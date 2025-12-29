@@ -1,5 +1,6 @@
 import { Entity } from '../core/Entity';
 import { ConfigManager } from '../config/MasterConfig';
+import { MaterialType } from '../core/HeatMap';
 
 export enum ProjectileType {
     CANNON = 'cannon',
@@ -21,11 +22,64 @@ export class Projectile extends Entity {
   public target: Entity | null = null;
   private turnSpeed: number = 0;
 
+  // Track hits on metal (1st hit does nothing, 2nd hit damages)
+  private static metalHitTracker: Map<string, number> = new Map();
+
   constructor(x: number, y: number, angle: number, type: ProjectileType = ProjectileType.CANNON) {
     super(x, y);
     this.type = type;
     this.rotation = angle;
     this.setupType();
+  }
+
+  public onWorldHit(heatMap: any, hitX: number, hitY: number): void {
+      const mat = heatMap.getMaterialAt(hitX, hitY);
+      const subSize = heatMap.tileSize / 10; // 1 layer = 1 sub-tile
+
+      switch(this.type) {
+          case ProjectileType.CANNON:
+              if (mat === MaterialType.WOOD) {
+                  // Cannon vs Wood: Star-like irregular shape (0 to 10 sub-tiles deep)
+                  heatMap.destroyArea(hitX, hitY, this.radius, true); 
+              } else if (mat === MaterialType.BRICK) {
+                  // 2 layers
+                  heatMap.destroyArea(hitX, hitY, subSize * 2);
+              } else if (mat === MaterialType.STONE) {
+                  // 1 layer
+                  heatMap.destroyArea(hitX, hitY, subSize * 1);
+              } else if (mat === MaterialType.METAL) {
+                  // 1 layer AFTER 2nd hit
+                  const key = `${Math.floor(hitX/4)},${Math.floor(hitY/4)}`; // sub-tile key roughly
+                  const hits = (Projectile.metalHitTracker.get(key) || 0) + 1;
+                  if (hits >= 2) {
+                      heatMap.destroyArea(hitX, hitY, subSize * 1);
+                      Projectile.metalHitTracker.delete(key);
+                  } else {
+                      Projectile.metalHitTracker.set(key, hits);
+                  }
+              }
+              break;
+
+          case ProjectileType.ROCKET:
+          case ProjectileType.MISSILE:
+          case ProjectileType.MINE:
+              const radius = this.aoeRadius > 0 ? this.aoeRadius : 20; // Default for projectiles
+              
+              if (mat === MaterialType.WOOD) {
+                  // Area of 2 length units (20 sub-tiles) + star-like up to 100% depth
+                  heatMap.destroyArea(hitX, hitY, subSize * 20, true);
+              } else if (mat === MaterialType.BRICK) {
+                  // 10 layers
+                  heatMap.destroyArea(hitX, hitY, subSize * 10);
+              } else if (mat === MaterialType.STONE) {
+                  // 5 layers
+                  heatMap.destroyArea(hitX, hitY, subSize * 5);
+              } else if (mat === MaterialType.METAL) {
+                  // 3 layers
+                  heatMap.destroyArea(hitX, hitY, subSize * 3);
+              }
+              break;
+      }
   }
 
   private setupType() {

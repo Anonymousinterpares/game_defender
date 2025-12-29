@@ -13,7 +13,7 @@ import { Enemy } from '../entities/Enemy';
 import { Drop, DropType } from '../entities/Drop';
 import { Particle } from '../entities/Particle';
 import { TurretUpgrade, ShieldUpgrade } from '../entities/upgrades/Upgrade';
-import { HeatMap } from './HeatMap';
+import { HeatMap, MaterialType } from './HeatMap';
 
 export class GameplayScene implements Scene {
   private world: World | null = null;
@@ -86,6 +86,7 @@ export class GameplayScene implements Scene {
   onEnter(): void {
     this.world = new World();
     this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
+    this.world.setHeatMap(this.heatMap);
     this.physics.setWorld(this.world);
     
     // Load Sounds
@@ -510,6 +511,10 @@ export class GameplayScene implements Scene {
             const hitBorder = p.x < 0 || p.x > mapW || p.y < 0 || p.y > mapH;
 
             if (hitWall || hitBorder) {
+                if (hitWall && this.heatMap) {
+                    p.onWorldHit(this.heatMap, p.x, p.y);
+                }
+                
                 if (p.aoeRadius > 0) {
                     this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
                 } else {

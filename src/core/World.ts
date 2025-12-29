@@ -1,10 +1,12 @@
 import { ConfigManager } from '../config/MasterConfig';
+import { MaterialType } from './HeatMap';
 
 export class World {
   private width: number;
   private height: number;
   private tileSize: number;
-  private tiles: number[][]; // 0 = empty, 1 = obstacle
+  private tiles: MaterialType[][]; // Material of the tile
+  private heatMapRef: any = null;
 
   constructor() {
     this.width = ConfigManager.getInstance().get('World', 'width');
@@ -15,17 +17,36 @@ export class World {
     this.generate();
   }
 
+  public setHeatMap(hm: any): void {
+      this.heatMapRef = hm;
+      // Initialize HeatMap materials from world
+      for (let y = 0; y < this.height; y++) {
+          for (let x = 0; x < this.width; x++) {
+              if (this.tiles[y][x] !== MaterialType.NONE) {
+                  this.heatMapRef.setMaterial(x, y, this.tiles[y][x]);
+              }
+          }
+      }
+  }
+
   private generate(): void {
+    const materials = [MaterialType.WOOD, MaterialType.BRICK, MaterialType.STONE, MaterialType.METAL];
+    
     // Initialize empty grid
     for (let y = 0; y < this.height; y++) {
-      const row: number[] = [];
+      const row: MaterialType[] = [];
       for (let x = 0; x < this.width; x++) {
         // Border walls
         if (x === 0 || x === this.width - 1 || y === 0 || y === this.height - 1) {
-          row.push(1);
+          row.push(MaterialType.INDESTRUCTIBLE);
         } else {
             // Random obstacles
-            row.push(Math.random() < 0.05 ? 1 : 0);
+            if (Math.random() < 0.05) {
+                const mat = materials[Math.floor(Math.random() * materials.length)];
+                row.push(mat);
+            } else {
+                row.push(MaterialType.NONE);
+            }
         }
       }
       this.tiles.push(row);
@@ -50,10 +71,6 @@ export class World {
     const startRow = Math.floor(cameraY / this.tileSize);
     const endRow = startRow + (viewHeight / this.tileSize) + 1;
 
-    // Draw Grid Background (Sepia/Blueprint style)
-    ctx.strokeStyle = '#2c241b'; // Very dark brown lines
-    ctx.lineWidth = 1;
-
     for (let y = startRow; y <= endRow; y++) {
       if (y < 0 || y >= this.height) continue;
       
@@ -64,21 +81,47 @@ export class World {
         const worldX = x * this.tileSize;
         const worldY = y * this.tileSize;
 
-        if (tileType === 1) {
-          // Industrial Wall Look
-          ctx.fillStyle = '#2a2a2a'; // Iron dark grey
-          ctx.fillRect(worldX, worldY, this.tileSize, this.tileSize);
+        if (tileType !== MaterialType.NONE) {
+          // Choose color based on material
+          let color = '#2a2a2a';
+          let borderColor = '#554433';
           
-          // Rivet border
-          ctx.strokeStyle = '#554433'; // Rusted edge
-          ctx.lineWidth = 2;
-          ctx.strokeRect(worldX + 2, worldY + 2, this.tileSize - 4, this.tileSize - 4);
-          
-          // Cross brace
-          ctx.beginPath();
-          ctx.moveTo(worldX, worldY);
-          ctx.lineTo(worldX + this.tileSize, worldY + this.tileSize);
-          ctx.stroke();
+          switch(tileType) {
+              case MaterialType.WOOD: color = '#5d4037'; borderColor = '#3e2723'; break;
+              case MaterialType.BRICK: color = '#a52a2a'; borderColor = '#800000'; break;
+              case MaterialType.STONE: color = '#616161'; borderColor = '#424242'; break;
+              case MaterialType.METAL: color = '#37474f'; borderColor = '#263238'; break;
+              case MaterialType.INDESTRUCTIBLE: color = '#1a1a1a'; borderColor = '#443322'; break;
+          }
+
+          const subDiv = 10;
+          const subSize = this.tileSize / subDiv;
+
+          for (let sy = 0; sy < subDiv; sy++) {
+              for (let sx = 0; sx < subDiv; sx++) {
+                  const subX = worldX + sx * subSize;
+                  const subY = worldY + sy * subSize;
+
+                  if (this.heatMapRef && this.heatMapRef.isSubTileDestroyed(subX + subSize/2, subY + subSize/2)) {
+                      continue;
+                  }
+
+                  ctx.fillStyle = color;
+                  ctx.fillRect(subX, subY, subSize + 0.5, subSize + 0.5);
+
+                  // Optional: draw small details or borders only on edges
+                  // For performance, we'll keep it simple: just the material color.
+                  // But let's add the material details back in a simplified way.
+                  if (tileType === MaterialType.WOOD && sx % 3 === 0) {
+                      ctx.fillStyle = borderColor;
+                      ctx.fillRect(subX, subY, 1, subSize);
+                  }
+                  if (tileType === MaterialType.METAL && sx === sy) {
+                      ctx.fillStyle = borderColor;
+                      ctx.fillRect(subX, subY, subSize, 1);
+                  }
+              }
+          }
         }
       }
     }
@@ -96,7 +139,14 @@ export class World {
       return true; // Outside world is a wall
     }
 
-    return this.tiles[gy][gx] === 1;
+    if (this.tiles[gy][gx] === MaterialType.NONE) return false;
+    
+    // Check sub-tile destruction
+    if (this.heatMapRef && this.heatMapRef.isSubTileDestroyed(x, y)) {
+        return false;
+    }
+
+    return true;
   }
 
   public resolveCollision(x: number, y: number, radius: number): { x: number, y: number, collided: boolean } {
