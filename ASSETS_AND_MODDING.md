@@ -35,6 +35,7 @@ Location: `public/assets/`
 - `shoot_rocket.wav` - Rocket launch sound.
 - `shoot_missile.wav` - Guided missile launch sound.
 - `place_mine.wav` - Sound when a mine is dropped.
+- `weapon_reload.wav` - Played when a weapon starts reloading.
 - `hit_cannon.wav` - Cannon projectile impact sound.
 - `hit_laser.wav` - Laser burn/sizzle sound.
 - `hit_ray.wav` - Heavy energy ray impact sound.

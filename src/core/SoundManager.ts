@@ -82,6 +82,7 @@ export class SoundManager {
           case 'shoot_rocket': this.synthesizeShoot(300, 0.35, 'sawtooth', 0.1); break;
           case 'shoot_missile': this.synthesizeShoot(500, 0.25, 'sine', 0.08); break;
           case 'place_mine': this.synthesizeShoot(150, 0.15, 'triangle', 0.1); break;
+          case 'weapon_reload': this.synthesizeReload(); break;
           case 'explosion_large': this.synthesizeExplosion(); break;
           case 'hit_cannon': this.synthesizeShoot(300, 0.1, 'triangle', 0.15); break;
           case 'hit_laser': this.synthesizeShoot(2000, 0.04, 'sine', 0.05); break;
@@ -128,6 +129,24 @@ export class SoundManager {
       gain.connect(this.masterGain);
       noise.start();
       noise.stop(this.audioCtx.currentTime + 0.5);
+  }
+
+  private synthesizeReload(): void {
+      if (!this.audioCtx || !this.masterGain) return;
+      const now = this.audioCtx.currentTime;
+      // Three mechanical clicks
+      [0, 0.1, 0.2].forEach((offset) => {
+          const osc = this.audioCtx!.createOscillator();
+          const gain = this.audioCtx!.createGain();
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(200 + offset * 1000, now + offset);
+          gain.gain.setValueAtTime(0.05, now + offset);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.05);
+          osc.connect(gain);
+          gain.connect(this.masterGain!);
+          osc.start(now + offset);
+          osc.stop(now + offset + 0.05);
+      });
   }
 
   private synthesizePing(): void {

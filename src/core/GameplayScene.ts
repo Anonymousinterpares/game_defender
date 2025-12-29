@@ -31,6 +31,12 @@ export class GameplayScene implements Scene {
   private nextDropSpawn: number = 5;
   private nextEnemySpawn: number = 3; 
 
+  // Weapon State
+  private currentAmmo: number = 0;
+  private isReloading: boolean = false;
+  private reloadTimer: number = 0;
+  private lastActiveWeapon: string = '';
+
   // Beam state
   private isFiringBeam: boolean = false;
   private beamEndPos: {x: number, y: number} = {x: 0, y: 0};
@@ -71,6 +77,7 @@ export class GameplayScene implements Scene {
     sm.loadSound('shoot_rocket', '/assets/sounds/shoot_rocket.wav');
     sm.loadSound('shoot_missile', '/assets/sounds/shoot_missile.wav');
     sm.loadSound('place_mine', '/assets/sounds/place_mine.wav');
+    sm.loadSound('weapon_reload', '/assets/sounds/weapon_reload.wav');
     sm.loadSound('hit_cannon', '/assets/sounds/hit_cannon.wav');
     sm.loadSound('hit_laser', '/assets/sounds/hit_laser.wav');
     sm.loadSound('hit_ray', '/assets/sounds/hit_ray.wav');
@@ -90,6 +97,7 @@ export class GameplayScene implements Scene {
 
     this.radar = new Radar();
     this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
+    this.initWeaponState();
     
     // Init Fog Canvas
     this.fogCanvas = document.createElement('canvas');
@@ -334,6 +342,19 @@ export class GameplayScene implements Scene {
 
     if (this.isDockOpen) return;
 
+    // --- Weapon / Ammo Logic ---
+    const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+    if (weapon !== this.lastActiveWeapon) {
+        this.initWeaponState();
+    }
+
+    if (this.isReloading) {
+        this.reloadTimer -= dt;
+        if (this.reloadTimer <= 0) {
+            this.finishReload();
+        }
+    }
+
     this.physics.update(dt);
 
     this.nextDropSpawn -= dt;
@@ -350,39 +371,58 @@ export class GameplayScene implements Scene {
 
     // --- WEAPON LOGIC ---
     this.isFiringBeam = false;
-    if (this.inputManager.isKeyDown('Space') && this.player) {
-      const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+    if (this.inputManager.isKeyDown('Space') && this.player && !this.isReloading) {
       const now = performance.now() / 1000;
       
       if (weapon === 'cannon' || weapon === 'rocket' || weapon === 'missile' || weapon === 'mine') {
           if (now - this.lastShotTime > this.shootCooldown) {
-            this.lastShotTime = now;
-            let pType = ProjectileType.CANNON;
-            let sfx = 'shoot_cannon';
-            
-            if (weapon === 'rocket') { pType = ProjectileType.ROCKET; sfx = 'shoot_rocket'; }
-            if (weapon === 'missile') { pType = ProjectileType.MISSILE; sfx = 'shoot_missile'; }
-            if (weapon === 'mine') { pType = ProjectileType.MINE; sfx = 'place_mine'; }
-            
-            const p = new Projectile(this.player.x, this.player.y, this.player.rotation, pType);
-            
-            if (weapon === 'missile') {
-                // Find closest enemy for missile
-                let bestDist = 1000;
-                let target: Enemy | null = null;
-                this.enemies.forEach(e => {
-                    const d = Math.sqrt((e.x-p.x)**2 + (e.y-p.y)**2);
-                    if (d < bestDist) { bestDist = d; target = e; }
-                });
-                p.target = target;
+            if (this.currentAmmo > 0) {
+                this.currentAmmo--;
+                this.lastShotTime = now;
+                let pType = ProjectileType.CANNON;
+                let sfx = 'shoot_cannon';
+                
+                if (weapon === 'rocket') { pType = ProjectileType.ROCKET; sfx = 'shoot_rocket'; }
+                if (weapon === 'missile') { pType = ProjectileType.MISSILE; sfx = 'shoot_missile'; }
+                if (weapon === 'mine') { pType = ProjectileType.MINE; sfx = 'place_mine'; }
+                
+                const p = new Projectile(this.player.x, this.player.y, this.player.rotation, pType);
+                
+                if (weapon === 'missile') {
+                    // Find closest enemy for missile
+                    let bestDist = 1000;
+                    let target: Enemy | null = null;
+                    this.enemies.forEach(e => {
+                        const d = Math.sqrt((e.x-p.x)**2 + (e.y-p.y)**2);
+                        if (d < bestDist) { bestDist = d; target = e; }
+                    });
+                    p.target = target;
+                }
+                
+                this.projectiles.push(p);
+                SoundManager.getInstance().playSound(sfx);
+
+                if (this.currentAmmo <= 0) {
+                    this.startReload();
+                }
+            } else {
+                this.startReload();
             }
-            
-            this.projectiles.push(p);
-            SoundManager.getInstance().playSound(sfx);
           }
       } else if (weapon === 'laser' || weapon === 'ray') {
-          this.isFiringBeam = true;
-          this.handleBeamFiring(weapon, dt);
+          if (this.currentAmmo > 0) {
+            this.isFiringBeam = true;
+            this.handleBeamFiring(weapon, dt);
+            
+            const depletion = ConfigManager.getInstance().get<number>('Weapons', weapon + 'DepletionRate');
+            this.currentAmmo -= depletion * dt;
+            if (this.currentAmmo <= 0) {
+                this.currentAmmo = 0;
+                this.startReload();
+            }
+          } else {
+            this.startReload();
+          }
       }
     }
 
@@ -530,6 +570,14 @@ export class GameplayScene implements Scene {
     ctx.font = '14px Courier';
     ctx.fillText(`POS: ${Math.floor(this.player.x)}, ${Math.floor(this.player.y)}`, 10, 20);
     ctx.fillText(`COINS: ${this.coinsCollected}`, 10, 40);
+
+    const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+    const displayAmmo = weapon === 'laser' || weapon === 'ray' ? this.currentAmmo.toFixed(1) : Math.floor(this.currentAmmo);
+    const ammoText = this.isReloading ? `RELOADING... (${this.reloadTimer.toFixed(1)}s)` : `AMMO: ${displayAmmo}`;
+    
+    ctx.fillStyle = this.isReloading ? '#ff4500' : '#cfaa6e';
+    ctx.font = 'bold 16px "Share Tech Mono"';
+    ctx.fillText(`${weapon.toUpperCase()} | ${ammoText}`, 10, 70);
   }
 
   private spawnDrop(): void {
@@ -731,5 +779,30 @@ export class GameplayScene implements Scene {
           const vy = Math.sin(angle) * speed;
           this.particles.push(new Particle(x, y, color, vx, vy, 0.3 + Math.random() * 0.4));
       }
+  }
+
+  private initWeaponState(): void {
+      const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+      this.lastActiveWeapon = weapon;
+      this.isReloading = false;
+      this.reloadTimer = 0;
+      
+      const configKey = weapon === 'laser' || weapon === 'ray' ? 'MaxEnergy' : 'MaxAmmo';
+      this.currentAmmo = ConfigManager.getInstance().get<number>('Weapons', weapon + configKey);
+  }
+
+  private startReload(): void {
+      if (this.isReloading) return;
+      this.isReloading = true;
+      const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+      this.reloadTimer = ConfigManager.getInstance().get<number>('Weapons', weapon + 'ReloadTime');
+      SoundManager.getInstance().playSound('weapon_reload');
+  }
+
+  private finishReload(): void {
+      this.isReloading = false;
+      const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+      const configKey = weapon === 'laser' || weapon === 'ray' ? 'MaxEnergy' : 'MaxAmmo';
+      this.currentAmmo = ConfigManager.getInstance().get<number>('Weapons', weapon + configKey);
   }
 }
