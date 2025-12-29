@@ -62,7 +62,6 @@ export class MainMenuScene implements Scene {
     const muteIcon = isMuted ? '🔇' : '🔊';
 
     this.container.innerHTML = `
-      <div style="position: absolute; top: 10px; right: 10px; cursor: pointer; font-size: 24px;" id="btn-mute">${muteIcon}</div>
       <h1 style="color: #00ff00; text-align: center; font-size: 2em; margin-bottom: 30px;">NEON ROGUE</h1>
       <button id="btn-start">Start Game</button>
       <button id="btn-settings">Settings</button>
@@ -76,11 +75,6 @@ export class MainMenuScene implements Scene {
 
     document.getElementById('btn-settings')?.addEventListener('click', () => {
       this.sceneManager.switchScene('settings');
-    });
-
-    document.getElementById('btn-mute')?.addEventListener('click', (e) => {
-        const muted = SoundManager.getInstance().toggleMute();
-        (e.target as HTMLElement).textContent = muted ? '🔇' : '🔊';
     });
   }
 }

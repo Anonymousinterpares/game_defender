@@ -2,11 +2,21 @@ import { Entity } from '../core/Entity';
 import { Player } from '../entities/Player';
 import { SoundManager } from '../core/SoundManager';
 
+interface RadarBlip {
+    x: number;
+    y: number;
+    type: string;
+    life: number; // 1.0 down to 0 for fading
+}
+
 export class Radar {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private scanAngle: number = 0;
   private lastScanAngle: number = 0;
+  
+  // Persistence
+  private blips: Map<string, RadarBlip> = new Map();
   
   // Config
   private size: number = 200;
@@ -37,73 +47,68 @@ export class Radar {
   public update(dt: number): void {
     this.lastScanAngle = this.scanAngle;
     // Rotate scanner
-    this.scanAngle += dt * 2; // Speed of rotation
+    this.scanAngle += dt * 3; // Slightly faster scan
     if (this.scanAngle > Math.PI * 2) {
         this.scanAngle -= Math.PI * 2;
         this.lastScanAngle -= Math.PI * 2;
     }
+
+    // Decay blips
+    this.blips.forEach((blip, id) => {
+        blip.life -= dt * 0.5; // Fades out over 2 seconds
+        if (blip.life <= 0) this.blips.delete(id);
+    });
   }
 
   public render(player: Player, entities: Entity[]): void {
-    // Clear
     this.ctx.clearRect(0, 0, this.size, this.size);
     
     const center = this.size / 2;
     const scale = (this.size / 2) / this.range;
 
-    // Draw Grid Rings
-    this.ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+    // 1. Draw Static Grid
+    this.ctx.strokeStyle = 'rgba(0, 255, 0, 0.2)';
+    this.ctx.lineWidth = 1;
     this.ctx.beginPath();
     this.ctx.arc(center, center, this.size * 0.25, 0, Math.PI * 2);
     this.ctx.stroke();
     this.ctx.beginPath();
     this.ctx.arc(center, center, this.size * 0.45, 0, Math.PI * 2);
     this.ctx.stroke();
+    
+    // Crosshair
+    this.ctx.beginPath();
+    this.ctx.moveTo(0, center); this.ctx.lineTo(this.size, center);
+    this.ctx.moveTo(center, 0); this.ctx.lineTo(center, this.size);
+    this.ctx.stroke();
 
-    // Check for pings
+    // 2. Process Scanning
     let pingTriggered = false;
 
-    // Draw Entities
     entities.forEach(entity => {
-      // Calculate relative position
+      if (entity instanceof Player) return; // Player is always at center
+
       const dx = entity.x - player.x;
       const dy = entity.y - player.y;
       
-      // Check range
       if (Math.abs(dx) > this.range || Math.abs(dy) > this.range) return;
 
-      const radarX = center + dx * scale;
-      const radarY = center + dy * scale;
-      
-      // Calculate fading based on scan line
-      // Angle of entity relative to center
+      // Angle relative to radar (up is -PI/2)
       let angle = Math.atan2(dy, dx); 
       if (angle < 0) angle += Math.PI * 2;
       
-      // Check if scan line passed this angle in this frame
-      // We check if angle is between lastScanAngle and scanAngle
-      if (angle >= this.lastScanAngle && angle < this.scanAngle) {
-          // Play ping for enemies only? Or everything? 
-          // Let's ping for enemies (Entities that are not Player)
-          if (entity !== player) pingTriggered = true;
-      }
-      
-      const typeName = entity.constructor.name;
-      if (entity instanceof Player) {
-          this.ctx.fillStyle = '#00ff00';
-          this.ctx.beginPath();
-          this.ctx.arc(radarX, radarY, 3, 0, Math.PI * 2);
-          this.ctx.fill();
-      } else if (typeName === 'Enemy') {
-          this.ctx.fillStyle = '#ff0000';
-          this.ctx.beginPath();
-          this.ctx.arc(radarX, radarY, 3, 0, Math.PI * 2);
-          this.ctx.fill();
-      } else if (typeName === 'Projectile') {
-          this.ctx.fillStyle = '#ffff00';
-          this.ctx.beginPath();
-          this.ctx.arc(radarX, radarY, 2, 0, Math.PI * 2);
-          this.ctx.fill();
+      // If scan line passes the entity's angle
+      if (this.isAngleBetween(angle, this.lastScanAngle, this.scanAngle)) {
+          // Use a semi-unique ID (using instance for simplicity in this prototype)
+          // In a real game use entity.id
+          const id = entity.constructor.name + "_" + Math.floor(entity.x) + "_" + Math.floor(entity.y);
+          this.blips.set(id, {
+              x: dx * scale,
+              y: dy * scale,
+              type: entity.constructor.name,
+              life: 1.0
+          });
+          pingTriggered = true;
       }
     });
 
@@ -111,21 +116,51 @@ export class Radar {
         SoundManager.getInstance().playSound('ping');
     }
 
-    // Draw Player Center
+    // 3. Render Blips
+    this.blips.forEach(blip => {
+        const x = center + blip.x;
+        const y = center + blip.y;
+        
+        let color = '255, 0, 0'; // Default Red (Enemy)
+        if (blip.type === 'Projectile') color = '255, 255, 0';
+        if (blip.type === 'Drop') color = '0, 255, 255';
+
+        this.ctx.fillStyle = `rgba(${color}, ${blip.life})`;
+        this.ctx.shadowBlur = 5 * blip.life;
+        this.ctx.shadowColor = `rgba(${color}, ${blip.life})`;
+        
+        this.ctx.beginPath();
+        this.ctx.arc(x, y, 2, 0, Math.PI * 2);
+        this.ctx.fill();
+    });
+    this.ctx.shadowBlur = 0;
+
+    // 4. Player (Fixed at center)
     this.ctx.fillStyle = '#fff';
     this.ctx.beginPath();
-    this.ctx.arc(center, center, 2, 0, Math.PI * 2);
+    this.ctx.arc(center, center, 3, 0, Math.PI * 2);
     this.ctx.fill();
 
-    // Draw Scan Line
-    this.ctx.beginPath();
-    this.ctx.moveTo(center, center);
-    this.ctx.lineTo(center + Math.cos(this.scanAngle) * (this.size/2), center + Math.sin(this.scanAngle) * (this.size/2));
-    this.ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
-    this.ctx.lineWidth = 2;
-    this.ctx.stroke();
-    
-    // Draw "Swipe" gradient behind line
-    // ... (omitted for brevity, complex gradient)
+    // 5. Draw Scan Line with trailing sweep
+    const sweepSegments = 20;
+    for (let i = 0; i < sweepSegments; i++) {
+        const alpha = (1 - i / sweepSegments) * 0.5;
+        const angle = this.scanAngle - (i * 0.05);
+        this.ctx.strokeStyle = `rgba(0, 255, 0, ${alpha})`;
+        this.ctx.lineWidth = i === 0 ? 2 : 1;
+        this.ctx.beginPath();
+        this.ctx.moveTo(center, center);
+        this.ctx.lineTo(center + Math.cos(angle) * (this.size/2), center + Math.sin(angle) * (this.size/2));
+        this.ctx.stroke();
+    }
+  }
+
+  private isAngleBetween(target: number, start: number, end: number): boolean {
+      if (start <= end) {
+          return target >= start && target < end;
+      } else {
+          // Wrap around case (e.g. start=350 deg, end=10 deg)
+          return target >= start || target < end;
+      }
   }
 }

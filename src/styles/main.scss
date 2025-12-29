@@ -172,6 +172,7 @@ canvas {
 
 /* HUD Buttons */
 .hud-btn {
+    pointer-events: auto;
     background: var(--steam-panel);
     border: 2px solid var(--steam-brass);
     color: var(--steam-gold);

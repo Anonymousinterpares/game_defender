@@ -46,6 +46,12 @@ export const MasterConfig: GameConfigSchema = {
     showGrid: { value: true, type: 'boolean', description: 'Show Map Grid' },
     fpsCounter: { value: true, type: 'boolean', description: 'Show FPS' }
   },
+  Visuals: {
+    fogOfWar: { value: true, type: 'boolean', description: 'Enable Fog of War' },
+    segmentVisibilityRadius: { value: 5.0, type: 'number', min: 1, max: 20, step: 0.5, description: 'Visibility around segments' },
+    coneAngle: { value: 60, type: 'number', min: 10, max: 180, step: 5, description: 'Vision Cone Angle (Degrees)' },
+    coneDistance: { value: 20.0, type: 'number', min: 5, max: 100, step: 1, description: 'Vision Cone Distance' }
+  },
   Keybindings: {
       openDock: { value: 'KeyP', type: 'string', description: 'Open Dock/Shop' }
   }

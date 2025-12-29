@@ -4,6 +4,7 @@ import { InputManager } from './InputManager';
 import { World } from './World';
 import { Player } from '../entities/Player';
 import { PhysicsEngine } from './PhysicsEngine';
+import { SoundManager } from './SoundManager';
 import { Radar } from '../ui/Radar';
 import { Entity } from './Entity';
 import { ConfigManager } from '../config/MasterConfig';
@@ -37,6 +38,11 @@ export class GameplayScene implements Scene {
   
   private backButton: HTMLButtonElement | null = null;
   private dockButton: HTMLButtonElement | null = null;
+  private muteButton: HTMLButtonElement | null = null;
+
+  // Fog of War offscreen canvas
+  private fogCanvas: HTMLCanvasElement | null = null;
+  private fogCtx: CanvasRenderingContext2D | null = null;
 
   constructor(
     private sceneManager: SceneManager,
@@ -49,6 +55,9 @@ export class GameplayScene implements Scene {
     this.world = new World();
     this.physics.setWorld(this.world);
     
+    // Load Sounds
+    SoundManager.getInstance().loadSound('ping', '/assets/sounds/ping.wav');
+
     const centerX = this.world.getWidthPixels() / 2;
     const centerY = this.world.getHeightPixels() / 2;
     this.player = new Player(centerX, centerY, this.inputManager);
@@ -61,6 +70,11 @@ export class GameplayScene implements Scene {
 
     this.radar = new Radar();
     this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
+    
+    // Init Fog Canvas
+    this.fogCanvas = document.createElement('canvas');
+    this.fogCtx = this.fogCanvas.getContext('2d');
+
     this.createUI();
   }
 
@@ -75,9 +89,14 @@ export class GameplayScene implements Scene {
     this.drops = [];
     this.projectiles = [];
     this.physics = new PhysicsEngine();
+    this.fogCanvas = null;
+    this.fogCtx = null;
   }
 
   private createUI(): void {
+      const uiLayer = document.getElementById('ui-layer');
+      if (!uiLayer) return;
+
       this.backButton = document.createElement('button');
       this.backButton.textContent = 'MENU';
       this.backButton.className = 'hud-btn';
@@ -87,23 +106,42 @@ export class GameplayScene implements Scene {
       this.backButton.addEventListener('click', () => {
           this.sceneManager.switchScene('menu');
       });
-      document.body.appendChild(this.backButton);
+      uiLayer.appendChild(this.backButton);
+
+      this.muteButton = document.createElement('button');
+      this.updateMuteButtonText();
+      this.muteButton.className = 'hud-btn';
+      this.muteButton.style.position = 'absolute';
+      this.muteButton.style.top = '10px';
+      this.muteButton.style.right = '100px';
+      this.muteButton.addEventListener('click', () => {
+          SoundManager.getInstance().toggleMute();
+          this.updateMuteButtonText();
+      });
+      uiLayer.appendChild(this.muteButton);
 
       this.dockButton = document.createElement('button');
       this.dockButton.textContent = 'DOCK (P)';
       this.dockButton.className = 'hud-btn';
       this.dockButton.style.position = 'absolute';
       this.dockButton.style.top = '10px';
-      this.dockButton.style.right = '100px';
+      this.dockButton.style.right = '190px';
       this.dockButton.addEventListener('click', () => {
           this.toggleDock();
       });
-      document.body.appendChild(this.dockButton);
+      uiLayer.appendChild(this.dockButton);
+  }
+
+  private updateMuteButtonText(): void {
+    if (!this.muteButton) return;
+    const muted = SoundManager.getInstance().getMuted();
+    this.muteButton.textContent = muted ? 'UNMUTE' : 'MUTE';
   }
 
   private cleanupUI(): void {
       if (this.backButton) { this.backButton.remove(); this.backButton = null; }
       if (this.dockButton) { this.dockButton.remove(); this.dockButton = null; }
+      if (this.muteButton) { this.muteButton.remove(); this.muteButton = null; }
       if (this.dockContainer) { this.dockContainer.remove(); this.dockContainer = null; }
   }
 
@@ -354,6 +392,12 @@ export class GameplayScene implements Scene {
     this.projectiles.forEach(p => p.render(ctx));
     ctx.restore();
 
+    // --- Fog of War ---
+    const useFog = ConfigManager.getInstance().get<boolean>('Visuals', 'fogOfWar');
+    if (useFog && this.fogCanvas && this.fogCtx && this.player) {
+        this.renderFogOfWar(ctx);
+    }
+
     if (this.radar) {
         // Pass everything to radar (Radar will filter based on distance and type)
         const radarEntities: Entity[] = [this.player, ...this.enemies, ...this.projectiles];
@@ -402,5 +446,89 @@ export class GameplayScene implements Scene {
         attempts++;
     }
     return {x: 100, y: 100};
+  }
+
+  private renderFogOfWar(mainCtx: CanvasRenderingContext2D): void {
+      if (!this.fogCanvas || !this.fogCtx || !this.player || !this.world) return;
+
+      const w = mainCtx.canvas.width;
+      const h = mainCtx.canvas.height;
+      if (this.fogCanvas.width !== w || this.fogCanvas.height !== h) {
+          this.fogCanvas.width = w;
+          this.fogCanvas.height = h;
+      }
+
+      const fctx = this.fogCtx;
+      const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+
+      // 1. Fill with darkness
+      fctx.globalCompositeOperation = 'source-over';
+      fctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+      fctx.fillRect(0, 0, w, h);
+
+      // 2. Punch holes (Destination-Out)
+      fctx.globalCompositeOperation = 'destination-out';
+      
+      const segRad = ConfigManager.getInstance().get<number>('Visuals', 'segmentVisibilityRadius') * tileSize;
+      const coneDist = ConfigManager.getInstance().get<number>('Visuals', 'coneDistance') * tileSize;
+      const coneAngleDeg = ConfigManager.getInstance().get<number>('Visuals', 'coneAngle');
+      const coneAngleRad = (coneAngleDeg * Math.PI) / 180;
+
+      // Punch circles around all segments
+      const bodies = this.player.getAllBodies();
+      bodies.forEach(b => {
+          const screenX = b.x - this.cameraX;
+          const screenY = b.y - this.cameraY;
+          
+          const grad = fctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, segRad);
+          grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+          grad.addColorStop(0.8, 'rgba(255, 255, 255, 0.8)');
+          grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          
+          fctx.fillStyle = grad;
+          fctx.beginPath();
+          fctx.arc(screenX, screenY, segRad, 0, Math.PI * 2);
+          fctx.fill();
+      });
+
+      // Vision Cone with Obstacle Check (Simple Raycasting)
+      const playerScreenX = this.player.x - this.cameraX;
+      const playerScreenY = this.player.y - this.cameraY;
+      
+      const startAngle = this.player.rotation - coneAngleRad / 2;
+      const rayCount = 60; // One ray per degree roughly
+      
+      fctx.beginPath();
+      fctx.moveTo(playerScreenX, playerScreenY);
+      
+      for (let i = 0; i <= rayCount; i++) {
+          const angle = startAngle + (i / rayCount) * coneAngleRad;
+          const rayX = Math.cos(angle);
+          const rayY = Math.sin(angle);
+          
+          let dist = 0;
+          const step = tileSize / 2;
+          // Trace ray
+          while (dist < coneDist) {
+              const testX = this.player.x + rayX * dist;
+              const testY = this.player.y + rayY * dist;
+              if (this.world.isWall(testX, testY)) break;
+              dist += step;
+          }
+          
+          const endX = playerScreenX + rayX * dist;
+          const endY = playerScreenY + rayY * dist;
+          fctx.lineTo(endX, endY);
+      }
+      fctx.closePath();
+      
+      const coneGrad = fctx.createRadialGradient(playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, coneDist);
+      coneGrad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+      coneGrad.addColorStop(1, 'rgba(255, 255, 255, 0.3)');
+      fctx.fillStyle = coneGrad;
+      fctx.fill();
+
+      // 3. Draw the fog overlay onto main canvas
+      mainCtx.drawImage(this.fogCanvas, 0, 0);
   }
 }
