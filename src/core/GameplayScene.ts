@@ -13,6 +13,7 @@ import { Enemy } from '../entities/Enemy';
 import { Drop, DropType } from '../entities/Drop';
 import { Particle } from '../entities/Particle';
 import { TurretUpgrade, ShieldUpgrade } from '../entities/upgrades/Upgrade';
+import { HeatMap } from './HeatMap';
 
 export class GameplayScene implements Scene {
   private world: World | null = null;
@@ -26,10 +27,23 @@ export class GameplayScene implements Scene {
   private projectiles: Projectile[] = [];
   private particles: Particle[] = [];
   
+  private cameraX: number = 0;
+  private cameraY: number = 0;
+  private coinsCollected: number = 0;
+  
   private lastShotTime: number = 0;
   private shootCooldown: number = 0.2;
   private nextDropSpawn: number = 5;
   private nextEnemySpawn: number = 3; 
+
+  // UI elements
+  private container: HTMLElement | null = null;
+  private backButton: HTMLButtonElement | null = null;
+  private muteButton: HTMLButtonElement | null = null;
+  private volumeSlider: HTMLInputElement | null = null;
+  private dockButton: HTMLButtonElement | null = null;
+  private dockContainer: HTMLElement | null = null;
+  private isDockOpen: boolean = false;
 
   // Weapon State
   private currentAmmo: number = 0;
@@ -43,21 +57,12 @@ export class GameplayScene implements Scene {
 
   // Beam state
   private isFiringBeam: boolean = false;
-  private beamEndPos: {x: number, y: number} = {x: 0, y: 0};
-
-  private coinsCollected: number = 0;
-  private isDockOpen: boolean = false;
-  private dockContainer: HTMLDivElement | null = null;
+  private beamEndPos: { x: number, y: number } = { x: 0, y: 0 };
   
-  private cameraX: number = 0;
-  private cameraY: number = 0;
-  
-  private backButton: HTMLButtonElement | null = null;
-  private dockButton: HTMLButtonElement | null = null;
-  private muteButton: HTMLButtonElement | null = null;
-  private volumeSlider: HTMLInputElement | null = null;
+  // Heat Simulation
+  private heatMap: HeatMap | null = null;
 
-  // Fog of War offscreen canvas
+  // Fog of War state
   private fogCanvas: HTMLCanvasElement | null = null;
   private fogCtx: CanvasRenderingContext2D | null = null;
 
@@ -70,6 +75,7 @@ export class GameplayScene implements Scene {
 
   onEnter(): void {
     this.world = new World();
+    this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
     this.physics.setWorld(this.world);
     
     // Load Sounds
@@ -522,6 +528,86 @@ export class GameplayScene implements Scene {
     if (this.radar && this.player) {
       this.radar.update(dt);
     }
+
+    this.heatMap?.update(dt);
+  }
+
+  private handleBeamFiring(type: string, dt: number): void {
+      if (!this.player || !this.world || !this.heatMap) return;
+      
+      const maxDist = type === 'laser' ? 800 : 500;
+      const step = 8;
+      let dist = 0;
+      let hitEnemy: Enemy | null = null;
+      let hitSomething = false;
+
+      const mapW = this.world.getWidthPixels();
+      const mapH = this.world.getHeightPixels();
+      
+      // Raycast for beam
+      while (dist < maxDist) {
+          const tx = this.player.x + Math.cos(this.player.rotation) * dist;
+          const ty = this.player.y + Math.sin(this.player.rotation) * dist;
+          
+          if (this.world.isWall(tx, ty) || tx < 0 || tx > mapW || ty < 0 || ty > mapH) {
+              hitSomething = true;
+              break;
+          }
+          
+          // Check enemy hits
+          for (const e of this.enemies) {
+              const dx = e.x - tx;
+              const dy = e.y - ty;
+              if (Math.sqrt(dx*dx + dy*dy) < e.radius) {
+                  hitEnemy = e;
+                  hitSomething = true;
+                  break;
+              }
+          }
+          if (hitEnemy) break;
+          dist += step;
+      }
+      
+      this.beamEndPos = {
+          x: this.player.x + Math.cos(this.player.rotation) * dist,
+          y: this.player.y + Math.sin(this.player.rotation) * dist
+      };
+      
+      const hitSfx = type === 'laser' ? 'hit_laser' : 'hit_ray';
+
+      if (hitSomething) {
+          SoundManager.getInstance().startLoop(hitSfx);
+          
+          // --- Heat Simulation Update ---
+          if (!hitEnemy) { // Only heat up environment
+              const heatAmount = type === 'laser' ? 0.4 : 0.6; // Heat per frame
+              this.heatMap.addHeat(this.beamEndPos.x, this.beamEndPos.y, heatAmount * dt * 5, 12);
+              
+              // Emit Sparks if very hot
+              if (this.heatMap.getIntensityAt(this.beamEndPos.x, this.beamEndPos.y) > 0.8 && Math.random() < 0.3) {
+                  this.createImpactParticles(this.beamEndPos.x, this.beamEndPos.y, '#fff');
+              }
+          }
+
+          if (hitEnemy) {
+            if (type === 'laser') {
+                hitEnemy.takeDamage(ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt);
+            } else {
+                const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                const distInTiles = dist / tileSize;
+                const base = ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage');
+                const damage = (base / (1 + distInTiles * distInTiles)) * dt;
+                hitEnemy.takeDamage(damage);
+            }
+          }
+      } else {
+          SoundManager.getInstance().stopLoop(hitSfx, 0.5);
+      }
+  }
+
+  private renderHeatMarks(ctx: CanvasRenderingContext2D): void {
+      if (!this.heatMap) return;
+      this.heatMap.render(ctx, this.cameraX, this.cameraY);
   }
 
   render(ctx: CanvasRenderingContext2D): void {
@@ -533,6 +619,7 @@ export class GameplayScene implements Scene {
     ctx.save();
     ctx.translate(-this.cameraX, -this.cameraY);
     this.world.render(ctx, this.cameraX, this.cameraY);
+    this.renderHeatMarks(ctx);
     this.drops.forEach(d => d.render(ctx));
     this.player.render(ctx);
     const renderDist = ConfigManager.getInstance().get<number>('World', 'renderDistance') * ConfigManager.getInstance().get<number>('World', 'tileSize');
@@ -719,67 +806,6 @@ export class GameplayScene implements Scene {
 
       // 3. Draw the fog overlay onto main canvas
       mainCtx.drawImage(this.fogCanvas, 0, 0);
-  }
-
-  private handleBeamFiring(type: string, dt: number): void {
-      if (!this.player || !this.world) return;
-      
-      const maxDist = type === 'laser' ? 800 : 500;
-      const step = 8;
-      let dist = 0;
-      let hitEnemy: Enemy | null = null;
-      let hitSomething = false;
-
-      const mapW = this.world.getWidthPixels();
-      const mapH = this.world.getHeightPixels();
-      
-      // Raycast for beam
-      while (dist < maxDist) {
-          const tx = this.player.x + Math.cos(this.player.rotation) * dist;
-          const ty = this.player.y + Math.sin(this.player.rotation) * dist;
-          
-          if (this.world.isWall(tx, ty) || tx < 0 || tx > mapW || ty < 0 || ty > mapH) {
-              hitSomething = true;
-              break;
-          }
-          
-          // Check enemy hits
-          for (const e of this.enemies) {
-              const dx = e.x - tx;
-              const dy = e.y - ty;
-              if (Math.sqrt(dx*dx + dy*dy) < e.radius) {
-                  hitEnemy = e;
-                  hitSomething = true;
-                  break;
-              }
-          }
-          if (hitEnemy) break;
-          dist += step;
-      }
-      
-      this.beamEndPos = {
-          x: this.player.x + Math.cos(this.player.rotation) * dist,
-          y: this.player.y + Math.sin(this.player.rotation) * dist
-      };
-      
-      const hitSfx = type === 'laser' ? 'hit_laser' : 'hit_ray';
-
-      if (hitSomething) {
-          SoundManager.getInstance().startLoop(hitSfx);
-          if (hitEnemy) {
-            if (type === 'laser') {
-                hitEnemy.takeDamage(ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt);
-            } else {
-                const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-                const distInTiles = dist / tileSize;
-                const base = ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage');
-                const damage = (base / (1 + distInTiles * distInTiles)) * dt;
-                hitEnemy.takeDamage(damage);
-            }
-          }
-      } else {
-          SoundManager.getInstance().stopLoop(hitSfx, 0.5);
-      }
   }
 
   private createExplosion(x: number, y: number, radius: number, damage: number): void {
