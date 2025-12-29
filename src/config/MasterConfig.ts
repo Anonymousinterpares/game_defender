@@ -77,7 +77,8 @@ export const MasterConfig: GameConfigSchema = {
   Debug: {
     showHitboxes: { value: false, type: 'boolean', description: 'Show Hitboxes' },
     showGrid: { value: true, type: 'boolean', description: 'Show Map Grid' },
-    fpsCounter: { value: true, type: 'boolean', description: 'Show FPS' }
+    fpsCounter: { value: true, type: 'boolean', description: 'Show FPS' },
+    devModeAlwaysOn: { value: true, type: 'boolean', description: 'Dev commands always active' }
   },
   Visuals: {
     fogOfWar: { value: true, type: 'boolean', description: 'Enable Fog of War' },

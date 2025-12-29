@@ -344,7 +344,7 @@ export class GameplayScene implements Scene {
   }
 
   update(dt: number): void {
-    if (this.inputManager.isKeyDown('Escape')) {
+    if (this.inputManager.isKeyJustPressed('Escape')) {
       this.sceneManager.switchScene('menu');
       return;
     }
@@ -868,7 +868,8 @@ export class GameplayScene implements Scene {
         return true;
     }
 
-    if (!this.isDevMode) return false;
+    const alwaysOn = ConfigManager.getInstance().get<boolean>('Debug', 'devModeAlwaysOn');
+    if (!this.isDevMode && !alwaysOn) return false;
 
     if (cleanCmd.startsWith('add_weapon')) {
         const num = parseInt(cleanCmd.replace('add_weapon', ''));

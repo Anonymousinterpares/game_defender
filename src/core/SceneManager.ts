@@ -15,7 +15,7 @@ export class SceneManager {
   ) {
     // Register Scenes
     this.scenes.set('menu', new MainMenuScene(this));
-    this.scenes.set('settings', new SettingsScene(this));
+    this.scenes.set('settings', new SettingsScene(this, inputManager));
     this.scenes.set('gameplay', new GameplayScene(this, inputManager));
 
     // Start with Menu

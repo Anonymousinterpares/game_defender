@@ -2,11 +2,15 @@ import { Scene } from '../core/Scene';
 import { SceneManager } from '../core/SceneManager';
 import { ConfigManager, ConfigItem } from '../config/MasterConfig';
 import { SoundManager } from '../core/SoundManager';
+import { InputManager } from '../core/InputManager';
 
 export class SettingsScene implements Scene {
   private container: HTMLDivElement | null = null;
 
-  constructor(private sceneManager: SceneManager) {}
+  constructor(
+    private sceneManager: SceneManager,
+    private inputManager: InputManager
+  ) {}
 
   onEnter(): void {
     this.createUI();
@@ -19,7 +23,11 @@ export class SettingsScene implements Scene {
     }
   }
 
-  update(dt: number): void {}
+  update(dt: number): void {
+    if (this.inputManager.isKeyJustPressed('Escape')) {
+      this.sceneManager.switchScene('menu');
+    }
+  }
   render(ctx: CanvasRenderingContext2D): void {
      // Draw dimmed background
      ctx.fillStyle = 'rgba(0,0,0,0.5)';
