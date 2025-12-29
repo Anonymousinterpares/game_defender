@@ -46,10 +46,20 @@ export class GameplayScene implements Scene {
   private isDockOpen: boolean = false;
 
   // Weapon State
-  private currentAmmo: number = 0;
-  private isReloading: boolean = false;
-  private reloadTimer: number = 0;
+  private weaponAmmo: Map<string, number> = new Map();
+  private unlockedWeapons: Set<string> = new Set(['cannon']);
+  private weaponReloading: Map<string, boolean> = new Map();
+  private weaponReloadTimer: Map<string, number> = new Map();
   private lastActiveWeapon: string = '';
+
+  private readonly weaponSlots: { [key: string]: string } = {
+    'Digit1': 'cannon',
+    'Digit2': 'rocket',
+    'Digit3': 'missile',
+    'Digit4': 'laser',
+    'Digit5': 'ray',
+    'Digit6': 'mine'
+  };
 
   // Dev Mode
   private isDevMode: boolean = false;
@@ -107,6 +117,23 @@ export class GameplayScene implements Scene {
 
     this.radar = new Radar();
     this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
+    
+    // Initialize Ammo
+    const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine'];
+    const alwaysOn = ConfigManager.getInstance().get<boolean>('Debug', 'devModeAlwaysOn');
+    
+    weapons.forEach(w => {
+        const configKey = w === 'laser' || w === 'ray' ? 'MaxEnergy' : 'MaxAmmo';
+        const max = ConfigManager.getInstance().get<number>('Weapons', w + configKey);
+        this.weaponAmmo.set(w, max);
+        this.weaponReloading.set(w, false);
+        this.weaponReloadTimer.set(w, 0);
+        
+        if (alwaysOn) {
+            this.unlockedWeapons.add(w);
+        }
+    });
+
     this.initWeaponState();
     
     // Init Fog Canvas
@@ -356,18 +383,34 @@ export class GameplayScene implements Scene {
 
     if (this.isDockOpen) return;
 
+    // --- Weapon Switching ---
+    for (const [key, weaponName] of Object.entries(this.weaponSlots)) {
+        if (this.inputManager.isKeyJustPressed(key)) {
+            if (this.unlockedWeapons.has(weaponName)) {
+                ConfigManager.getInstance().set('Player', 'activeWeapon', weaponName);
+                SoundManager.getInstance().playSound('ui_click');
+            } else {
+                console.warn(`Weapon ${weaponName} not unlocked yet.`);
+            }
+        }
+    }
+
     // --- Weapon / Ammo Logic ---
     const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
     if (weapon !== this.lastActiveWeapon) {
         this.initWeaponState();
     }
 
-    if (this.isReloading) {
-        this.reloadTimer -= dt;
-        if (this.reloadTimer <= 0) {
-            this.finishReload();
+    // Update all reload timers
+    this.weaponReloadTimer.forEach((timer, w) => {
+        if (this.weaponReloading.get(w)) {
+            const newTimer = timer - dt;
+            this.weaponReloadTimer.set(w, newTimer);
+            if (newTimer <= 0) {
+                this.finishReload(w);
+            }
         }
-    }
+    });
 
     this.physics.update(dt);
 
@@ -387,13 +430,19 @@ export class GameplayScene implements Scene {
 
     // --- WEAPON LOGIC ---
     this.isFiringBeam = false;
-    if (this.inputManager.isKeyDown('Space') && this.player && !this.isReloading) {
+    const isReloading = this.weaponReloading.get(weapon);
+    const currentAmmo = this.weaponAmmo.get(weapon) || 0;
+
+    if (this.inputManager.isKeyDown('Space') && this.player && !isReloading) {
       const now = performance.now() / 1000;
       
       if (weapon === 'cannon' || weapon === 'rocket' || weapon === 'missile' || weapon === 'mine') {
           if (now - this.lastShotTime > this.shootCooldown) {
-            if (this.currentAmmo > 0) {
-                this.currentAmmo--;
+            if (weapon === 'cannon' || currentAmmo > 0) {
+                if (weapon !== 'cannon') {
+                    this.weaponAmmo.set(weapon, currentAmmo - 1);
+                }
+                
                 this.lastShotTime = now;
                 let pType = ProjectileType.CANNON;
                 let sfx = 'shoot_cannon';
@@ -418,27 +467,28 @@ export class GameplayScene implements Scene {
                 this.projectiles.push(p);
                 SoundManager.getInstance().playSound(sfx);
 
-                if (this.currentAmmo <= 0) {
-                    this.startReload();
+                if (weapon !== 'cannon' && this.weaponAmmo.get(weapon)! <= 0) {
+                    this.startReload(weapon);
                 }
             } else {
-                this.startReload();
+                this.startReload(weapon);
             }
           }
       } else if (weapon === 'laser' || weapon === 'ray') {
-          if (this.currentAmmo > 0) {
+          if (currentAmmo > 0) {
             this.isFiringBeam = true;
             this.handleBeamFiring(weapon, dt);
             SoundManager.getInstance().startLoop(weapon === 'laser' ? 'shoot_laser' : 'shoot_ray');
             
             const depletion = ConfigManager.getInstance().get<number>('Weapons', weapon + 'DepletionRate');
-            this.currentAmmo -= depletion * dt;
-            if (this.currentAmmo <= 0) {
-                this.currentAmmo = 0;
-                this.startReload();
+            const newAmmo = Math.max(0, currentAmmo - depletion * dt);
+            this.weaponAmmo.set(weapon, newAmmo);
+            
+            if (newAmmo <= 0) {
+                this.startReload(weapon);
             }
           } else {
-            this.startReload();
+            this.startReload(weapon);
           }
       }
     }
@@ -678,12 +728,31 @@ export class GameplayScene implements Scene {
     ctx.fillText(`COINS: ${this.coinsCollected}`, 10, 40);
 
     const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
-    const displayAmmo = weapon === 'laser' || weapon === 'ray' ? this.currentAmmo.toFixed(1) : Math.floor(this.currentAmmo);
-    const ammoText = this.isReloading ? `RELOADING... (${this.reloadTimer.toFixed(1)}s)` : `AMMO: ${displayAmmo}`;
+    const isReloading = this.weaponReloading.get(weapon);
+    const reloadTimer = this.weaponReloadTimer.get(weapon) || 0;
+    const currentAmmo = this.weaponAmmo.get(weapon) || 0;
+
+    let ammoText = "";
+    if (weapon === 'cannon') {
+        ammoText = "AMMO: ∞";
+    } else {
+        const displayAmmo = weapon === 'laser' || weapon === 'ray' ? currentAmmo.toFixed(1) : Math.floor(currentAmmo);
+        ammoText = isReloading ? `RELOADING... (${reloadTimer.toFixed(1)}s)` : `AMMO: ${displayAmmo}`;
+    }
     
-    ctx.fillStyle = this.isReloading ? '#ff4500' : '#cfaa6e';
+    ctx.fillStyle = isReloading ? '#ff4500' : '#cfaa6e';
     ctx.font = 'bold 16px "Share Tech Mono"';
     ctx.fillText(`${weapon.toUpperCase()} | ${ammoText}`, 10, 70);
+
+    // Render Slots
+    ctx.font = '12px "Share Tech Mono"';
+    let slotX = 10;
+    Object.entries(this.weaponSlots).forEach(([key, name], i) => {
+        const isSelected = name === weapon;
+        const isUnlocked = this.unlockedWeapons.has(name);
+        ctx.fillStyle = isSelected ? '#00ff00' : (isUnlocked ? '#888' : '#444');
+        ctx.fillText(`${i+1}: ${name.toUpperCase()}${isSelected ? ' <' : ''}`, slotX, 90 + i * 15);
+    });
   }
 
   private spawnDrop(): void {
@@ -837,26 +906,32 @@ export class GameplayScene implements Scene {
   private initWeaponState(): void {
       const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
       this.lastActiveWeapon = weapon;
-      this.isReloading = false;
-      this.reloadTimer = 0;
+  }
+
+  private startReload(weapon: string): void {
+      if (this.weaponReloading.get(weapon)) return;
+      
+      const reloadTime = ConfigManager.getInstance().get<number>('Weapons', weapon + 'ReloadTime');
+      if (reloadTime <= 0) {
+          this.finishReload(weapon);
+          return;
+      }
+
+      this.weaponReloading.set(weapon, true);
+      this.weaponReloadTimer.set(weapon, reloadTime);
+      
+      if (weapon === ConfigManager.getInstance().get<string>('Player', 'activeWeapon')) {
+        SoundManager.getInstance().playSound('weapon_reload');
+      }
+  }
+
+  private finishReload(weapon: string): void {
+      this.weaponReloading.set(weapon, false);
+      this.weaponReloadTimer.set(weapon, 0);
       
       const configKey = weapon === 'laser' || weapon === 'ray' ? 'MaxEnergy' : 'MaxAmmo';
-      this.currentAmmo = ConfigManager.getInstance().get<number>('Weapons', weapon + configKey);
-  }
-
-  private startReload(): void {
-      if (this.isReloading) return;
-      this.isReloading = true;
-      const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
-      this.reloadTimer = ConfigManager.getInstance().get<number>('Weapons', weapon + 'ReloadTime');
-      SoundManager.getInstance().playSound('weapon_reload');
-  }
-
-  private finishReload(): void {
-      this.isReloading = false;
-      const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
-      const configKey = weapon === 'laser' || weapon === 'ray' ? 'MaxEnergy' : 'MaxAmmo';
-      this.currentAmmo = ConfigManager.getInstance().get<number>('Weapons', weapon + configKey);
+      const max = ConfigManager.getInstance().get<number>('Weapons', weapon + configKey);
+      this.weaponAmmo.set(weapon, max);
   }
 
   public handleCommand(cmd: string): boolean {
@@ -875,9 +950,11 @@ export class GameplayScene implements Scene {
         const num = parseInt(cleanCmd.replace('add_weapon', ''));
         const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine'];
         if (num >= 1 && num <= 6) {
-            ConfigManager.getInstance().set('Player', 'activeWeapon', weapons[num-1]);
+            const wName = weapons[num-1];
+            this.unlockedWeapons.add(wName);
+            ConfigManager.getInstance().set('Player', 'activeWeapon', wName);
             this.initWeaponState();
-            console.log(`Added weapon ${weapons[num-1]}`);
+            console.log(`Added and equipped weapon: ${wName}`);
             return true;
         }
     }

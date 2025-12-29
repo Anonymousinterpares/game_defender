@@ -32,32 +32,32 @@ export const MasterConfig: GameConfigSchema = {
   },
   Weapons: {
     cannonDamage: { value: 10, type: 'number', min: 1, max: 100, step: 1, description: 'Cannon Damage' },
-    cannonMaxAmmo: { value: 30, type: 'number', min: 1, max: 200, step: 1, description: 'Cannon Mag Size' },
-    cannonReloadTime: { value: 3.0, type: 'number', min: 0.5, max: 10, step: 0.1, description: 'Cannon Reload (s)' },
+    cannonMaxAmmo: { value: 999999, type: 'number', min: 1, max: 1000000, step: 1, description: 'Cannon Mag Size' },
+    cannonReloadTime: { value: 0, type: 'number', min: 0, max: 10, step: 0.1, description: 'Cannon Reload (s)' },
 
     laserDPS: { value: 30, type: 'number', min: 1, max: 200, step: 5, description: 'Laser DPS' },
-    laserMaxEnergy: { value: 10.0, type: 'number', min: 1, max: 100, step: 1, description: 'Laser Energy' },
-    laserDepletionRate: { value: 1.0, type: 'number', min: 0.1, max: 10, step: 0.1, description: 'Laser Depletion (/s)' },
+    laserMaxEnergy: { value: 100.0, type: 'number', min: 1, max: 500, step: 1, description: 'Laser Energy' },
+    laserDepletionRate: { value: 10.0, type: 'number', min: 0.1, max: 50, step: 0.1, description: 'Laser Depletion (/s)' },
     laserReloadTime: { value: 5.0, type: 'number', min: 1, max: 20, step: 1, description: 'Laser Charge (s)' },
 
     rayBaseDamage: { value: 150, type: 'number', min: 10, max: 1000, step: 10, description: 'Energy Ray Base Damage' },
-    rayMaxEnergy: { value: 15.0, type: 'number', min: 1, max: 100, step: 1, description: 'Ray Energy' },
-    rayDepletionRate: { value: 1.0, type: 'number', min: 0.1, max: 10, step: 0.1, description: 'Ray Depletion (/s)' },
+    rayMaxEnergy: { value: 100.0, type: 'number', min: 1, max: 500, step: 1, description: 'Ray Energy' },
+    rayDepletionRate: { value: 15.0, type: 'number', min: 0.1, max: 50, step: 0.1, description: 'Ray Depletion (/s)' },
     rayReloadTime: { value: 5.0, type: 'number', min: 1, max: 20, step: 1, description: 'Ray Charge (s)' },
 
     rocketDamage: { value: 60, type: 'number', min: 10, max: 500, step: 10, description: 'Rocket Impact Damage' },
-    rocketMaxAmmo: { value: 1, type: 'number', min: 1, max: 10, step: 1, description: 'Rocket Mag Size' },
-    rocketReloadTime: { value: 6.0, type: 'number', min: 1, max: 20, step: 1, description: 'Rocket Reload (s)' },
+    rocketMaxAmmo: { value: 30, type: 'number', min: 1, max: 200, step: 1, description: 'Rocket Mag Size' },
+    rocketReloadTime: { value: 3.0, type: 'number', min: 1, max: 20, step: 1, description: 'Rocket Reload (s)' },
     rocketAOE: { value: 3.5, type: 'number', min: 1, max: 10, step: 0.5, description: 'Rocket AOE Radius' },
 
     missileDamage: { value: 30, type: 'number', min: 5, max: 300, step: 5, description: 'Missile Damage' },
-    missileMaxAmmo: { value: 1, type: 'number', min: 1, max: 10, step: 1, description: 'Missile Mag Size' },
-    missileReloadTime: { value: 6.0, type: 'number', min: 1, max: 20, step: 1, description: 'Missile Reload (s)' },
+    missileMaxAmmo: { value: 60, type: 'number', min: 1, max: 200, step: 1, description: 'Missile Mag Size' },
+    missileReloadTime: { value: 4.0, type: 'number', min: 1, max: 20, step: 1, description: 'Missile Reload (s)' },
     missileSpeed: { value: 8, type: 'number', min: 2, max: 20, step: 1, description: 'Missile Speed' },
     missileTurnSpeed: { value: 0.1, type: 'number', min: 0.01, max: 0.5, step: 0.01, description: 'Missile Agility' },
 
     mineDamage: { value: 80, type: 'number', min: 10, max: 1000, step: 10, description: 'Mine Damage' },
-    mineMaxAmmo: { value: 1, type: 'number', min: 1, max: 10, step: 1, description: 'Mine Mag Size' },
+    mineMaxAmmo: { value: 20, type: 'number', min: 1, max: 200, step: 1, description: 'Mine Mag Size' },
     mineReloadTime: { value: 2.0, type: 'number', min: 0.5, max: 10, step: 0.1, description: 'Mine Reload (s)' },
     mineAOE: { value: 4.0, type: 'number', min: 1, max: 15, step: 0.5, description: 'Mine AOE Radius' },
     mineArmTime: { value: 1.0, type: 'number', min: 0, max: 5, step: 0.1, description: 'Mine Arming Time (sec)' }
