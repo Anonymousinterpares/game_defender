@@ -109,21 +109,31 @@ export class HeatMap {
                 const effect = (1 - dist/radius) * amount;
                 data[i] = Math.min(1.0, data[i] + effect);
                 
+                // Carbonization: Wood chars immediately on contact with heat sources (beams)
+                if (mData && mData[i] === MaterialType.WOOD) {
+                    this.applyScorch(tx, ty, i);
+                }
+
                 // Wood Flammability
                 if (mData && mData[i] === MaterialType.WOOD && data[i] > 0.6) {
                     this.ignite(tx, ty, i);
                 }
 
                 if (data[i] > 0.5) {
-                    let sData = this.scorchData.get(key);
-                    if (!sData) {
-                        sData = new Uint8Array(this.subDiv * this.subDiv);
-                        this.scorchData.set(key, sData);
-                    }
-                    sData[i] = 1;
+                    this.applyScorch(tx, ty, i);
                 }
             }
         }
+    }
+
+    private applyScorch(tx: number, ty: number, idx: number): void {
+        const key = `${tx},${ty}`;
+        let sData = this.scorchData.get(key);
+        if (!sData) {
+            sData = new Uint8Array(this.subDiv * this.subDiv);
+            this.scorchData.set(key, sData);
+        }
+        sData[idx] = 1;
     }
 
     private ignite(tx: number, ty: number, idx: number): void {
@@ -186,6 +196,9 @@ export class HeatMap {
                 if (heat) heat[i] = 0;
                 const fire = this.fireData.get(key);
                 if (fire) fire[i] = 0;
+            } else if (dist < effectiveRadius + subSize * 2) {
+                // Carbonization border around destroyed area
+                this.applyScorch(tx, ty, i);
             }
         }
     }
@@ -330,7 +343,11 @@ export class HeatMap {
                     }
 
                     if (scorched && heat < 0.1) {
-                        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                        if (mData[i] === MaterialType.WOOD) {
+                            ctx.fillStyle = 'rgba(28, 28, 28, 0.9)'; // Graphite Black
+                        } else {
+                            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                        }
                         ctx.fillRect(rx, ry, subSize + 0.5, subSize + 0.5);
                     }
 
