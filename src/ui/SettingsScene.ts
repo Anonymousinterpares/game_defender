@@ -1,6 +1,7 @@
 import { Scene } from '../core/Scene';
 import { SceneManager } from '../core/SceneManager';
 import { ConfigManager, ConfigItem } from '../config/MasterConfig';
+import { SoundManager } from '../core/SoundManager';
 
 export class SettingsScene implements Scene {
   private container: HTMLDivElement | null = null;
@@ -83,6 +84,7 @@ export class SettingsScene implements Scene {
     this.bindEvents(schema);
 
     document.getElementById('btn-back')?.addEventListener('click', () => {
+      SoundManager.getInstance().playSound('ui_click');
       this.sceneManager.switchScene('menu');
     });
   }
@@ -137,13 +139,16 @@ export class SettingsScene implements Scene {
             ConfigManager.getInstance().set(categoryName, key, val);
             if (valDisplay) valDisplay.textContent = val.toString();
           });
+          el.addEventListener('change', () => SoundManager.getInstance().playSound('ui_click'));
         } else if (item.type === 'boolean') {
           el.addEventListener('change', (e) => {
+            SoundManager.getInstance().playSound('ui_click');
             const val = (e.target as HTMLInputElement).checked;
             ConfigManager.getInstance().set(categoryName, key, val);
           });
         } else if (item.type === 'string') {
             el.addEventListener('change', (e) => {
+                SoundManager.getInstance().playSound('ui_click');
                 const val = (e.target as HTMLInputElement).value;
                 ConfigManager.getInstance().set(categoryName, key, val);
             });

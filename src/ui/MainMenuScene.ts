@@ -70,10 +70,12 @@ export class MainMenuScene implements Scene {
     uiLayer.appendChild(this.container);
 
     document.getElementById('btn-start')?.addEventListener('click', () => {
+      SoundManager.getInstance().playSound('ui_click');
       this.sceneManager.switchScene('gameplay');
     });
 
     document.getElementById('btn-settings')?.addEventListener('click', () => {
+      SoundManager.getInstance().playSound('ui_click');
       this.sceneManager.switchScene('settings');
     });
   }

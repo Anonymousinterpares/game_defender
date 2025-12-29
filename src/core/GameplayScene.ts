@@ -8,9 +8,10 @@ import { SoundManager } from './SoundManager';
 import { Radar } from '../ui/Radar';
 import { Entity } from './Entity';
 import { ConfigManager } from '../config/MasterConfig';
-import { Projectile } from '../entities/Projectile';
+import { Projectile, ProjectileType } from '../entities/Projectile';
 import { Enemy } from '../entities/Enemy';
 import { Drop, DropType } from '../entities/Drop';
+import { Particle } from '../entities/Particle';
 import { TurretUpgrade, ShieldUpgrade } from '../entities/upgrades/Upgrade';
 
 export class GameplayScene implements Scene {
@@ -23,11 +24,16 @@ export class GameplayScene implements Scene {
   private enemies: Enemy[] = [];
   private drops: Drop[] = [];
   private projectiles: Projectile[] = [];
+  private particles: Particle[] = [];
   
   private lastShotTime: number = 0;
   private shootCooldown: number = 0.2;
   private nextDropSpawn: number = 5;
   private nextEnemySpawn: number = 3; 
+
+  // Beam state
+  private isFiringBeam: boolean = false;
+  private beamEndPos: {x: number, y: number} = {x: 0, y: 0};
 
   private coinsCollected: number = 0;
   private isDockOpen: boolean = false;
@@ -39,6 +45,7 @@ export class GameplayScene implements Scene {
   private backButton: HTMLButtonElement | null = null;
   private dockButton: HTMLButtonElement | null = null;
   private muteButton: HTMLButtonElement | null = null;
+  private volumeSlider: HTMLInputElement | null = null;
 
   // Fog of War offscreen canvas
   private fogCanvas: HTMLCanvasElement | null = null;
@@ -56,7 +63,20 @@ export class GameplayScene implements Scene {
     this.physics.setWorld(this.world);
     
     // Load Sounds
-    SoundManager.getInstance().loadSound('ping', '/assets/sounds/ping.wav');
+    const sm = SoundManager.getInstance();
+    sm.loadSound('ping', '/assets/sounds/ping.wav');
+    sm.loadSound('shoot_cannon', '/assets/sounds/shoot_cannon.wav');
+    sm.loadSound('shoot_laser', '/assets/sounds/shoot_laser.wav');
+    sm.loadSound('shoot_ray', '/assets/sounds/shoot_ray.wav');
+    sm.loadSound('shoot_rocket', '/assets/sounds/shoot_rocket.wav');
+    sm.loadSound('shoot_missile', '/assets/sounds/shoot_missile.wav');
+    sm.loadSound('place_mine', '/assets/sounds/place_mine.wav');
+    sm.loadSound('hit_cannon', '/assets/sounds/hit_cannon.wav');
+    sm.loadSound('hit_laser', '/assets/sounds/hit_laser.wav');
+    sm.loadSound('hit_ray', '/assets/sounds/hit_ray.wav');
+    sm.loadSound('explosion_large', '/assets/sounds/explosion_large.wav');
+    sm.loadSound('collect_coin', '/assets/sounds/collect_coin.wav');
+    sm.loadSound('ui_click', '/assets/sounds/ui_click.wav');
 
     const centerX = this.world.getWidthPixels() / 2;
     const centerY = this.world.getHeightPixels() / 2;
@@ -104,6 +124,7 @@ export class GameplayScene implements Scene {
       this.backButton.style.top = '10px';
       this.backButton.style.right = '10px';
       this.backButton.addEventListener('click', () => {
+          SoundManager.getInstance().playSound('ui_click');
           this.sceneManager.switchScene('menu');
       });
       uiLayer.appendChild(this.backButton);
@@ -115,18 +136,38 @@ export class GameplayScene implements Scene {
       this.muteButton.style.top = '10px';
       this.muteButton.style.right = '100px';
       this.muteButton.addEventListener('click', () => {
+          SoundManager.getInstance().playSound('ui_click');
           SoundManager.getInstance().toggleMute();
           this.updateMuteButtonText();
       });
       uiLayer.appendChild(this.muteButton);
+
+      this.volumeSlider = document.createElement('input');
+      this.volumeSlider.type = 'range';
+      this.volumeSlider.min = '0';
+      this.volumeSlider.max = '1';
+      this.volumeSlider.step = '0.01';
+      this.volumeSlider.value = SoundManager.getInstance().getVolume().toString();
+      this.volumeSlider.className = 'hud-slider';
+      this.volumeSlider.style.position = 'absolute';
+      this.volumeSlider.style.top = '15px';
+      this.volumeSlider.style.right = '190px';
+      this.volumeSlider.style.width = '80px';
+      this.volumeSlider.style.pointerEvents = 'auto';
+      this.volumeSlider.addEventListener('input', (e) => {
+          const val = parseFloat((e.target as HTMLInputElement).value);
+          SoundManager.getInstance().setVolume(val);
+      });
+      uiLayer.appendChild(this.volumeSlider);
 
       this.dockButton = document.createElement('button');
       this.dockButton.textContent = 'DOCK (P)';
       this.dockButton.className = 'hud-btn';
       this.dockButton.style.position = 'absolute';
       this.dockButton.style.top = '10px';
-      this.dockButton.style.right = '190px';
+      this.dockButton.style.right = '280px';
       this.dockButton.addEventListener('click', () => {
+          SoundManager.getInstance().playSound('ui_click');
           this.toggleDock();
       });
       uiLayer.appendChild(this.dockButton);
@@ -142,6 +183,7 @@ export class GameplayScene implements Scene {
       if (this.backButton) { this.backButton.remove(); this.backButton = null; }
       if (this.dockButton) { this.dockButton.remove(); this.dockButton = null; }
       if (this.muteButton) { this.muteButton.remove(); this.muteButton = null; }
+      if (this.volumeSlider) { this.volumeSlider.remove(); this.volumeSlider = null; }
       if (this.dockContainer) { this.dockContainer.remove(); this.dockContainer = null; }
   }
 
@@ -196,6 +238,7 @@ export class GameplayScene implements Scene {
 
       this.dockContainer.querySelector('#buy-repair')?.addEventListener('click', () => {
           if (this.coinsCollected >= repairCost) {
+              SoundManager.getInstance().playSound('ui_click');
               this.coinsCollected -= repairCost;
               this.updateDockContent(repairCost, speedCost, fireRateCost);
           }
@@ -203,6 +246,7 @@ export class GameplayScene implements Scene {
 
       this.dockContainer.querySelector('#buy-speed')?.addEventListener('click', () => {
           if (this.coinsCollected >= speedCost) {
+              SoundManager.getInstance().playSound('ui_click');
               this.coinsCollected -= speedCost;
               const currentSpeed = ConfigManager.getInstance().get<number>('Player', 'baseSpeed');
               ConfigManager.getInstance().set('Player', 'baseSpeed', currentSpeed + 1);
@@ -213,6 +257,7 @@ export class GameplayScene implements Scene {
 
       this.dockContainer.querySelector('#buy-fire')?.addEventListener('click', () => {
           if (this.coinsCollected >= fireRateCost) {
+              SoundManager.getInstance().playSound('ui_click');
               this.coinsCollected -= fireRateCost;
               const currentRate = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
               ConfigManager.getInstance().set('Player', 'shootCooldown', Math.max(0.05, currentRate - 0.02));
@@ -223,6 +268,7 @@ export class GameplayScene implements Scene {
 
       this.dockContainer.querySelector('#buy-slot')?.addEventListener('click', () => {
           if (this.coinsCollected >= slotCost && this.player) {
+              SoundManager.getInstance().playSound('ui_click');
               this.coinsCollected -= slotCost;
               this.player.addSlot();
               const allBodies = this.player.getAllBodies();
@@ -235,6 +281,7 @@ export class GameplayScene implements Scene {
           if (this.coinsCollected >= turretCost && this.player) {
               const freeSlotIdx = this.findFreeSlot();
               if (freeSlotIdx !== -1) {
+                  SoundManager.getInstance().playSound('ui_click');
                   this.coinsCollected -= turretCost;
                   const slot = this.player.segments[freeSlotIdx];
                   this.player.upgrades.set(freeSlotIdx, new TurretUpgrade(slot));
@@ -249,6 +296,7 @@ export class GameplayScene implements Scene {
           if (this.coinsCollected >= shieldCost && this.player) {
               const freeSlotIdx = this.findFreeSlot();
               if (freeSlotIdx !== -1) {
+                  SoundManager.getInstance().playSound('ui_click');
                   this.coinsCollected -= shieldCost;
                   const slot = this.player.segments[freeSlotIdx];
                   this.player.upgrades.set(freeSlotIdx, new ShieldUpgrade(slot));
@@ -260,6 +308,7 @@ export class GameplayScene implements Scene {
       });
 
       this.dockContainer.querySelector('#btn-close-dock')?.addEventListener('click', () => {
+          SoundManager.getInstance().playSound('ui_click');
           this.toggleDock();
       });
   }
@@ -299,44 +348,89 @@ export class GameplayScene implements Scene {
         this.nextEnemySpawn = 4 + Math.random() * 4;
     }
 
+    // --- WEAPON LOGIC ---
+    this.isFiringBeam = false;
     if (this.inputManager.isKeyDown('Space') && this.player) {
+      const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
       const now = performance.now() / 1000;
-      if (now - this.lastShotTime > this.shootCooldown) {
-        this.lastShotTime = now;
-        const p = new Projectile(this.player.x, this.player.y, this.player.rotation);
-        this.projectiles.push(p);
+      
+      if (weapon === 'cannon' || weapon === 'rocket' || weapon === 'missile' || weapon === 'mine') {
+          if (now - this.lastShotTime > this.shootCooldown) {
+            this.lastShotTime = now;
+            let pType = ProjectileType.CANNON;
+            let sfx = 'shoot_cannon';
+            
+            if (weapon === 'rocket') { pType = ProjectileType.ROCKET; sfx = 'shoot_rocket'; }
+            if (weapon === 'missile') { pType = ProjectileType.MISSILE; sfx = 'shoot_missile'; }
+            if (weapon === 'mine') { pType = ProjectileType.MINE; sfx = 'place_mine'; }
+            
+            const p = new Projectile(this.player.x, this.player.y, this.player.rotation, pType);
+            
+            if (weapon === 'missile') {
+                // Find closest enemy for missile
+                let bestDist = 1000;
+                let target: Enemy | null = null;
+                this.enemies.forEach(e => {
+                    const d = Math.sqrt((e.x-p.x)**2 + (e.y-p.y)**2);
+                    if (d < bestDist) { bestDist = d; target = e; }
+                });
+                p.target = target;
+            }
+            
+            this.projectiles.push(p);
+            SoundManager.getInstance().playSound(sfx);
+          }
+      } else if (weapon === 'laser' || weapon === 'ray') {
+          this.isFiringBeam = true;
+          this.handleBeamFiring(weapon, dt);
       }
     }
 
     if (this.player) {
       for (const p of this.projectiles) {
-        // Projectile vs World (Walls and Borders)
+        // Projectile vs World
         if (this.world) {
             const mapW = this.world.getWidthPixels();
             const mapH = this.world.getHeightPixels();
-            
-            // Wall Collision
-            if (this.world.isWall(p.x, p.y)) {
+            const hitWall = this.world.isWall(p.x, p.y);
+            const hitBorder = p.x < 0 || p.x > mapW || p.y < 0 || p.y > mapH;
+
+            if (hitWall || hitBorder) {
+                if (p.aoeRadius > 0) {
+                    this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
+                } else {
+                    SoundManager.getInstance().playSound('hit_cannon');
+                    this.createImpactParticles(p.x, p.y, p.color);
+                }
                 p.active = false;
-            }
-            // Border Collision
-            else if (p.x < 0 || p.x > mapW || p.y < 0 || p.y > mapH) {
-                p.active = false;
+                continue;
             }
         }
 
         // Projectile vs Enemy
-        for (const e of this.enemies) {
-          if (this.physics.checkCollision(p, e)) {
-            e.takeDamage(10);
-            p.active = false;
-          }
+        if (p.active) {
+            for (const e of this.enemies) {
+              if (this.physics.checkCollision(p, e)) {
+                if (p.type === ProjectileType.MINE && !p.isArmed) continue;
+                
+                if (p.aoeRadius > 0) {
+                    this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
+                } else {
+                    e.takeDamage(p.damage);
+                    SoundManager.getInstance().playSound('hit_cannon');
+                    console.log('Cannon Hit played'); // Debug
+                }
+                p.active = false;
+                break;
+              }
+            }
         }
       }
 
       for (const d of this.drops) {
         if (this.physics.checkCollision(this.player, d)) {
           d.active = false;
+          SoundManager.getInstance().playSound('collect_coin');
           if (d.type === DropType.COIN) this.coinsCollected += 10;
         }
       }
@@ -355,6 +449,7 @@ export class GameplayScene implements Scene {
     this.drops.forEach(d => d.update(dt));
     
     this.projectiles = this.projectiles.filter(p => { p.update(dt); return p.active; });
+    this.particles = this.particles.filter(p => { p.update(dt); return p.active; });
     this.enemies = this.enemies.filter(e => { if(!e.active) this.physics.removeBody(e); return e.active; });
     this.drops = this.drops.filter(d => d.active);
 
@@ -382,14 +477,41 @@ export class GameplayScene implements Scene {
     this.drops.forEach(d => d.render(ctx));
     this.player.render(ctx);
     const renderDist = ConfigManager.getInstance().get<number>('World', 'renderDistance') * ConfigManager.getInstance().get<number>('World', 'tileSize');
-    this.enemies.forEach(e => {
-        const dx = e.x - this.player!.x;
-        const dy = e.y - this.player!.y;
-        if (Math.abs(dx) < renderDist && Math.abs(dy) < renderDist) {
-            e.render(ctx);
+        this.enemies.forEach(e => {
+            const dx = e.x - this.player!.x;
+            const dy = e.y - this.player!.y;
+            if (Math.abs(dx) < renderDist && Math.abs(dy) < renderDist) {
+                e.render(ctx);
+            }
+        });
+        this.projectiles.forEach(p => p.render(ctx));
+        this.particles.forEach(p => p.render(ctx));
+        
+        // Render Continuous Beams
+        if (this.isFiringBeam && this.player) {
+            const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+        ctx.beginPath();
+        ctx.moveTo(this.player.x, this.player.y);
+        ctx.lineTo(this.beamEndPos.x, this.beamEndPos.y);
+        
+        if (weapon === 'laser') {
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // Core
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+        } else {
+            const grad = ctx.createLinearGradient(this.player.x, this.player.y, this.beamEndPos.x, this.beamEndPos.y);
+            grad.addColorStop(0, 'rgba(0, 255, 255, 0.8)');
+            grad.addColorStop(1, 'rgba(0, 255, 255, 0.1)');
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 15 + Math.random() * 5;
+            ctx.stroke();
         }
-    });
-    this.projectiles.forEach(p => p.render(ctx));
+    }
+
     ctx.restore();
 
     // --- Fog of War ---
@@ -530,5 +652,84 @@ export class GameplayScene implements Scene {
 
       // 3. Draw the fog overlay onto main canvas
       mainCtx.drawImage(this.fogCanvas, 0, 0);
+  }
+
+  private handleBeamFiring(type: string, dt: number): void {
+      if (!this.player || !this.world) return;
+      
+      const maxDist = type === 'laser' ? 800 : 500;
+      const step = 8;
+      let dist = 0;
+      let hitEnemy: Enemy | null = null;
+      
+      // Raycast for beam
+      while (dist < maxDist) {
+          const tx = this.player.x + Math.cos(this.player.rotation) * dist;
+          const ty = this.player.y + Math.sin(this.player.rotation) * dist;
+          
+          if (this.world.isWall(tx, ty)) break;
+          
+          // Check enemy hits
+          for (const e of this.enemies) {
+              const dx = e.x - tx;
+              const dy = e.y - ty;
+              if (Math.sqrt(dx*dx + dy*dy) < e.radius) {
+                  hitEnemy = e;
+                  break;
+              }
+          }
+          if (hitEnemy) break;
+          dist += step;
+      }
+      
+      this.beamEndPos = {
+          x: this.player.x + Math.cos(this.player.rotation) * dist,
+          y: this.player.y + Math.sin(this.player.rotation) * dist
+      };
+      
+      if (hitEnemy) {
+          if (type === 'laser') {
+              hitEnemy.takeDamage(ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt);
+              if (Math.random() < 0.1) SoundManager.getInstance().playSound('hit_laser');
+          } else {
+              // Inverse square law: damage = base / (dist^2)
+              // We'll use a simplified version for gameplay: damage = base / (1 + (dist/tileSize)^2)
+              const base = ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage');
+              const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+              const normDist = dist / tileSize;
+              const damage = (base / (1 + normDist * normDist)) * dt * 10;
+              hitEnemy.takeDamage(damage);
+              if (Math.random() < 0.1) SoundManager.getInstance().playSound('hit_ray');
+          }
+      }
+      
+      // Play loop sound (very simplified)
+      if (Math.random() < 0.05) SoundManager.getInstance().playSound(type === 'laser' ? 'shoot_laser' : 'shoot_ray');
+  }
+
+  private createExplosion(x: number, y: number, radius: number, damage: number): void {
+      SoundManager.getInstance().playSound('explosion_large');
+      // Damage enemies in radius
+      this.enemies.forEach(e => {
+          const dx = e.x - x;
+          const dy = e.y - y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < radius) {
+              const falloff = 1 - (dist / radius);
+              e.takeDamage(damage * falloff);
+          }
+      });
+      // Visual feedback placeholder could be added here
+  }
+
+  private createImpactParticles(x: number, y: number, color: string): void {
+      const count = 5 + Math.floor(Math.random() * 5);
+      for (let i = 0; i < count; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 50 + Math.random() * 150;
+          const vx = Math.cos(angle) * speed;
+          const vy = Math.sin(angle) * speed;
+          this.particles.push(new Particle(x, y, color, vx, vy, 0.3 + Math.random() * 0.4));
+      }
   }
 }

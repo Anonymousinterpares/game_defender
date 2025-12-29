@@ -189,3 +189,23 @@ canvas {
         box-shadow: 0 0 10px var(--steam-gold);
     }
 }
+
+.hud-slider {
+    accent-color: var(--steam-gold);
+    background: var(--steam-panel);
+    border: 1px solid var(--steam-brass);
+    cursor: pointer;
+    height: 8px;
+    -webkit-appearance: none;
+    border-radius: 4px;
+
+    &::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 14px;
+        height: 14px;
+        background: var(--steam-gold);
+        border: 1px solid #000;
+        border-radius: 50%;
+        box-shadow: 0 0 5px #000;
+    }
+}

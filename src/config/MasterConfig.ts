@@ -27,7 +27,21 @@ export const MasterConfig: GameConfigSchema = {
     turnSpeed: { value: 3.0, type: 'number', min: 0.1, max: 10.0, step: 0.1, description: 'Turn Speed (Rad/sec)' },
     maxHealth: { value: 100, type: 'number', min: 1, max: 1000, step: 10, description: 'Base Health' },
     bodyLength: { value: 2, type: 'number', min: 1, max: 20, step: 1, description: 'Additional Body Segments' },
-    shootCooldown: { value: 0.2, type: 'number', min: 0.05, max: 1.0, step: 0.01, description: 'Weapon Fire Rate' }
+    shootCooldown: { value: 0.2, type: 'number', min: 0.05, max: 2.0, step: 0.01, description: 'Weapon Fire Rate' },
+    activeWeapon: { value: 'cannon', type: 'string', description: 'Active Weapon (cannon, laser, ray, rocket, missile, mine)' }
+  },
+  Weapons: {
+    cannonDamage: { value: 10, type: 'number', min: 1, max: 100, step: 1, description: 'Cannon Damage' },
+    laserDPS: { value: 30, type: 'number', min: 1, max: 200, step: 5, description: 'Laser DPS' },
+    rayBaseDamage: { value: 150, type: 'number', min: 10, max: 1000, step: 10, description: 'Energy Ray Base Damage' },
+    rocketDamage: { value: 60, type: 'number', min: 10, max: 500, step: 10, description: 'Rocket Impact Damage' },
+    rocketAOE: { value: 3.5, type: 'number', min: 1, max: 10, step: 0.5, description: 'Rocket AOE Radius' },
+    missileDamage: { value: 30, type: 'number', min: 5, max: 300, step: 5, description: 'Missile Damage' },
+    missileSpeed: { value: 8, type: 'number', min: 2, max: 20, step: 1, description: 'Missile Speed' },
+    missileTurnSpeed: { value: 0.1, type: 'number', min: 0.01, max: 0.5, step: 0.01, description: 'Missile Agility' },
+    mineDamage: { value: 80, type: 'number', min: 10, max: 1000, step: 10, description: 'Mine Damage' },
+    mineAOE: { value: 4.0, type: 'number', min: 1, max: 15, step: 0.5, description: 'Mine AOE Radius' },
+    mineArmTime: { value: 1.0, type: 'number', min: 0, max: 5, step: 0.1, description: 'Mine Arming Time (sec)' }
   },
   Upgrades: {
       hullRepairCost: { value: 50, type: 'number', description: 'Repair Cost' },

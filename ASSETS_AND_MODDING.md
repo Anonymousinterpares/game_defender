@@ -29,10 +29,17 @@ Location: `public/assets/`
 
 #### Sounds (`public/assets/sounds/`)
 - `ping.wav` - SONAR radar sweep detection sound (synthesized fallback exists).
-- `shoot.wav` - Standard weapon fire sound.
+- `shoot_cannon.wav` - Standard cannon fire sound.
+- `shoot_laser.wav` - Laser beam start/loop sound.
+- `shoot_ray.wav` - Energy ray start/loop sound.
+- `shoot_rocket.wav` - Rocket launch sound.
+- `shoot_missile.wav` - Guided missile launch sound.
+- `place_mine.wav` - Sound when a mine is dropped.
+- `hit_cannon.wav` - Cannon projectile impact sound.
+- `hit_laser.wav` - Laser burn/sizzle sound.
+- `hit_ray.wav` - Heavy energy ray impact sound.
+- `explosion_large.wav` - Sound played upon enemy destruction or AOE explosions.
 - `collect_coin.wav` - Played when picking up gear/coins.
-- `enemy_hit.wav` - Impact sound when projectile hits an enemy.
-- `enemy_explode.wav` - Sound played upon enemy destruction.
 - `ui_click.wav` - Standard button click sound for menus and the Engineering Dock.
 
 #### Fonts (`public/assets/fonts/`)
