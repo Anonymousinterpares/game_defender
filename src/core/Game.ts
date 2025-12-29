@@ -2,6 +2,7 @@ import '../styles/main.scss';
 import { ConfigManager } from '../config/MasterConfig';
 import { SceneManager } from './SceneManager';
 import { InputManager } from './InputManager';
+import { DevConsole } from './DevConsole';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -9,6 +10,7 @@ export class Game {
   private lastTime: number = 0;
   private sceneManager: SceneManager;
   private inputManager: InputManager;
+  private devConsole: DevConsole;
 
   constructor(containerId: string) {
     const container = document.getElementById(containerId);
@@ -27,6 +29,7 @@ export class Game {
     // Init Managers
     this.inputManager = new InputManager();
     this.sceneManager = new SceneManager(this.ctx, uiLayer, this.inputManager);
+    this.devConsole = new DevConsole(this.sceneManager);
 
     // Resize handling
     window.addEventListener('resize', () => this.resize());

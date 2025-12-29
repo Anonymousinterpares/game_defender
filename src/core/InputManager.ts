@@ -32,6 +32,9 @@ export class InputManager {
   }
 
   private onKeyDown(e: KeyboardEvent): void {
+    if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+        return;
+    }
     this.keys.add(e.code);
     this.updateDirection();
   }

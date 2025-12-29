@@ -37,6 +37,10 @@ export class GameplayScene implements Scene {
   private reloadTimer: number = 0;
   private lastActiveWeapon: string = '';
 
+  // Dev Mode
+  private isDevMode: boolean = false;
+  private spawnEnemies: boolean = true;
+
   // Beam state
   private isFiringBeam: boolean = false;
   private beamEndPos: {x: number, y: number} = {x: 0, y: 0};
@@ -119,6 +123,10 @@ export class GameplayScene implements Scene {
     this.physics = new PhysicsEngine();
     this.fogCanvas = null;
     this.fogCtx = null;
+    SoundManager.getInstance().stopLoop('shoot_laser');
+    SoundManager.getInstance().stopLoop('shoot_ray');
+    SoundManager.getInstance().stopLoop('hit_laser');
+    SoundManager.getInstance().stopLoop('hit_ray');
   }
 
   private createUI(): void {
@@ -365,7 +373,9 @@ export class GameplayScene implements Scene {
 
     this.nextEnemySpawn -= dt;
     if (this.nextEnemySpawn <= 0) {
-        this.spawnEnemy();
+        if (this.spawnEnemies) {
+            this.spawnEnemy();
+        }
         this.nextEnemySpawn = 4 + Math.random() * 4;
     }
 
@@ -413,6 +423,7 @@ export class GameplayScene implements Scene {
           if (this.currentAmmo > 0) {
             this.isFiringBeam = true;
             this.handleBeamFiring(weapon, dt);
+            SoundManager.getInstance().startLoop(weapon === 'laser' ? 'shoot_laser' : 'shoot_ray');
             
             const depletion = ConfigManager.getInstance().get<number>('Weapons', weapon + 'DepletionRate');
             this.currentAmmo -= depletion * dt;
@@ -424,6 +435,13 @@ export class GameplayScene implements Scene {
             this.startReload();
           }
       }
+    }
+
+    if (!this.isFiringBeam) {
+        SoundManager.getInstance().stopLoop('shoot_laser');
+        SoundManager.getInstance().stopLoop('shoot_ray');
+        SoundManager.getInstance().stopLoop('hit_laser', 0.5);
+        SoundManager.getInstance().stopLoop('hit_ray', 0.5);
     }
 
     if (this.player) {
@@ -439,7 +457,8 @@ export class GameplayScene implements Scene {
                 if (p.aoeRadius > 0) {
                     this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
                 } else {
-                    SoundManager.getInstance().playSound('hit_cannon');
+                    const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
+                    SoundManager.getInstance().playSound(sfx);
                     this.createImpactParticles(p.x, p.y, p.color);
                 }
                 p.active = false;
@@ -457,8 +476,8 @@ export class GameplayScene implements Scene {
                     this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
                 } else {
                     e.takeDamage(p.damage);
-                    SoundManager.getInstance().playSound('hit_cannon');
-                    console.log('Cannon Hit played'); // Debug
+                    const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
+                    SoundManager.getInstance().playSound(sfx);
                 }
                 p.active = false;
                 break;
@@ -709,13 +728,20 @@ export class GameplayScene implements Scene {
       const step = 8;
       let dist = 0;
       let hitEnemy: Enemy | null = null;
+      let hitSomething = false;
+
+      const mapW = this.world.getWidthPixels();
+      const mapH = this.world.getHeightPixels();
       
       // Raycast for beam
       while (dist < maxDist) {
           const tx = this.player.x + Math.cos(this.player.rotation) * dist;
           const ty = this.player.y + Math.sin(this.player.rotation) * dist;
           
-          if (this.world.isWall(tx, ty)) break;
+          if (this.world.isWall(tx, ty) || tx < 0 || tx > mapW || ty < 0 || ty > mapH) {
+              hitSomething = true;
+              break;
+          }
           
           // Check enemy hits
           for (const e of this.enemies) {
@@ -723,6 +749,7 @@ export class GameplayScene implements Scene {
               const dy = e.y - ty;
               if (Math.sqrt(dx*dx + dy*dy) < e.radius) {
                   hitEnemy = e;
+                  hitSomething = true;
                   break;
               }
           }
@@ -735,24 +762,24 @@ export class GameplayScene implements Scene {
           y: this.player.y + Math.sin(this.player.rotation) * dist
       };
       
-      if (hitEnemy) {
-          if (type === 'laser') {
-              hitEnemy.takeDamage(ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt);
-              if (Math.random() < 0.1) SoundManager.getInstance().playSound('hit_laser');
-          } else {
-              // Inverse square law: damage = base / (dist^2)
-              // We'll use a simplified version for gameplay: damage = base / (1 + (dist/tileSize)^2)
-              const base = ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage');
-              const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-              const normDist = dist / tileSize;
-              const damage = (base / (1 + normDist * normDist)) * dt * 10;
-              hitEnemy.takeDamage(damage);
-              if (Math.random() < 0.1) SoundManager.getInstance().playSound('hit_ray');
+      const hitSfx = type === 'laser' ? 'hit_laser' : 'hit_ray';
+
+      if (hitSomething) {
+          SoundManager.getInstance().startLoop(hitSfx);
+          if (hitEnemy) {
+            if (type === 'laser') {
+                hitEnemy.takeDamage(ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt);
+            } else {
+                const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                const distInTiles = dist / tileSize;
+                const base = ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage');
+                const damage = (base / (1 + distInTiles * distInTiles)) * dt;
+                hitEnemy.takeDamage(damage);
+            }
           }
+      } else {
+          SoundManager.getInstance().stopLoop(hitSfx, 0.5);
       }
-      
-      // Play loop sound (very simplified)
-      if (Math.random() < 0.05) SoundManager.getInstance().playSound(type === 'laser' ? 'shoot_laser' : 'shoot_ray');
   }
 
   private createExplosion(x: number, y: number, radius: number, damage: number): void {
@@ -804,5 +831,42 @@ export class GameplayScene implements Scene {
       const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
       const configKey = weapon === 'laser' || weapon === 'ray' ? 'MaxEnergy' : 'MaxAmmo';
       this.currentAmmo = ConfigManager.getInstance().get<number>('Weapons', weapon + configKey);
+  }
+
+  public handleCommand(cmd: string): boolean {
+    const cleanCmd = cmd.trim().toLowerCase();
+    
+    if (cleanCmd === 'dev_on') {
+        this.isDevMode = true;
+        console.log('Dev mode activated');
+        return true;
+    }
+
+    if (!this.isDevMode) return false;
+
+    if (cleanCmd.startsWith('add_weapon')) {
+        const num = parseInt(cleanCmd.replace('add_weapon', ''));
+        const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine'];
+        if (num >= 1 && num <= 6) {
+            ConfigManager.getInstance().set('Player', 'activeWeapon', weapons[num-1]);
+            this.initWeaponState();
+            console.log(`Added weapon ${weapons[num-1]}`);
+            return true;
+        }
+    }
+
+    if (cleanCmd === 'activate_enemy_spawn') {
+        this.spawnEnemies = true;
+        console.log('Enemy spawning activated');
+        return true;
+    }
+
+    if (cleanCmd === 'deactivate_enemy_spawn') {
+        this.spawnEnemies = false;
+        console.log('Enemy spawning deactivated');
+        return true;
+    }
+
+    return false;
   }
 }

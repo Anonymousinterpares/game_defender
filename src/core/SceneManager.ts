@@ -36,6 +36,10 @@ export class SceneManager {
     }
   }
 
+  public getCurrentScene(): Scene | null {
+    return this.currentScene;
+  }
+
   public update(dt: number): void {
     if (this.currentScene) {
       this.currentScene.update(dt);

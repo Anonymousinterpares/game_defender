@@ -209,3 +209,29 @@ canvas {
         box-shadow: 0 0 5px #000;
     }
 }
+
+#dev-console {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    border-bottom: 2px solid var(--steam-brass);
+    z-index: 9999;
+    padding: 10px;
+    box-sizing: border-box;
+
+    input {
+        width: 100%;
+        background: transparent;
+        border: none;
+        color: var(--steam-gold);
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 18px;
+        outline: none;
+        
+        &::placeholder {
+            color: rgba(207, 170, 110, 0.5);
+        }
+    }
+}
