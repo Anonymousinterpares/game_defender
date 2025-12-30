@@ -843,9 +843,14 @@ export class GameplayScene implements Scene {
       const { ambientIntensity, sunColor, sunDirection } = WorldClock.getInstance().getTimeState();
       const worldMeshVersion = this.world.getMeshVersion();
       
+      // Calculate a bake version that includes sun position (rounded to avoid too many bakes)
+      const sunAngle = Math.atan2(sunDirection.y, sunDirection.x);
+      const bakeVersion = `${worldMeshVersion}_${Math.round(sunAngle * 10)}`; 
+      
       // --- 1. ACCUMULATE STATIC SHADOWS (CHUNKED) ---
       const lctx = this.lightCtx;
-      lctx.fillStyle = sunColor;
+      lctx.globalCompositeOperation = 'source-over'; 
+      lctx.fillStyle = sunColor; // The "Sunlight" color (e.g. white or yellow)
       lctx.fillRect(0, 0, w, h);
 
       const startGX = Math.floor(this.cameraX / this.chunkSize);
@@ -861,13 +866,13 @@ export class GameplayScene implements Scene {
                   const canvas = document.createElement('canvas');
                   canvas.width = this.chunkSize;
                   canvas.height = this.chunkSize;
-                  chunk = { canvas, ctx: canvas.getContext('2d')!, version: -1 };
+                  chunk = { canvas, ctx: canvas.getContext('2d')!, version: '' };
                   this.shadowChunks.set(key, chunk);
               }
 
-              if (chunk.version !== worldMeshVersion) {
+              if (chunk.version !== bakeVersion) {
                   this.rebuildShadowChunk(chunk, gx, gy, sunDirection, ambientIntensity);
-                  chunk.version = worldMeshVersion;
+                  chunk.version = bakeVersion;
               }
 
               lctx.drawImage(chunk.canvas, gx * this.chunkSize - this.cameraX, gy * this.chunkSize - this.cameraY);
@@ -875,7 +880,7 @@ export class GameplayScene implements Scene {
       }
 
       // --- 2. ACCUMULATE DYNAMIC LIGHTS ---
-      // Point Lights
+      // ... [Dynamic lights logic stays same but we ensure we use 'screen' or 'lighter'] ...
       if (ambientIntensity < 0.95) {
           const lights = LightManager.getInstance().getLights();
           const segments = this.world.getOcclusionSegments(this.cameraX, this.cameraY, w, h);
@@ -887,7 +892,6 @@ export class GameplayScene implements Scene {
               if (screenX < -light.radius || screenX > w + light.radius || 
                   screenY < -light.radius || screenY > h + light.radius) return;
 
-              // Use cached polygon if mesh hasn't changed AND light hasn't moved much
               let polygon = this.lightPolygonCache.get(light.id);
               const lastPos = (light as any)._lastShadowPos || {x: 0, y: 0};
               const lightMoved = Math.abs(light.x - lastPos.x) > 2 || Math.abs(light.y - lastPos.y) > 2;
@@ -921,16 +925,24 @@ export class GameplayScene implements Scene {
           });
       }
 
-      // Cleanup polygon cache occasionally
-      if (this.lightUpdateCounter++ % 120 === 0) {
-          const currentIds = new Set(LightManager.getInstance().getLights().map(l => l.id));
-          for (const id of this.lightPolygonCache.keys()) {
-              if (!currentIds.has(id)) this.lightPolygonCache.delete(id);
-          }
+      // --- 3. UN-SHADOW CASTERS (Mathematically Correct unshadowing for multiply) ---
+      lctx.save();
+      lctx.globalCompositeOperation = 'source-over';
+      lctx.translate(-this.cameraX, -this.cameraY);
+      this.world.renderAsSilhouette(lctx, this.cameraX, this.cameraY, '#ffffff');
+      
+      // Unshadow entities
+      if (this.player) {
+          this.player.renderAsSilhouette(lctx, '#ffffff');
       }
+      this.enemies.forEach(e => {
+          e.renderAsSilhouette(lctx, '#ffffff');
+      });
+      lctx.restore();
 
       this.meshVersion = worldMeshVersion;
 
+      // Final Multiply
       ctx.save();
       ctx.globalCompositeOperation = 'multiply';
       ctx.drawImage(this.lightCanvas, 0, 0);
@@ -947,9 +959,9 @@ export class GameplayScene implements Scene {
     const segments = this.world.getOcclusionSegments(worldX, worldY, this.chunkSize, this.chunkSize);
     
     sctx.save();
-    sctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; 
-    sctx.globalCompositeOperation = 'multiply';
-    const shadowLen = 25 + 125 * (1.0 - Math.pow(intensity, 0.4)); 
+    // Darker, high-contrast shadows
+    sctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; 
+    const shadowLen = 20 + 150 * (1.0 - Math.pow(intensity, 0.4)); 
     
     sctx.beginPath();
     segments.forEach(seg => {

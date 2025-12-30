@@ -185,8 +185,18 @@ export class Player extends Entity {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+      this.renderInternal(ctx, false);
+  }
+
+  public renderAsSilhouette(ctx: CanvasRenderingContext2D, color: string): void {
+      this.renderInternal(ctx, true, color);
+  }
+
+  private renderInternal(ctx: CanvasRenderingContext2D, silhouette: boolean, silColor?: string): void {
     // Render Upgrades FIRST (behind segments)
-    this.upgrades.forEach(u => u.render(ctx));
+    if (!silhouette) {
+        this.upgrades.forEach(u => u.render(ctx));
+    }
 
     // Draw Segments
     for (let i = this.segments.length - 1; i >= 0; i--) {
@@ -195,7 +205,7 @@ export class Player extends Entity {
       
       ctx.save();
       // Apply visual scale bump for segments
-      if (s.visualScale !== 1.0) {
+      if (!silhouette && s.visualScale !== 1.0) {
           ctx.translate(s.x, s.y);
           ctx.scale(s.visualScale, s.visualScale);
           ctx.translate(-s.x, -s.y);
@@ -204,28 +214,35 @@ export class Player extends Entity {
       ctx.beginPath();
       ctx.arc(s.x, s.y, size, 0, Math.PI * 2);
       
-      // Brass Gradient
-      const grad = ctx.createRadialGradient(s.x - 5, s.y - 5, 2, s.x, s.y, size);
-      grad.addColorStop(0, '#ebd5b3'); 
-      grad.addColorStop(0.5, '#b58d4a'); 
-      grad.addColorStop(1, '#594326'); 
+      if (silhouette) {
+          ctx.fillStyle = silColor || '#fff';
+      } else {
+          // Brass Gradient
+          const grad = ctx.createRadialGradient(s.x - 5, s.y - 5, 2, s.x, s.y, size);
+          grad.addColorStop(0, '#ebd5b3'); 
+          grad.addColorStop(0.5, '#b58d4a'); 
+          grad.addColorStop(1, '#594326'); 
+          ctx.fillStyle = grad;
+      }
       
-      ctx.fillStyle = grad;
       ctx.fill();
-      ctx.strokeStyle = '#3d2e1e';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      
+      if (!silhouette) {
+          ctx.strokeStyle = '#3d2e1e';
+          ctx.lineWidth = 2;
+          ctx.stroke();
 
-      // Damage Flash Overlay for segments
-      if (s.damageFlash > 0) {
-          ctx.globalCompositeOperation = 'source-atop';
-          ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (s.damageFlash / 0.2)})`;
-          ctx.fillRect(s.x - s.radius, s.y - s.radius, s.radius * 2, s.radius * 2);
+          // Damage Flash Overlay for segments
+          if (s.damageFlash > 0) {
+              ctx.globalCompositeOperation = 'source-atop';
+              ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (s.damageFlash / 0.2)})`;
+              ctx.fillRect(s.x - s.radius, s.y - s.radius, s.radius * 2, s.radius * 2);
+          }
       }
       ctx.restore();
 
       // Render fire on segment if burning
-      if (s.isOnFire) {
+      if (!silhouette && s.isOnFire) {
           s.renderFire(ctx);
       }
     }
@@ -233,7 +250,7 @@ export class Player extends Entity {
     // Draw Head
     ctx.save();
     // Apply visual scale bump for head
-    if (this.visualScale !== 1.0) {
+    if (!silhouette && this.visualScale !== 1.0) {
         ctx.translate(this.x, this.y);
         ctx.scale(this.visualScale, this.visualScale);
         ctx.translate(-this.x, -this.y);
@@ -242,42 +259,56 @@ export class Player extends Entity {
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     
-    const headGrad = ctx.createRadialGradient(this.x - 5, this.y - 5, 2, this.x, this.y, this.radius);
-    headGrad.addColorStop(0, '#ffdf80');
-    headGrad.addColorStop(0.5, '#cfaa6e');
-    headGrad.addColorStop(1, '#8c6a36');
+    if (silhouette) {
+        ctx.fillStyle = silColor || '#fff';
+    } else {
+        const headGrad = ctx.createRadialGradient(this.x - 5, this.y - 5, 2, this.x, this.y, this.radius);
+        headGrad.addColorStop(0, '#ffdf80');
+        headGrad.addColorStop(0.5, '#cfaa6e');
+        headGrad.addColorStop(1, '#8c6a36');
+        ctx.fillStyle = headGrad;
+    }
     
-    ctx.fillStyle = headGrad;
     ctx.fill();
-    ctx.strokeStyle = '#594326';
-    ctx.lineWidth = 3;
-    ctx.stroke();
 
-    // Damage Flash Overlay for head
-    if (this.damageFlash > 0) {
-        ctx.globalCompositeOperation = 'source-atop';
-        ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
-        ctx.fillRect(this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+    if (!silhouette) {
+        ctx.strokeStyle = '#594326';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // Damage Flash Overlay for head
+        if (this.damageFlash > 0) {
+            ctx.globalCompositeOperation = 'source-atop';
+            ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
+            ctx.fillRect(this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+        }
     }
     ctx.restore();
 
-    // Render fire on head if burning
-    this.renderFire(ctx);
-    
-    // Cannon
-    const cannonLen = 25;
-    ctx.beginPath();
-    ctx.moveTo(this.x, this.y);
-    ctx.lineTo(this.x + Math.cos(this.rotation) * cannonLen, this.y + Math.sin(this.rotation) * cannonLen);
-    ctx.strokeStyle = '#222';
-    ctx.lineWidth = 6;
-    ctx.stroke();
-    
-    ctx.beginPath();
-    ctx.moveTo(this.x, this.y);
-    ctx.lineTo(this.x + Math.cos(this.rotation) * cannonLen, this.y + Math.sin(this.rotation) * cannonLen);
-    ctx.strokeStyle = '#434b4d';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    if (!silhouette) {
+        // Render fire on head if burning
+        this.renderFire(ctx);
+        
+        // Cannon
+        const cannonLen = 25;
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+        
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(cannonLen, 0);
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 6;
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(cannonLen, 0);
+        ctx.strokeStyle = '#434b4d';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+    }
   }
 }

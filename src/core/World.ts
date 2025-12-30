@@ -145,33 +145,43 @@ export class World {
   }
 
   public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
+      this.renderInternal(ctx, cameraX, cameraY, false);
+  }
+
+  public renderAsSilhouette(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, color: string): void {
+      this.renderInternal(ctx, cameraX, cameraY, true, color);
+  }
+
+  private renderInternal(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, silhouette: boolean, silColor?: string): void {
     const viewWidth = ctx.canvas.width;
     const viewHeight = ctx.canvas.height;
     
-    // 1. Render Infinite Charcoal Void & Structural Grid
-    ctx.fillStyle = '#111111';
-    ctx.fillRect(cameraX, cameraY, viewWidth, viewHeight);
+    if (!silhouette) {
+        // 1. Render Infinite Charcoal Void & Structural Grid
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(cameraX, cameraY, viewWidth, viewHeight);
 
-    ctx.beginPath();
-    ctx.strokeStyle = '#1a1a1a';
-    ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = 1;
 
-    const startX = Math.floor(cameraX / this.tileSize) * this.tileSize;
-    const endX = cameraX + viewWidth;
-    const startY = Math.floor(cameraY / this.tileSize) * this.tileSize;
-    const endY = cameraY + viewHeight;
+        const startX = Math.floor(cameraX / this.tileSize) * this.tileSize;
+        const endX = cameraX + viewWidth;
+        const startY = Math.floor(cameraY / this.tileSize) * this.tileSize;
+        const endY = cameraY + viewHeight;
 
-    for (let x = startX; x <= endX; x += this.tileSize) {
-        ctx.moveTo(x, cameraY);
-        ctx.lineTo(x, endY);
+        for (let x = startX; x <= endX; x += this.tileSize) {
+            ctx.moveTo(x, cameraY);
+            ctx.lineTo(x, endY);
+        }
+        for (let y = startY; y <= endY; y += this.tileSize) {
+            ctx.moveTo(cameraX, y);
+            ctx.lineTo(endX, y);
+        }
+        ctx.stroke();
     }
-    for (let y = startY; y <= endY; y += this.tileSize) {
-        ctx.moveTo(cameraX, y);
-        ctx.lineTo(endX, y);
-    }
-    ctx.stroke();
 
-    // 2. Render Walls (Casters) using Cache
+    // 2. Render Walls
     const startCol = Math.floor(cameraX / this.tileSize);
     const endCol = startCol + Math.ceil(viewWidth / this.tileSize) + 1;
     const startRow = Math.floor(cameraY / this.tileSize);
@@ -185,13 +195,17 @@ export class World {
         const tileType = this.tiles[y][x];
         if (tileType === MaterialType.NONE) continue;
 
-        const cacheKey = `${x},${y}`;
-        let cached = this.tileCanvasCache.get(cacheKey);
-        if (!cached) {
-            cached = this.renderTileToCache(x, y, tileType);
+        if (silhouette) {
+            ctx.fillStyle = silColor || '#fff';
+            ctx.fillRect(x * this.tileSize, y * this.tileSize - 8, this.tileSize, this.tileSize + 8);
+        } else {
+            const cacheKey = `${x},${y}`;
+            let cached = this.tileCanvasCache.get(cacheKey);
+            if (!cached) {
+                cached = this.renderTileToCache(x, y, tileType);
+            }
+            ctx.drawImage(cached, x * this.tileSize, y * this.tileSize - 8);
         }
-        
-        ctx.drawImage(cached, x * this.tileSize, y * this.tileSize - 8);
       }
     }
   }
