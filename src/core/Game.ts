@@ -11,6 +11,9 @@ export class Game {
   private sceneManager: SceneManager;
   private inputManager: InputManager;
   private devConsole: DevConsole;
+  private fps: number = 0;
+  private fpsUpdateTimer: number = 0;
+  private frameCount: number = 0;
 
   constructor(containerId: string) {
     const container = document.getElementById(containerId);
@@ -53,6 +56,14 @@ export class Game {
     const deltaTime = (timestamp - this.lastTime) / 1000;
     this.lastTime = timestamp;
 
+    this.frameCount++;
+    this.fpsUpdateTimer += deltaTime;
+    if (this.fpsUpdateTimer >= 0.5) {
+        this.fps = Math.round(this.frameCount / this.fpsUpdateTimer);
+        this.frameCount = 0;
+        this.fpsUpdateTimer = 0;
+    }
+
     this.update(deltaTime);
     this.render();
 
@@ -70,5 +81,13 @@ export class Game {
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     this.sceneManager.render();
+
+    // Render FPS if enabled
+    if (ConfigManager.getInstance().get<boolean>('Debug', 'FpsShow')) {
+        this.ctx.fillStyle = '#0f0';
+        this.ctx.font = 'bold 14px "Share Tech Mono", monospace';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText(`FPS: ${this.fps}`, 10, this.canvas.height - 10);
+    }
   }
 }
