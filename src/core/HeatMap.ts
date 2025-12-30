@@ -309,7 +309,10 @@ export class HeatMap {
 
             if (dist < effectiveRadius) {
                 hData[i] = 0;
-                if (this.worldRef) this.worldRef.markMeshDirty();
+                if (this.worldRef) {
+                    this.worldRef.markMeshDirty();
+                    this.worldRef.invalidateTileCache(tx, ty);
+                }
                 // Once destroyed, clear heat/fire
                 const heat = this.heatData.get(key);
                 if (heat) heat[i] = 0;

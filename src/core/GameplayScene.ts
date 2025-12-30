@@ -85,13 +85,14 @@ export class GameplayScene implements Scene {
   private lightCanvas: HTMLCanvasElement | null = null;
   private lightCtx: CanvasRenderingContext2D | null = null;
   private lightUpdateCounter: number = 0;
-  private lastTime: number = 0;
   private lightPolygonCache: Map<string, Point[]> = new Map();
+  private meshVersion: number = 0;
 
-  constructor(
-    private sceneManager: SceneManager,
-    private inputManager: InputManager
-  ) {
+  // Static Shadow Cache (Ambient + Sun)
+  private shadowChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, version: number }> = new Map();
+  private chunkSize: number = 512;
+
+  constructor(private sceneManager: SceneManager, private inputManager: InputManager) {
     this.physics = new PhysicsEngine();
   }
 
@@ -183,6 +184,10 @@ export class GameplayScene implements Scene {
     this.physics = new PhysicsEngine();
     this.fogCanvas = null;
     this.fogCtx = null;
+    this.lightCanvas = null;
+    this.lightCtx = null;
+    this.shadowChunks.clear();
+    FloorDecalManager.getInstance().clear();
     SoundManager.getInstance().stopLoopSpatial('shoot_laser');
     SoundManager.getInstance().stopLoopSpatial('shoot_ray');
     SoundManager.getInstance().stopLoopSpatial('hit_laser');
@@ -828,55 +833,52 @@ export class GameplayScene implements Scene {
       const lightingEnabled = ConfigManager.getInstance().get<boolean>('Lighting', 'enabled');
       if (!lightingEnabled || !this.lightCanvas || !this.lightCtx || !this.world) return;
 
-      const { ambientIntensity, sunColor, sunDirection } = WorldClock.getInstance().getTimeState();
-      
       const w = ctx.canvas.width;
       const h = ctx.canvas.height;
+      
       if (this.lightCanvas.width !== w || this.lightCanvas.height !== h) {
-          this.lightCanvas.width = w;
-          this.lightCanvas.height = h;
+          this.lightCanvas.width = w; this.lightCanvas.height = h;
       }
 
+      const { ambientIntensity, sunColor, sunDirection } = WorldClock.getInstance().getTimeState();
+      const worldMeshVersion = this.world.getMeshVersion();
+      
+      // --- 1. ACCUMULATE STATIC SHADOWS (CHUNKED) ---
       const lctx = this.lightCtx;
-      lctx.clearRect(0, 0, w, h);
-
-      // 1. Ambient Background (Darkness)
       lctx.fillStyle = sunColor;
-      lctx.globalAlpha = 1.0;
       lctx.fillRect(0, 0, w, h);
 
-      const segments = this.world.getOcclusionSegments(this.cameraX, this.cameraY, w, h);
+      const startGX = Math.floor(this.cameraX / this.chunkSize);
+      const startGY = Math.floor(this.cameraY / this.chunkSize);
+      const endGX = Math.floor((this.cameraX + w) / this.chunkSize);
+      const endGY = Math.floor((this.cameraY + h) / this.chunkSize);
 
-      // 1.5 Sun Shadows (Parallel) - Silhouette Extraction feel
-      if (ambientIntensity > 0.1) {
-          lctx.save();
-          lctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; 
-          lctx.globalCompositeOperation = 'multiply';
-          
-          const shadowLen = 25 + 125 * (1.0 - Math.pow(ambientIntensity, 0.4)); 
-          
-          segments.forEach(seg => {
-              const a = { x: seg.a.x - this.cameraX, y: seg.a.y - this.cameraY };
-              const b = { x: seg.b.x - this.cameraX, y: seg.b.y - this.cameraY };
-              const a2 = { x: a.x + sunDirection.x * shadowLen, y: a.y + sunDirection.y * shadowLen };
-              const b2 = { x: b.x + sunDirection.x * shadowLen, y: b.y + sunDirection.y * shadowLen };
-              
-              lctx.beginPath();
-              lctx.moveTo(a.x, a.y);
-              lctx.lineTo(b.x, b.y);
-              lctx.lineTo(b2.x, b2.y);
-              lctx.lineTo(a2.x, a2.y);
-              lctx.closePath();
-              lctx.fill();
-          });
-          lctx.restore();
+      for (let gy = startGY; gy <= endGY; gy++) {
+          for (let gx = startGX; gx <= endGX; gx++) {
+              const key = `${gx},${gy}`;
+              let chunk = this.shadowChunks.get(key);
+              if (!chunk) {
+                  const canvas = document.createElement('canvas');
+                  canvas.width = this.chunkSize;
+                  canvas.height = this.chunkSize;
+                  chunk = { canvas, ctx: canvas.getContext('2d')!, version: -1 };
+                  this.shadowChunks.set(key, chunk);
+              }
+
+              if (chunk.version !== worldMeshVersion) {
+                  this.rebuildShadowChunk(chunk, gx, gy, sunDirection, ambientIntensity);
+                  chunk.version = worldMeshVersion;
+              }
+
+              lctx.drawImage(chunk.canvas, gx * this.chunkSize - this.cameraX, gy * this.chunkSize - this.cameraY);
+          }
       }
 
-      // 2. Point Lights with Shadows
-      if (ambientIntensity < 0.9) {
+      // --- 2. ACCUMULATE DYNAMIC LIGHTS ---
+      // Point Lights
+      if (ambientIntensity < 0.95) {
           const lights = LightManager.getInstance().getLights();
-          const freq = ConfigManager.getInstance().get<number>('Lighting', 'updateFrequency') || 3;
-          const shouldUpdatePolygons = (this.lightUpdateCounter % freq === 0);
+          const segments = this.world.getOcclusionSegments(this.cameraX, this.cameraY, w, h);
           
           lights.forEach(light => {
               const screenX = light.x - this.cameraX;
@@ -885,10 +887,15 @@ export class GameplayScene implements Scene {
               if (screenX < -light.radius || screenX > w + light.radius || 
                   screenY < -light.radius || screenY > h + light.radius) return;
 
+              // Use cached polygon if mesh hasn't changed AND light hasn't moved much
               let polygon = this.lightPolygonCache.get(light.id);
-              if (shouldUpdatePolygons || !polygon) {
+              const lastPos = (light as any)._lastShadowPos || {x: 0, y: 0};
+              const lightMoved = Math.abs(light.x - lastPos.x) > 2 || Math.abs(light.y - lastPos.y) > 2;
+
+              if (!polygon || worldMeshVersion !== this.meshVersion || lightMoved) {
                   polygon = VisibilitySystem.calculateVisibility({x: light.x, y: light.y}, segments);
                   this.lightPolygonCache.set(light.id, polygon);
+                  (light as any)._lastShadowPos = {x: light.x, y: light.y};
               }
 
               if (polygon.length > 0) {
@@ -897,8 +904,7 @@ export class GameplayScene implements Scene {
                   lctx.globalAlpha = light.intensity * (1.0 - ambientIntensity * 0.5);
 
                   lctx.beginPath();
-                  const first = polygon[0];
-                  lctx.moveTo(first.x - this.cameraX, first.y - this.cameraY);
+                  lctx.moveTo(polygon[0].x - this.cameraX, polygon[0].y - this.cameraY);
                   for (let i = 1; i < polygon.length; i++) {
                       lctx.lineTo(polygon[i].x - this.cameraX, polygon[i].y - this.cameraY);
                   }
@@ -910,23 +916,55 @@ export class GameplayScene implements Scene {
                   grad.addColorStop(1, 'rgba(0,0,0,0)');
                   lctx.fillStyle = grad;
                   lctx.fillRect(screenX - light.radius, screenY - light.radius, light.radius * 2, light.radius * 2);
-                  
                   lctx.restore();
               }
           });
       }
 
-      if (this.lightUpdateCounter % 60 === 0) {
+      // Cleanup polygon cache occasionally
+      if (this.lightUpdateCounter++ % 120 === 0) {
           const currentIds = new Set(LightManager.getInstance().getLights().map(l => l.id));
           for (const id of this.lightPolygonCache.keys()) {
               if (!currentIds.has(id)) this.lightPolygonCache.delete(id);
           }
       }
 
+      this.meshVersion = worldMeshVersion;
+
       ctx.save();
       ctx.globalCompositeOperation = 'multiply';
       ctx.drawImage(this.lightCanvas, 0, 0);
       ctx.restore();
+  }
+
+  private rebuildShadowChunk(chunk: any, gx: number, gy: number, sunDir: {x: number, y: number}, intensity: number): void {
+    const sctx = chunk.ctx;
+    sctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
+    if (intensity <= 0.1 || !this.world) return;
+
+    const worldX = gx * this.chunkSize;
+    const worldY = gy * this.chunkSize;
+    const segments = this.world.getOcclusionSegments(worldX, worldY, this.chunkSize, this.chunkSize);
+    
+    sctx.save();
+    sctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; 
+    sctx.globalCompositeOperation = 'multiply';
+    const shadowLen = 25 + 125 * (1.0 - Math.pow(intensity, 0.4)); 
+    
+    sctx.beginPath();
+    segments.forEach(seg => {
+        const a = { x: seg.a.x - worldX, y: seg.a.y - worldY };
+        const b = { x: seg.b.x - worldX, y: seg.b.y - worldY };
+        const a2 = { x: a.x + sunDir.x * shadowLen, y: a.y + sunDir.y * shadowLen };
+        const b2 = { x: b.x + sunDir.x * shadowLen, y: b.y + sunDir.y * shadowLen };
+        sctx.moveTo(a.x, a.y);
+        sctx.lineTo(b.x, b.y);
+        sctx.lineTo(b2.x, b2.y);
+        sctx.lineTo(a2.x, a2.y);
+        sctx.closePath();
+    });
+    sctx.fill();
+    sctx.restore();
   }
 
   private renderHeatMarks(ctx: CanvasRenderingContext2D): void {

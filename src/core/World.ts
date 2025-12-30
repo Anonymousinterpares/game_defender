@@ -10,7 +10,13 @@ export class World {
 
   // Optimized Shadow Geometry
   private cachedSegments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
+  private spatialGrid: Map<string, {a: {x: number, y: number}, b: {x: number, y: number}}[]> = new Map();
+  private gridCellSize: number = 256;
   private isMeshDirty: boolean = true;
+  private meshVersion: number = 0;
+
+  // Render Caching
+  private tileCanvasCache: Map<string, HTMLCanvasElement> = new Map();
 
   constructor() {
     this.width = ConfigManager.getInstance().get('World', 'width');
@@ -35,7 +41,18 @@ export class World {
   }
 
   public markMeshDirty(): void {
-      this.isMeshDirty = true;
+      if (!this.isMeshDirty) {
+          this.isMeshDirty = true;
+          this.meshVersion++;
+      }
+  }
+
+  public getMeshVersion(): number {
+      return this.meshVersion;
+  }
+
+  public invalidateTileCache(tx: number, ty: number): void {
+      this.tileCanvasCache.delete(`${tx},${ty}`);
   }
 
   private generate(): void {
@@ -68,16 +85,75 @@ export class World {
     return this.height * this.tileSize;
   }
 
+  private renderTileToCache(tx: number, ty: number, tileType: MaterialType): HTMLCanvasElement {
+      const canvas = document.createElement('canvas');
+      canvas.width = this.tileSize;
+      canvas.height = this.tileSize + 16; // Extra space for 3D height
+      const ctx = canvas.getContext('2d')!;
+      
+      let color = '#2a2a2a';
+      let sideColor = '#1a1a1a';
+      let topColor = '#444';
+      
+      switch(tileType) {
+          case MaterialType.WOOD: color = '#5d4037'; sideColor = '#3e2723'; topColor = '#795548'; break;
+          case MaterialType.BRICK: color = '#a52a2a'; sideColor = '#800000'; topColor = '#c62828'; break;
+          case MaterialType.STONE: color = '#616161'; sideColor = '#424242'; topColor = '#9e9e9e'; break;
+          case MaterialType.METAL: color = '#37474f'; sideColor = '#263238'; topColor = '#546e7a'; break;
+          case MaterialType.INDESTRUCTIBLE: color = '#1a1a1a'; sideColor = '#000000'; topColor = '#333333'; break;
+      }
+
+      const h = 8;
+      const subDiv = 10;
+      const subSize = this.tileSize / subDiv;
+      const hData = this.heatMapRef ? this.heatMapRef.getTileHP(tx, ty) : null;
+
+      if (hData) {
+          for (let sy = 0; sy < subDiv; sy++) {
+              for (let sx = 0; sx < subDiv; sx++) {
+                  const idx = sy * subDiv + sx;
+                  if (hData[idx] > 0) {
+                      const lx = sx * subSize;
+                      const ly = sy * subSize + h;
+                      // Side
+                      ctx.fillStyle = sideColor;
+                      ctx.fillRect(lx, ly, subSize + 0.3, subSize + 0.3);
+                      // Top
+                      ctx.fillStyle = color;
+                      ctx.fillRect(lx, ly - h, subSize + 0.3, subSize + 0.3);
+                      // Highlight
+                      if (sy === 0 || sx === 0) {
+                          ctx.fillStyle = topColor;
+                          if (sy === 0) ctx.fillRect(lx, ly - h, subSize, 1);
+                          if (sx === 0) ctx.fillRect(lx, ly - h, 1, subSize);
+                      }
+                  }
+              }
+          }
+      } else {
+          ctx.fillStyle = sideColor;
+          ctx.fillRect(0, h, this.tileSize, this.tileSize);
+          ctx.fillStyle = color;
+          ctx.fillRect(0, 0, this.tileSize, this.tileSize);
+          ctx.fillStyle = topColor;
+          ctx.fillRect(0, 0, this.tileSize, 2);
+          ctx.fillRect(0, 0, 2, this.tileSize);
+      }
+
+      this.tileCanvasCache.set(`${tx},${ty}`, canvas);
+      return canvas;
+  }
+
   public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
     const viewWidth = ctx.canvas.width;
     const viewHeight = ctx.canvas.height;
     
     // 1. Render Infinite Charcoal Void & Structural Grid
-    ctx.fillStyle = '#111111'; // Charcoal substrate
+    ctx.fillStyle = '#111111';
     ctx.fillRect(cameraX, cameraY, viewWidth, viewHeight);
 
     ctx.beginPath();
-    ctx.strokeStyle = '#1a1a1a'; // Dark grid lines
+    ctx.strokeStyle = '#1a1a1a';
     ctx.lineWidth = 1;
 
     const startX = Math.floor(cameraX / this.tileSize) * this.tileSize;
@@ -95,135 +171,45 @@ export class World {
     }
     ctx.stroke();
 
-    // 2. Render Walls (Casters)
+    // 2. Render Walls (Casters) using Cache
     const startCol = Math.floor(cameraX / this.tileSize);
-    const endCol = startCol + (viewWidth / this.tileSize) + 1;
+    const endCol = startCol + Math.ceil(viewWidth / this.tileSize) + 1;
     const startRow = Math.floor(cameraY / this.tileSize);
-    const endRow = startRow + (viewHeight / this.tileSize) + 1;
+    const endRow = startRow + Math.ceil(viewHeight / this.tileSize) + 1;
 
     for (let y = startRow; y <= endRow; y++) {
       if (y < 0 || y >= this.height) continue;
-      
       for (let x = startCol; x <= endCol; x++) {
         if (x < 0 || x >= this.width) continue;
 
         const tileType = this.tiles[y][x];
-        const worldX = x * this.tileSize;
-        const worldY = y * this.tileSize;
+        if (tileType === MaterialType.NONE) continue;
 
-        if (tileType !== MaterialType.NONE) {
-          let color = '#2a2a2a';
-          let sideColor = '#1a1a1a';
-          let topColor = '#444';
-          
-          switch(tileType) {
-              case MaterialType.WOOD: color = '#5d4037'; sideColor = '#3e2723'; topColor = '#795548'; break;
-              case MaterialType.BRICK: color = '#a52a2a'; sideColor = '#800000'; topColor = '#c62828'; break;
-              case MaterialType.STONE: color = '#616161'; sideColor = '#424242'; topColor = '#9e9e9e'; break;
-              case MaterialType.METAL: color = '#37474f'; sideColor = '#263238'; topColor = '#546e7a'; break;
-              case MaterialType.INDESTRUCTIBLE: color = '#1a1a1a'; sideColor = '#000000'; topColor = '#333333'; break;
-          }
-
-          const isMostlyDestroyed = this.heatMapRef ? this.heatMapRef.isTileMostlyDestroyed(x, y) : false;
-          
-          if (!isMostlyDestroyed) {
-              const h = 8;
-              const subDiv = 10;
-              const subSize = this.tileSize / subDiv;
-              const hasData = this.heatMapRef && this.heatMapRef.hasTileData(x, y);
-
-              if (hasData) {
-                  // Damaged tile: Draw both side and top sub-tile by sub-tile
-                  for (let sy = 0; sy < subDiv; sy++) {
-                      for (let sx = 0; sx < subDiv; sx++) {
-                          const subWorldX = worldX + sx * subSize;
-                          const subWorldY = worldY + sy * subSize;
-                          
-                          if (!this.heatMapRef.isSubTileDestroyed(subWorldX + subSize/2, subWorldY + subSize/2)) {
-                              // Side shadow
-                              ctx.fillStyle = sideColor;
-                              ctx.fillRect(subWorldX, subWorldY, subSize + 0.2, subSize + 0.2);
-                              
-                              // Top face
-                              ctx.fillStyle = color;
-                              ctx.fillRect(subWorldX, subWorldY - h, subSize + 0.2, subSize + 0.2);
-                              
-                              // Optional: Small top highlight for each sub-tile edge
-                              if (sy === 0 || sx === 0) {
-                                  ctx.fillStyle = topColor;
-                                  if (sy === 0) ctx.fillRect(subWorldX, subWorldY - h, subSize, 1);
-                                  if (sx === 0) ctx.fillRect(subWorldX, subWorldY - h, 1, subSize);
-                              }
-                          }
-                      }
-                  }
-              } else {
-                  // Healthy tile: Fast path draw big rects
-                  ctx.fillStyle = sideColor;
-                  ctx.fillRect(worldX, worldY, this.tileSize, this.tileSize);
-                  ctx.fillStyle = color;
-                  ctx.fillRect(worldX, worldY - h, this.tileSize, this.tileSize);
-                  ctx.fillStyle = topColor;
-                  ctx.fillRect(worldX, worldY - h, this.tileSize, 2);
-                  ctx.fillRect(worldX, worldY - h, 2, this.tileSize);
-              }
-          } else {
-              const subDiv = 10;
-              const subSize = this.tileSize / subDiv;
-              ctx.fillStyle = sideColor;
-              for (let i = 0; i < 100; i++) {
-                  const sx = i % subDiv;
-                  const sy = Math.floor(i / subDiv);
-                  if (!this.heatMapRef.isSubTileDestroyed(worldX + sx * subSize + subSize/2, worldY + sy * subSize + subSize/2)) {
-                      ctx.fillRect(worldX + sx * subSize, worldY + sy * subSize, subSize + 0.5, subSize + 0.5);
-                  }
-              }
-          }
+        const cacheKey = `${x},${y}`;
+        let cached = this.tileCanvasCache.get(cacheKey);
+        if (!cached) {
+            cached = this.renderTileToCache(x, y, tileType);
         }
+        
+        ctx.drawImage(cached, x * this.tileSize, y * this.tileSize - 8);
       }
     }
   }
 
-  // --- Collision Helpers ---
-
   public isWall(x: number, y: number): boolean {
-    // Convert world coords to grid coords
     const gx = Math.floor(x / this.tileSize);
     const gy = Math.floor(y / this.tileSize);
-    
-    // Check bounds
-    if (gx < 0 || gx >= this.width || gy < 0 || gy >= this.height) {
-      return true; // Outside world is a wall
-    }
-
+    if (gx < 0 || gx >= this.width || gy < 0 || gy >= this.height) return true;
     if (this.tiles[gy][gx] === MaterialType.NONE) return false;
-    
-    // Check sub-tile destruction
-    if (this.heatMapRef && this.heatMapRef.isSubTileDestroyed(x, y)) {
-        return false;
-    }
-
+    if (this.heatMapRef && this.heatMapRef.isSubTileDestroyed(x, y)) return false;
     return true;
-  }
-
-  public resolveCollision(x: number, y: number, radius: number): { x: number, y: number, collided: boolean } {
-    // Simple resolution: If inside wall, push back?
-    // Better: Check future position.
-    
-    // But for this method, we just check if (x,y) is valid.
-    if (this.isWall(x, y)) return { x, y, collided: true };
-    
-    // Check circle vs tile edges is harder.
-    // Simplified: Check center point.
-    // Even better: Check 4 points around circle.
-    
-    return { x, y, collided: false };
   }
 
   private rebuildMesh(): void {
       const segments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
       const ts = this.tileSize;
 
+      // ... [Internal segment generation remains logicially similar but we will index them] ...
       // 1. Process Healthy Tiles (Greedy horizontal merging)
       const visitedH = new Set<string>();
       for (let y = 0; y < this.height; y++) {
@@ -254,7 +240,7 @@ export class World {
           }
       }
 
-      // 2. Process Damaged Tiles (Intra-tile edge merging)
+      // 2. Damaged Tiles
       for (let y = 0; y < this.height; y++) {
           for (let x = 0; x < this.width; x++) {
               if (this.tiles[y][x] === MaterialType.NONE) continue;
@@ -303,6 +289,24 @@ export class World {
       }
 
       this.cachedSegments = segments;
+      
+      // Update Spatial Grid
+      this.spatialGrid.clear();
+      segments.forEach(seg => {
+          const gx1 = Math.floor(Math.min(seg.a.x, seg.b.x) / this.gridCellSize);
+          const gy1 = Math.floor(Math.min(seg.a.y, seg.b.y) / this.gridCellSize);
+          const gx2 = Math.floor(Math.max(seg.a.x, seg.b.x) / this.gridCellSize);
+          const gy2 = Math.floor(Math.max(seg.a.y, seg.b.y) / this.gridCellSize);
+
+          for (let gy = gy1; gy <= gy2; gy++) {
+              for (let gx = gx1; gx <= gx2; gx++) {
+                  const key = `${gx},${gy}`;
+                  if (!this.spatialGrid.has(key)) this.spatialGrid.set(key, []);
+                  this.spatialGrid.get(key)!.push(seg);
+              }
+          }
+      });
+
       this.isMeshDirty = false;
   }
 
@@ -311,12 +315,18 @@ export class World {
           this.rebuildMesh();
       }
 
-      const padding = 200;
-      return this.cachedSegments.filter(s => {
-          return (s.a.x > cameraX - padding && s.a.x < cameraX + viewWidth + padding &&
-                  s.a.y > cameraY - padding && s.a.y < cameraY + viewHeight + padding) ||
-                 (s.b.x > cameraX - padding && s.b.x < cameraX + viewWidth + padding &&
-                  s.b.y > cameraY - padding && s.b.y < cameraY + viewHeight + padding);
-      });
+      const gx1 = Math.floor((cameraX - 64) / this.gridCellSize);
+      const gy1 = Math.floor((cameraY - 64) / this.gridCellSize);
+      const gx2 = Math.floor((cameraX + viewWidth + 64) / this.gridCellSize);
+      const gy2 = Math.floor((cameraY + viewHeight + 64) / this.gridCellSize);
+
+      const result: Set<{a: {x: number, y: number}, b: {x: number, y: number}}> = new Set();
+      for (let gy = gy1; gy <= gy2; gy++) {
+          for (let gx = gx1; gx <= gx2; gx++) {
+              const cell = this.spatialGrid.get(`${gx},${gy}`);
+              if (cell) cell.forEach(s => result.add(s));
+          }
+      }
+      return Array.from(result);
   }
 }
