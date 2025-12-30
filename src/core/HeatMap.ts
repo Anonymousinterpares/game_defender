@@ -1,3 +1,6 @@
+import { SoundManager } from './SoundManager';
+import { ConfigManager } from '../config/MasterConfig';
+
 export enum MaterialType {
     NONE = 0,
     WOOD = 1,
@@ -40,8 +43,32 @@ export class HeatMap {
     private lastSimTime: number = 0;
     private simInterval: number = 3; 
     private frameCount: number = 0;
+    private fireAsset: HTMLImageElement | null = null;
 
-    constructor(private tileSize: number) {}
+    constructor(private tileSize: number) {
+        // Pre-load fire spritesheet if configured
+        const useSprite = ConfigManager.getInstance().get<boolean>('Fire', 'isFireSpritesheet');
+        if (useSprite) {
+            this.fireAsset = new Image();
+            this.fireAsset.src = '/assets/visuals/fire_spritesheet.png';
+            this.fireAsset.onerror = () => {
+                console.warn("Fire spritesheet not found, falling back to procedural.");
+                this.fireAsset = null;
+            };
+        }
+    }
+
+    public isSubTileBurning(worldX: number, worldY: number): boolean {
+        const tx = Math.floor(worldX / this.tileSize);
+        const ty = Math.floor(worldY / this.tileSize);
+        const fData = this.fireData.get(`${tx},${ty}`);
+        if (!fData) return false;
+
+        const subX = Math.floor((worldX % this.tileSize) / (this.tileSize / this.subDiv));
+        const subY = Math.floor((worldY % this.tileSize) / (this.tileSize / this.subDiv));
+        const idx = subY * this.subDiv + subX;
+        return fData[idx] > 0.5; // Burning threshold
+    }
 
     public setMaterial(tx: number, ty: number, material: MaterialType): void {
         const key = `${tx},${ty}`;
@@ -209,6 +236,7 @@ export class HeatMap {
 
         const effectiveDT = dt * this.simInterval;
         const toRemove: string[] = [];
+        const soundMgr = SoundManager.getInstance();
 
         this.activeTiles.forEach(key => {
             const data = this.heatData.get(key)!;
@@ -219,9 +247,12 @@ export class HeatMap {
             if (!this.whiteHeatTime.has(key)) this.whiteHeatTime.set(key, wData);
 
             let hasActivity = false;
+            let burningSubTiles = 0;
 
             const nextData = new Float32Array(data);
             const nextFire = fData ? new Float32Array(fData) : null;
+
+            const [tx, ty] = key.split(',').map(Number);
 
             for (let y = 0; y < this.subDiv; y++) {
                 for (let x = 0; x < this.subDiv; x++) {
@@ -263,6 +294,7 @@ export class HeatMap {
                     if (nextFire && mData && mData[idx] === MaterialType.WOOD) {
                         if (nextFire[idx] > 0) {
                             hasActivity = true;
+                            burningSubTiles++;
                             nextFire[idx] += effectiveDT * 0.5; // Fire grows
                             nextData[idx] = Math.min(1.0, nextData[idx] + nextFire[idx] * 0.2); // Fire heats up tile
                             
@@ -289,6 +321,13 @@ export class HeatMap {
                         }
                     }
                 }
+            }
+
+            // Trigger fire sound for this tile if it's burning
+            if (burningSubTiles > 0) {
+                const worldX = tx * this.tileSize + this.tileSize / 2;
+                const worldY = ty * this.tileSize + this.tileSize / 2;
+                soundMgr.updateAreaSound('fire', worldX, worldY, burningSubTiles);
             }
             
             data.set(nextData);
@@ -357,13 +396,31 @@ export class HeatMap {
                     }
 
                     if (fire > 0) {
-                        const pulse = 0.8 + Math.sin(time * 30 + i) * 0.2;
-                        ctx.fillStyle = `rgba(255, ${Math.floor(100 + Math.random() * 100)}, 0, ${pulse})`;
-                        ctx.fillRect(rx, ry, subSize + 0.5, subSize + 0.5);
-                        // Sparks
+                        if (this.fireAsset) {
+                            // Approach B: Sprite-sheet
+                            const frameCount = 16; // Assuming 4x4
+                            const frame = Math.floor((time * 15 + i) % frameCount);
+                            const fw = this.fireAsset.width / 4;
+                            const fh = this.fireAsset.height / 4;
+                            const fx = (frame % 4) * fw;
+                            const fy = Math.floor(frame / 4) * fh;
+                            
+                            ctx.drawImage(this.fireAsset, fx, fy, fw, fh, rx - subSize*0.5, ry - subSize, subSize*2, subSize*2);
+                        } else {
+                            // Approach A: Procedural Fallback
+                            const pulse = 0.8 + Math.sin(time * 30 + i) * 0.2;
+                            ctx.fillStyle = `rgba(255, ${Math.floor(100 + Math.random() * 100)}, 0, ${pulse})`;
+                            ctx.fillRect(rx, ry, subSize + 0.5, subSize + 0.5);
+                            
+                            // More detailed flame-like particles for Procedural
+                            ctx.fillStyle = `rgba(255, ${Math.floor(200 + Math.random() * 55)}, 0, 0.8)`;
+                            ctx.fillRect(rx + subSize*0.2, ry - subSize*0.5*fire, subSize*0.6, subSize*fire);
+                        }
+                        
+                        // Sparks (shared)
                         if (Math.random() < 0.1) {
                             ctx.fillStyle = '#fff';
-                            ctx.fillRect(rx + Math.random() * subSize, ry - Math.random() * 5, 1, 1);
+                            ctx.fillRect(rx + Math.random() * subSize, ry - Math.random() * 10, 1, 1);
                         }
                     }
                 }

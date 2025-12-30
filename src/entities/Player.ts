@@ -64,6 +64,10 @@ export class Player extends Entity {
   public refreshConfig(): void {
     this.baseSpeedStat = ConfigManager.getInstance().get<number>('Player', 'baseSpeed');
     this.turnSpeed = ConfigManager.getInstance().get<number>('Player', 'turnSpeed');
+    this.maxHealth = ConfigManager.getInstance().get<number>('Player', 'maxHealth');
+    // Heal to max if it's the first load or if we want to reset
+    if (this.health === 100 && this.maxHealth !== 100) this.health = this.maxHealth;
+    
     // We don't overwrite bodyLength from config if it has grown in-game
     // Unless it's the first load
     if (this.segments.length === 0) {
@@ -85,6 +89,12 @@ export class Player extends Entity {
   }
 
   update(dt: number, enemies: Entity[] = [], spawnProjectile: (x: number, y: number, angle: number) => void = () => {}): void {
+    const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
+    const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
+    this.handleFireLogic(dt, fireDPS, baseExtinguish);
+
+    if (!this.active) return;
+
     // 1. MOUSE AIMING
     const screenX = window.innerWidth / 2;
     const screenY = window.innerHeight / 2;

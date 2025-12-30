@@ -1,19 +1,24 @@
 import { Entity } from '../core/Entity';
 import { Player } from './Player';
+import { ConfigManager } from '../config/MasterConfig';
 
 export class Enemy extends Entity {
-  public health: number = 20;
-  public active: boolean = true;
   private speed: number = 150;
 
   constructor(x: number, y: number) {
     super(x, y);
     this.color = '#ff3333'; // Red
     this.radius = 12;
+    this.health = 20;
+    this.maxHealth = 20;
   }
 
   update(dt: number, player?: Player): void {
-    if (!player) return;
+    const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
+    const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
+    this.handleFireLogic(dt, fireDPS, baseExtinguish);
+
+    if (!player || !this.active) return;
 
     // Basic Chase AI
     const dx = player.x - this.x;
@@ -25,11 +30,11 @@ export class Enemy extends Entity {
       this.vy = (dy / dist) * this.speed;
       this.rotation = Math.atan2(dy, dx);
     }
-
-    // Position update is handled by PhysicsEngine
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+    if (!this.active) return;
+    
     // Body (Iron/Rust)
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
@@ -57,12 +62,5 @@ export class Enemy extends Entity {
     ctx.fill();
     
     ctx.shadowBlur = 0; // Reset
-  }
-
-  takeDamage(amount: number): void {
-    this.health -= amount;
-    if (this.health <= 0) {
-      this.active = false;
-    }
   }
 }

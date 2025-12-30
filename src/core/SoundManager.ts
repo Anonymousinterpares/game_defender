@@ -9,6 +9,8 @@ interface SpatialVoice {
     filter: BiquadFilterNode;
     x: number;
     y: number;
+    lastSeen?: number; // Persistence for area sounds
+    intensity?: number; // Current intensity for area sounds
 }
 
 interface QueuedSound {
@@ -39,6 +41,10 @@ export class SoundManager {
   private soundQueue: Map<string, QueuedSound> = new Map();
   private readonly CLUSTER_GRID_SIZE = 64;
 
+  // Area Sound Management (for persistent effects like fire)
+  private areaSoundQueue: Map<string, { x: number, y: number, intensity: number }> = new Map();
+  private activeAreaLoops: Map<string, SpatialVoice> = new Map();
+
   private constructor() {}
 
   public static getInstance(): SoundManager {
@@ -63,6 +69,121 @@ export class SoundManager {
 
   public setWorld(world: World): void {
       this.world = world;
+  }
+
+  public updateAreaSound(name: string, x: number, y: number, intensity: number): void {
+    const clusterSize = ConfigManager.getInstance().get<number>('Fire', 'soundClusterSize') || 128;
+    const gx = Math.floor(x / clusterSize);
+    const gy = Math.floor(y / clusterSize);
+    const key = `${name}_${gx}_${gy}`;
+
+    const existing = this.areaSoundQueue.get(key);
+    if (existing) {
+        // Weighted centroid position
+        const totalIntensity = existing.intensity + intensity;
+        existing.x = (existing.x * existing.intensity + x * intensity) / totalIntensity;
+        existing.y = (existing.y * existing.intensity + y * intensity) / totalIntensity;
+        existing.intensity = totalIntensity;
+    } else {
+        this.areaSoundQueue.set(key, { x, y, intensity });
+    }
+  }
+
+  private processAreaSounds(): void {
+    if (!this.audioCtx || !this.masterGain || !this.world) return;
+
+    const now = this.audioCtx.currentTime;
+    const clusterVolScale = ConfigManager.getInstance().get<number>('Fire', 'volumePerSubTile') || 0.005;
+    const maxClusterVol = ConfigManager.getInstance().get<number>('Fire', 'maxClusterVolume') || 0.8;
+    const ttl = ConfigManager.getInstance().get<number>('Fire', 'soundTTL') || 0.2;
+
+    // 1. Update active loops from the queue (new data available)
+    this.areaSoundQueue.forEach((data, key) => {
+        const soundName = key.split('_')[0];
+        let voice = this.activeAreaLoops.get(key);
+
+        if (!voice) {
+            const filter = this.audioCtx!.createBiquadFilter();
+            filter.type = 'lowpass';
+            const panner = this.audioCtx!.createStereoPanner();
+            const gain = this.audioCtx!.createGain();
+            gain.gain.value = 0;
+
+            filter.connect(panner);
+            panner.connect(gain);
+            gain.connect(this.masterGain!);
+
+            const buffer = this.sounds.get(soundName);
+            let source: AudioBufferSourceNode | OscillatorNode;
+
+            if (buffer) {
+                const bSource = this.audioCtx!.createBufferSource();
+                bSource.buffer = buffer;
+                bSource.loop = true;
+                source = bSource;
+            } else {
+                const osc = this.audioCtx!.createOscillator();
+                osc.type = 'sine';
+                osc.frequency.value = 200;
+                source = osc;
+            }
+
+            source.connect(filter);
+            source.start();
+
+            voice = { source, gain, panner, filter, x: data.x, y: data.y, lastSeen: now, intensity: data.intensity };
+            this.activeAreaLoops.set(key, voice);
+        } else {
+            // New simulation update received
+            voice.x = data.x;
+            voice.y = data.y;
+            voice.intensity = data.intensity;
+            voice.lastSeen = now;
+        }
+    });
+
+    // 2. Process all active loops (even if queue was empty this frame)
+    this.activeAreaLoops.forEach((voice, key) => {
+        const timeSinceSeen = now - (voice.lastSeen || 0);
+
+        if (timeSinceSeen > ttl) {
+            // It's been too long without an update - fire is probably out
+            voice.gain.gain.setTargetAtTime(0, now, 0.1);
+            if (timeSinceSeen > ttl + 0.5) {
+                voice.source.stop();
+                this.activeAreaLoops.delete(key);
+            }
+        } else {
+            // Loop is still active (either updated this frame or within TTL window)
+            const paths = SoundRaycaster.calculateAudiblePaths(voice.x, voice.y, this.listenerX, this.listenerY, this.world!);
+            
+            if (paths.length === 0) {
+                voice.gain.gain.setTargetAtTime(0, now, 0.1);
+            } else {
+                let totalEnergy = 0;
+                let weightedPan = 0;
+                let minCutoff = 20000;
+                for (const p of paths) {
+                    totalEnergy += p.volume * p.volume;
+                    weightedPan += p.pan * p.volume;
+                    minCutoff = Math.min(minCutoff, p.filterCutoff);
+                }
+
+                const spatialVol = Math.sqrt(totalEnergy);
+                const intensityVol = Math.min(maxClusterVol, (voice.intensity || 0) * clusterVolScale);
+                const finalVol = spatialVol * intensityVol;
+
+                const totalPathVol = paths.reduce((acc, p) => acc + p.volume, 0);
+                const finalPan = totalPathVol > 0 ? weightedPan / totalPathVol : 0;
+
+                voice.gain.gain.setTargetAtTime(finalVol, now, 0.1);
+                voice.panner.pan.setTargetAtTime(finalPan, now, 0.1);
+                voice.filter.frequency.setTargetAtTime(minCutoff, now, 0.1);
+            }
+        }
+    });
+
+    this.areaSoundQueue.clear();
   }
 
   public queueSoundSpatial(name: string, x: number, y: number): void {
@@ -109,7 +230,8 @@ export class SoundManager {
       this.listenerX = x;
       this.listenerY = y;
       
-      this.processQueue(); // Automatically process queued hits every frame
+      this.processQueue(); 
+      this.processAreaSounds(); // Process looping area effects (like fire)
 
       // Update spatial loops
       if (this.world) {

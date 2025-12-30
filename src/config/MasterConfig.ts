@@ -109,6 +109,17 @@ export const MasterConfig: GameConfigSchema = {
     vol_collect_coin: { value: 0.4, type: 'number', description: 'Collect Coin Volume' },
     vol_ping: { value: 0.1, type: 'number', description: 'Radar Ping Volume' }
   },
+  Fire: {
+    dps: { value: 10, type: 'number', description: 'Damage per second when burning' },
+    spreadChance: { value: 0.1, type: 'number', description: 'Chance to spread fire to sub-tile/neighbor' },
+    catchChance: { value: 0.5, type: 'number', description: 'Chance to catch fire when touching burning object (per sec)' },
+    baseExtinguishChance: { value: 0.5, type: 'number', description: 'Initial chance to stop burning (per sec)' },
+    isFireSpritesheet: { value: false, type: 'boolean', description: 'Use sprite-based fire animations' },
+    soundClusterSize: { value: 128, type: 'number', description: 'Grid size for clustering fire sounds' },
+    volumePerSubTile: { value: 0.005, type: 'number', description: 'Volume contribution per burning sub-tile' },
+    maxClusterVolume: { value: 0.8, type: 'number', description: 'Maximum volume for a single fire cluster' },
+    soundTTL: { value: 0.2, type: 'number', description: 'Time (s) to keep area sound alive between updates' }
+  },
   Keybindings: {
       openDock: { value: 'KeyP', type: 'string', description: 'Open Dock/Shop' }
   }

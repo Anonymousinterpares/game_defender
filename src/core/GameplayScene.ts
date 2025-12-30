@@ -108,6 +108,7 @@ export class GameplayScene implements Scene {
     sm.loadSound('explosion_large', '/assets/sounds/explosion_large.wav');
     sm.loadSound('collect_coin', '/assets/sounds/collect_coin.wav');
     sm.loadSound('ui_click', '/assets/sounds/ui_click.wav');
+    sm.loadSound('fire', '/assets/sounds/fire.wav');
 
     // Automatically discover and load all material hit variants
     sm.discoverMaterialVariants(['wood', 'brick', 'stone', 'metal', 'indestructible']);
@@ -587,6 +588,40 @@ export class GameplayScene implements Scene {
     if (this.player) {
       const screenW = window.innerWidth;
       const screenH = window.innerHeight;
+
+      // Check environment fire
+      this.player.getAllBodies().forEach(b => {
+          const eb = b as Entity;
+          if (this.heatMap && this.heatMap.isSubTileBurning(eb.x, eb.y)) {
+              this.tryIgniteEntity(eb, dt);
+          }
+      });
+      
+      this.enemies.forEach(e => {
+          if (this.heatMap && this.heatMap.isSubTileBurning(e.x, e.y)) {
+              this.tryIgniteEntity(e, dt);
+          }
+      });
+
+      // Entity vs Entity fire spread
+      const allBurning = this.entities.filter(e => e.isOnFire && e.active);
+      const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
+
+      allBurning.forEach(source => {
+          this.entities.forEach(target => {
+              if (source !== target && target.active && !target.isOnFire) {
+                  const dx = source.x - target.x;
+                  const dy = source.y - target.y;
+                  const dist = Math.sqrt(dx*dx + dy*dy);
+                  if (dist < source.radius + target.radius) {
+                      if (Math.random() < catchChance * dt) {
+                          target.isOnFire = true;
+                      }
+                  }
+              }
+          });
+      });
+
       this.cameraX = this.player.x - screenW / 2;
       this.cameraY = this.player.y - screenH / 2;
     }
@@ -948,6 +983,14 @@ export class GameplayScene implements Scene {
       
       if (weapon === ConfigManager.getInstance().get<string>('Player', 'activeWeapon') && this.player) {
         SoundManager.getInstance().playSoundSpatial('weapon_reload', this.player.x, this.player.y);
+      }
+  }
+
+  private tryIgniteEntity(e: Entity, dt: number): void {
+      if (e.isOnFire) return;
+      const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
+      if (Math.random() < catchChance * dt) {
+          e.isOnFire = true;
       }
   }
 
