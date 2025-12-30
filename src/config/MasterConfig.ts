@@ -114,7 +114,7 @@ export const MasterConfig: GameConfigSchema = {
     spreadChance: { value: 0.1, type: 'number', description: 'Chance to spread fire to sub-tile/neighbor' },
     catchChance: { value: 0.5, type: 'number', description: 'Chance to catch fire when touching burning object (per sec)' },
     baseExtinguishChance: { value: 0.5, type: 'number', description: 'Initial chance to stop burning (per sec)' },
-    isFireSpritesheet: { value: false, type: 'boolean', description: 'Use sprite-based fire animations' },
+    isFireSpritesheet: { value: true, type: 'boolean', description: 'Use sprite-based fire animations' },
     soundClusterSize: { value: 128, type: 'number', description: 'Grid size for clustering fire sounds' },
     volumePerSubTile: { value: 0.005, type: 'number', description: 'Volume contribution per burning sub-tile' },
     maxClusterVolume: { value: 0.8, type: 'number', description: 'Maximum volume for a single fire cluster' },

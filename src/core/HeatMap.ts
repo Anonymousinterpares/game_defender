@@ -50,7 +50,7 @@ export class HeatMap {
         const useSprite = ConfigManager.getInstance().get<boolean>('Fire', 'isFireSpritesheet');
         if (useSprite) {
             this.fireAsset = new Image();
-            this.fireAsset.src = '/assets/visuals/fire_spritesheet.png';
+            this.fireAsset.src = '/assets/visuals/fire_spritesheet.svg';
             this.fireAsset.onerror = () => {
                 console.warn("Fire spritesheet not found, falling back to procedural.");
                 this.fireAsset = null;
@@ -397,13 +397,13 @@ export class HeatMap {
 
                     if (fire > 0) {
                         if (this.fireAsset) {
-                            // Approach B: Sprite-sheet
-                            const frameCount = 16; // Assuming 4x4
+                            // Approach B: Sprite-sheet (8-frame linear)
+                            const frameCount = 8;
                             const frame = Math.floor((time * 15 + i) % frameCount);
-                            const fw = this.fireAsset.width / 4;
-                            const fh = this.fireAsset.height / 4;
-                            const fx = (frame % 4) * fw;
-                            const fy = Math.floor(frame / 4) * fh;
+                            const fw = this.fireAsset.width / frameCount;
+                            const fh = this.fireAsset.height;
+                            const fx = frame * fw;
+                            const fy = 0;
                             
                             ctx.drawImage(this.fireAsset, fx, fy, fw, fh, rx - subSize*0.5, ry - subSize, subSize*2, subSize*2);
                         } else {
