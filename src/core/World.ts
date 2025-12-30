@@ -107,6 +107,8 @@ export class World {
       const subDiv = 10;
       const subSize = this.tileSize / subDiv;
       const hData = this.heatMapRef ? this.heatMapRef.getTileHP(tx, ty) : null;
+      const heatData = this.heatMapRef ? this.heatMapRef.getTileHeat(tx, ty) : null;
+      const sData = this.heatMapRef ? this.heatMapRef.getTileScorch(tx, ty) : null;
 
       if (hData) {
           for (let sy = 0; sy < subDiv; sy++) {
@@ -115,13 +117,31 @@ export class World {
                   if (hData[idx] > 0) {
                       const lx = sx * subSize;
                       const ly = sy * subSize + h;
-                      // Side
+                      
+                      // 1. Render Side & Top
                       ctx.fillStyle = sideColor;
                       ctx.fillRect(lx, ly, subSize + 0.3, subSize + 0.3);
-                      // Top
                       ctx.fillStyle = color;
                       ctx.fillRect(lx, ly - h, subSize + 0.3, subSize + 0.3);
-                      // Highlight
+                      
+                      // 2. Render Scorch Marks (Cached)
+                      if (sData && sData[idx]) {
+                          ctx.fillStyle = tileType === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
+                          ctx.fillRect(lx, ly - h, subSize + 0.3, subSize + 0.3);
+                      }
+
+                      // 3. Render Static Heat Glow (Low intensity heat bakes into cache)
+                      if (heatData && heatData[idx] > 0.05) {
+                          const heat = heatData[idx];
+                          // Only bake if not "white hot" (animated heat stays in real-time)
+                          if (heat < 0.6) {
+                              const r = Math.floor(100 + 155 * (heat / 0.4));
+                              ctx.fillStyle = `rgba(${r}, 0, 0, ${0.2 + heat * 0.4})`;
+                              ctx.fillRect(lx, ly - h, subSize + 0.3, subSize + 0.3);
+                          }
+                      }
+
+                      // 4. Highlights
                       if (sy === 0 || sx === 0) {
                           ctx.fillStyle = topColor;
                           if (sy === 0) ctx.fillRect(lx, ly - h, subSize, 1);

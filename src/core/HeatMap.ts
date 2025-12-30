@@ -283,7 +283,10 @@ export class HeatMap {
             sData = new Uint8Array(this.subDiv * this.subDiv);
             this.scorchData.set(key, sData);
         }
-        sData[idx] = 1;
+        if (sData[idx] === 0) {
+            sData[idx] = 1;
+            if (this.worldRef) this.worldRef.invalidateTileCache(tx, ty);
+        }
     }
 
     private ignite(tx: number, ty: number, idx: number): void {
@@ -502,30 +505,13 @@ export class HeatMap {
 
                 const heat = heatData ? heatData[i] : 0;
                 const fire = fireData ? fireData[i] : 0;
-                const scorched = sData ? sData[i] : 0;
 
-                // Base Material Color (if needed to override World's render)
-                // Actually World renders the whole tile. HeatMap renders overlays.
-                // To support per-subtile destruction, World needs to NOT render if HeatMap has data?
-                // Or HeatMap renders "holes" using destination-out on a temp canvas?
-                // Let's just render the material color for now if it's damaged.
-                
-                if (heat > 0.01 || fire > 0 || scorched) {
+                // High intensity heat (animated) or fire only
+                if (heat > 0.6 || fire > 0) {
                     if (heat > 0.6) {
                         rx += Math.sin(time * 20 + rx) * 2 * heat;
                         ry += Math.cos(time * 20 + ry) * 2 * heat;
-                    }
-
-                    if (scorched && heat < 0.1) {
-                        if (mData[i] === MaterialType.WOOD) {
-                            ctx.fillStyle = 'rgba(28, 28, 28, 0.9)'; // Graphite Black
-                        } else {
-                            ctx.fillStyle = 'rgba(0,0,0,0.5)';
-                        }
-                        ctx.fillRect(rx, ry, subSize + 0.5, subSize + 0.5);
-                    }
-
-                    if (heat >= 0.01) {
+                        
                         ctx.fillStyle = this.getHeatColor(heat);
                         ctx.fillRect(rx, ry, subSize + 0.5, subSize + 0.5);
                     }
@@ -629,6 +615,30 @@ export class HeatMap {
     
 
                 return this.hpData.get(`${tx},${ty}`) || null;
+
+    
+
+            }
+
+    
+
+            public getTileHeat(tx: number, ty: number): Float32Array | null {
+
+    
+
+                return this.heatData.get(`${tx},${ty}`) || null;
+
+    
+
+            }
+
+    
+
+            public getTileScorch(tx: number, ty: number): Uint8Array | null {
+
+    
+
+                return this.scorchData.get(`${tx},${ty}`) || null;
 
     
 
