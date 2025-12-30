@@ -17,6 +17,7 @@ import { HeatMap, MaterialType } from './HeatMap';
 import { WorldClock } from './WorldClock';
 import { LightManager } from './LightManager';
 import { VisibilitySystem, Point } from './VisibilitySystem';
+import { FloorDecalManager } from './FloorDecalManager';
 
 export class GameplayScene implements Scene {
   private world: World | null = null;
@@ -786,6 +787,40 @@ export class GameplayScene implements Scene {
       }
   }
 
+  private renderHUD(ctx: CanvasRenderingContext2D): void {
+      if (!this.player) return;
+      ctx.fillStyle = '#fff';
+      ctx.font = '14px Courier';
+      ctx.fillText(`POS: ${Math.floor(this.player.x)}, ${Math.floor(this.player.y)}`, 10, 20);
+      ctx.fillText(`COINS: ${this.coinsCollected}`, 10, 40);
+
+      const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+      const isReloading = this.weaponReloading.get(weapon);
+      const reloadTimer = this.weaponReloadTimer.get(weapon) || 0;
+      const currentAmmo = this.weaponAmmo.get(weapon) || 0;
+
+      let ammoText = "";
+      if (weapon === 'cannon') {
+          ammoText = "AMMO: ∞";
+      } else {
+          const displayAmmo = weapon === 'laser' || weapon === 'ray' ? currentAmmo.toFixed(1) : Math.floor(currentAmmo);
+          ammoText = isReloading ? `RELOADING... (${reloadTimer.toFixed(1)}s)` : `AMMO: ${displayAmmo}`;
+      }
+      
+      ctx.fillStyle = isReloading ? '#ff4500' : '#cfaa6e';
+      ctx.font = 'bold 16px "Share Tech Mono"';
+      ctx.fillText(`${weapon.toUpperCase()} | ${ammoText}`, 10, 70);
+
+      ctx.font = '12px "Share Tech Mono"';
+      let slotX = 10;
+      Object.entries(this.weaponSlots).forEach(([key, name], i) => {
+          const isSelected = name === weapon;
+          const isUnlocked = this.unlockedWeapons.has(name);
+          ctx.fillStyle = isSelected ? '#00ff00' : (isUnlocked ? '#888' : '#444');
+          ctx.fillText(`${i+1}: ${name.toUpperCase()}${isSelected ? ' <' : ''}`, slotX, 90 + i * 15);
+      });
+  }
+
   private renderLighting(ctx: CanvasRenderingContext2D): void {
       const lightingEnabled = ConfigManager.getInstance().get<boolean>('Lighting', 'enabled');
       if (!lightingEnabled || !this.lightCanvas || !this.lightCtx || !this.world) return;
@@ -802,25 +837,20 @@ export class GameplayScene implements Scene {
       const lctx = this.lightCtx;
       lctx.clearRect(0, 0, w, h);
 
-      // 1. Ambient Background
+      // 1. Ambient Background (Darkness)
       lctx.fillStyle = sunColor;
       lctx.globalAlpha = 1.0;
       lctx.fillRect(0, 0, w, h);
 
       const segments = this.world.getOcclusionSegments(this.cameraX, this.cameraY, w, h);
 
-      // 1.5 Sun Shadows (Parallel)
-      // Visible throughout the day until very dark night
+      // 1.5 Sun Shadows (Parallel) - Silhouette Extraction feel
       if (ambientIntensity > 0.1) {
           lctx.save();
-          // Shadow color: becomes more opaque as ambient decreases (night)
-          // But during day it should be a consistent subtle dark tint
-          const shadowAlpha = 0.4 * (1.0 - ambientIntensity * 0.2);
-          lctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`; 
+          lctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; 
           lctx.globalCompositeOperation = 'multiply';
           
-          // Longer shadows when sun is low (sunrise/sunset)
-          const shadowLen = 80 * (1.0 - Math.pow(ambientIntensity, 0.5)); 
+          const shadowLen = 25 + 125 * (1.0 - Math.pow(ambientIntensity, 0.4)); 
           
           segments.forEach(seg => {
               const a = { x: seg.a.x - this.cameraX, y: seg.a.y - this.cameraY };
@@ -845,8 +875,6 @@ export class GameplayScene implements Scene {
           const freq = ConfigManager.getInstance().get<number>('Lighting', 'updateFrequency') || 3;
           const shouldUpdatePolygons = (this.lightUpdateCounter % freq === 0);
           
-          const segments = this.world.getOcclusionSegments(this.cameraX, this.cameraY, w, h);
-
           lights.forEach(light => {
               const screenX = light.x - this.cameraX;
               const screenY = light.y - this.cameraY;
@@ -904,31 +932,36 @@ export class GameplayScene implements Scene {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-
     if (!this.world || !this.player) return;
 
+    // --- PHASE 1: WORLD PASS (Full Brightness) ---
+    // 1. Background & Floor Decals
     ctx.save();
     ctx.translate(-this.cameraX, -this.cameraY);
     this.world.render(ctx, this.cameraX, this.cameraY);
+    FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY);
     this.renderHeatMarks(ctx);
+    
+    // 2. Entities (Player, Enemies, Drops)
     this.drops.forEach(d => d.render(ctx));
     this.player.render(ctx);
+    
     const renderDist = ConfigManager.getInstance().get<number>('World', 'renderDistance') * ConfigManager.getInstance().get<number>('World', 'tileSize');
-        this.enemies.forEach(e => {
-            const dx = e.x - this.player!.x;
-            const dy = e.y - this.player!.y;
-            if (Math.abs(dx) < renderDist && Math.abs(dy) < renderDist) {
-                e.render(ctx);
-            }
-        });
-        this.projectiles.forEach(p => p.render(ctx));
-        this.particles.forEach(p => p.render(ctx));
-        
-        // Render Continuous Beams
-        if (this.isFiringBeam && this.player) {
-            const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+    this.enemies.forEach(e => {
+        const dx = e.x - this.player!.x;
+        const dy = e.y - this.player!.y;
+        if (Math.abs(dx) < renderDist && Math.abs(dy) < renderDist) {
+            e.render(ctx);
+        }
+    });
+
+    // 3. Projectiles & Particles
+    this.projectiles.forEach(p => p.render(ctx));
+    this.particles.forEach(p => p.render(ctx));
+    
+    // Render Continuous Beams
+    if (this.isFiringBeam && this.player) {
+        const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
         ctx.beginPath();
         ctx.moveTo(this.player.x, this.player.y);
         ctx.lineTo(this.beamEndPos.x, this.beamEndPos.y);
@@ -937,7 +970,6 @@ export class GameplayScene implements Scene {
             ctx.strokeStyle = '#ff0000';
             ctx.lineWidth = 2;
             ctx.stroke();
-            // Core
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 0.5;
             ctx.stroke();
@@ -950,55 +982,23 @@ export class GameplayScene implements Scene {
             ctx.stroke();
         }
     }
-
     ctx.restore();
 
-    // --- Lighting Layer ---
+    // --- PHASE 2: LIGHT PASS (Accumulation) ---
     this.renderLighting(ctx);
 
-    // --- Fog of War ---
+    // --- PHASE 3: ATMOSPHERE & UI ---
     const useFog = ConfigManager.getInstance().get<boolean>('Visuals', 'fogOfWar');
     if (useFog && this.fogCanvas && this.fogCtx && this.player) {
         this.renderFogOfWar(ctx);
     }
 
     if (this.radar) {
-        // Pass everything to radar (Radar will filter based on distance and type)
         const radarEntities: Entity[] = [this.player, ...this.enemies, ...this.projectiles];
         this.radar.render(this.player, radarEntities);
     }
     
-    ctx.fillStyle = '#fff';
-    ctx.font = '14px Courier';
-    ctx.fillText(`POS: ${Math.floor(this.player.x)}, ${Math.floor(this.player.y)}`, 10, 20);
-    ctx.fillText(`COINS: ${this.coinsCollected}`, 10, 40);
-
-    const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
-    const isReloading = this.weaponReloading.get(weapon);
-    const reloadTimer = this.weaponReloadTimer.get(weapon) || 0;
-    const currentAmmo = this.weaponAmmo.get(weapon) || 0;
-
-    let ammoText = "";
-    if (weapon === 'cannon') {
-        ammoText = "AMMO: ∞";
-    } else {
-        const displayAmmo = weapon === 'laser' || weapon === 'ray' ? currentAmmo.toFixed(1) : Math.floor(currentAmmo);
-        ammoText = isReloading ? `RELOADING... (${reloadTimer.toFixed(1)}s)` : `AMMO: ${displayAmmo}`;
-    }
-    
-    ctx.fillStyle = isReloading ? '#ff4500' : '#cfaa6e';
-    ctx.font = 'bold 16px "Share Tech Mono"';
-    ctx.fillText(`${weapon.toUpperCase()} | ${ammoText}`, 10, 70);
-
-    // Render Slots
-    ctx.font = '12px "Share Tech Mono"';
-    let slotX = 10;
-    Object.entries(this.weaponSlots).forEach(([key, name], i) => {
-        const isSelected = name === weapon;
-        const isUnlocked = this.unlockedWeapons.has(name);
-        ctx.fillStyle = isSelected ? '#00ff00' : (isUnlocked ? '#888' : '#444');
-        ctx.fillText(`${i+1}: ${name.toUpperCase()}${isSelected ? ' <' : ''}`, slotX, 90 + i * 15);
-    });
+    this.renderHUD(ctx);
   }
 
   private spawnDrop(): void {
@@ -1136,6 +1136,7 @@ export class GameplayScene implements Scene {
   private createExplosion(x: number, y: number, radius: number, damage: number): void {
       SoundManager.getInstance().playSoundSpatial('explosion_large', x, y);
       LightManager.getInstance().addTransientLight('explosion', x, y);
+      FloorDecalManager.getInstance().addScorchMark(x, y, radius);
       
       // Hit sound for explosion center
       if (this.heatMap) {

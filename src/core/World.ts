@@ -32,7 +32,6 @@ export class World {
   private generate(): void {
     const materials = [MaterialType.WOOD, MaterialType.BRICK, MaterialType.STONE, MaterialType.METAL];
     
-    // Initialize empty grid
     for (let y = 0; y < this.height; y++) {
       const row: MaterialType[] = [];
       for (let x = 0; x < this.width; x++) {
@@ -40,7 +39,6 @@ export class World {
         if (x === 0 || x === this.width - 1 || y === 0 || y === this.height - 1) {
           row.push(MaterialType.INDESTRUCTIBLE);
         } else {
-            // Random obstacles
             if (Math.random() < 0.05) {
                 const mat = materials[Math.floor(Math.random() * materials.length)];
                 row.push(mat);
@@ -65,7 +63,30 @@ export class World {
     const viewWidth = ctx.canvas.width;
     const viewHeight = ctx.canvas.height;
     
-    // Calculate visible tile range
+    // 1. Render Infinite Charcoal Void & Structural Grid
+    ctx.fillStyle = '#111111'; // Charcoal substrate
+    ctx.fillRect(cameraX, cameraY, viewWidth, viewHeight);
+
+    ctx.beginPath();
+    ctx.strokeStyle = '#1a1a1a'; // Dark grid lines
+    ctx.lineWidth = 1;
+
+    const startX = Math.floor(cameraX / this.tileSize) * this.tileSize;
+    const endX = cameraX + viewWidth;
+    const startY = Math.floor(cameraY / this.tileSize) * this.tileSize;
+    const endY = cameraY + viewHeight;
+
+    for (let x = startX; x <= endX; x += this.tileSize) {
+        ctx.moveTo(x, cameraY);
+        ctx.lineTo(x, endY);
+    }
+    for (let y = startY; y <= endY; y += this.tileSize) {
+        ctx.moveTo(cameraX, y);
+        ctx.lineTo(endX, y);
+    }
+    ctx.stroke();
+
+    // 2. Render Walls (Casters)
     const startCol = Math.floor(cameraX / this.tileSize);
     const endCol = startCol + (viewWidth / this.tileSize) + 1;
     const startRow = Math.floor(cameraY / this.tileSize);
@@ -82,43 +103,53 @@ export class World {
         const worldY = y * this.tileSize;
 
         if (tileType !== MaterialType.NONE) {
-          // Choose color based on material
           let color = '#2a2a2a';
-          let borderColor = '#554433';
+          let sideColor = '#1a1a1a';
+          let topColor = '#444';
           
           switch(tileType) {
-              case MaterialType.WOOD: color = '#5d4037'; borderColor = '#3e2723'; break;
-              case MaterialType.BRICK: color = '#a52a2a'; borderColor = '#800000'; break;
-              case MaterialType.STONE: color = '#616161'; borderColor = '#424242'; break;
-              case MaterialType.METAL: color = '#37474f'; borderColor = '#263238'; break;
-              case MaterialType.INDESTRUCTIBLE: color = '#1a1a1a'; borderColor = '#443322'; break;
+              case MaterialType.WOOD: color = '#5d4037'; sideColor = '#3e2723'; topColor = '#795548'; break;
+              case MaterialType.BRICK: color = '#a52a2a'; sideColor = '#800000'; topColor = '#c62828'; break;
+              case MaterialType.STONE: color = '#616161'; sideColor = '#424242'; topColor = '#9e9e9e'; break;
+              case MaterialType.METAL: color = '#37474f'; sideColor = '#263238'; topColor = '#546e7a'; break;
+              case MaterialType.INDESTRUCTIBLE: color = '#1a1a1a'; sideColor = '#000000'; topColor = '#333333'; break;
           }
 
-          const subDiv = 10;
-          const subSize = this.tileSize / subDiv;
+          const isMostlyDestroyed = this.heatMapRef ? this.heatMapRef.isTileMostlyDestroyed(x, y) : false;
+          
+          if (!isMostlyDestroyed) {
+              const h = 8;
+              ctx.fillStyle = sideColor;
+              ctx.fillRect(worldX, worldY, this.tileSize, this.tileSize);
+              ctx.fillStyle = color;
+              ctx.fillRect(worldX, worldY - h, this.tileSize, this.tileSize);
+              ctx.fillStyle = topColor;
+              ctx.fillRect(worldX, worldY - h, this.tileSize, 2);
+              ctx.fillRect(worldX, worldY - h, 2, this.tileSize);
 
-          for (let sy = 0; sy < subDiv; sy++) {
-              for (let sx = 0; sx < subDiv; sx++) {
-                  const subX = worldX + sx * subSize;
-                  const subY = worldY + sy * subSize;
-
-                  if (this.heatMapRef && this.heatMapRef.isSubTileDestroyed(subX + subSize/2, subY + subSize/2)) {
-                      continue;
+              if (this.heatMapRef && this.heatMapRef.hasTileData(x, y)) {
+                  const subDiv = 10;
+                  const subSize = this.tileSize / subDiv;
+                  ctx.save();
+                  ctx.globalCompositeOperation = 'destination-out';
+                  for (let sy = 0; sy < subDiv; sy++) {
+                      for (let sx = 0; sx < subDiv; sx++) {
+                          if (this.heatMapRef.isSubTileDestroyed(worldX + sx * subSize + subSize/2, worldY + sy * subSize + subSize/2)) {
+                              ctx.fillRect(worldX + sx * subSize, worldY - h + sy * subSize, subSize, subSize);
+                          }
+                      }
                   }
-
-                  ctx.fillStyle = color;
-                  ctx.fillRect(subX, subY, subSize + 0.5, subSize + 0.5);
-
-                  // Optional: draw small details or borders only on edges
-                  // For performance, we'll keep it simple: just the material color.
-                  // But let's add the material details back in a simplified way.
-                  if (tileType === MaterialType.WOOD && sx % 3 === 0) {
-                      ctx.fillStyle = borderColor;
-                      ctx.fillRect(subX, subY, 1, subSize);
-                  }
-                  if (tileType === MaterialType.METAL && sx === sy) {
-                      ctx.fillStyle = borderColor;
-                      ctx.fillRect(subX, subY, subSize, 1);
+                  ctx.restore();
+              }
+          } else {
+              const subDiv = 10;
+              const subSize = this.tileSize / subDiv;
+              ctx.fillStyle = sideColor;
+              for (let i = 0; i < 100; i++) {
+                  const sx = i % subDiv;
+                  const sy = Math.floor(i / subDiv);
+                  if (!this.heatMapRef.isSubTileDestroyed(worldX + sx * subSize + subSize/2, worldY + sy * subSize + subSize/2)) {
+                      ctx.fillRect(worldX + sx * subSize, worldY + sy * subSize, subSize + 0.5, subSize + 0.5);
                   }
               }
           }

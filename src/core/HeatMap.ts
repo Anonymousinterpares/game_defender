@@ -539,13 +539,32 @@ export class HeatMap {
         return data[subY * this.subDiv + subX] || 0;
     }
 
-    public getMaterialAt(worldX: number, worldY: number): MaterialType {
-        const tx = Math.floor(worldX / this.tileSize);
-        const ty = Math.floor(worldY / this.tileSize);
-        const data = this.materialData.get(`${tx},${ty}`);
-        if (!data) return MaterialType.NONE;
-        const subX = Math.floor((worldX % this.tileSize) / (this.tileSize / this.subDiv));
-        const subY = Math.floor((worldY % this.tileSize) / (this.tileSize / this.subDiv));
-        return data[subY * this.subDiv + subX];
+        public getMaterialAt(worldX: number, worldY: number): MaterialType {
+
+            const tx = Math.floor(worldX / this.tileSize);
+
+            const ty = Math.floor(worldY / this.tileSize);
+
+            const data = this.materialData.get(`${tx},${ty}`);
+
+            if (!data) return MaterialType.NONE;
+
+            const subX = Math.floor((worldX % this.tileSize) / (this.tileSize / this.subDiv));
+
+            const subY = Math.floor((worldY % this.tileSize) / (this.tileSize / this.subDiv));
+
+            return data[subY * this.subDiv + subX];
+
+        }
+
+    
+
+        public hasTileData(tx: number, ty: number): boolean {
+
+            return this.hpData.has(`${tx},${ty}`);
+
+        }
+
     }
-}
+
+    

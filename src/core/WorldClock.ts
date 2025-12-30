@@ -17,7 +17,7 @@ export class WorldClock {
     private realSecondsPerHour: number = 120;
 
     private constructor() {
-        const startHour = ConfigManager.getInstance().get<number>('TimeSystem', 'startHour') || 10;
+        const startHour = ConfigManager.getInstance().get<number>('TimeSystem', 'startHour') ?? 10;
         this.realSecondsPerHour = ConfigManager.getInstance().get<number>('TimeSystem', 'realSecondsPerHour') || 120;
         this.gameSeconds = startHour * 3600;
     }
@@ -44,10 +44,9 @@ export class WorldClock {
         const sunrise = ConfigManager.getInstance().get<number>('TimeSystem', 'sunriseHour') || 6;
         const sunset = ConfigManager.getInstance().get<number>('TimeSystem', 'sunsetHour') || 19;
         
-        // Sun Angle: 0 at sunrise (6AM), PI at sunset (6PM) - approximate
-        // 6AM = 6/24 of day. We want 6AM to be angle 0.
-        const dayProgress = (totalSeconds / (24 * 3600)); // 0 to 1
-        const sunAngle = (dayProgress * Math.PI * 2) - (Math.PI / 2); 
+        // Sun Angle: Ensure it's never perfectly 90 degrees (vertical)
+        const dayProgress = (totalSeconds / (24 * 3600)); 
+        const sunAngle = (dayProgress * Math.PI * 2) + 0.5; // Constant offset ensures slant
         
         const sunDirection = {
             x: Math.cos(sunAngle),
