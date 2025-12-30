@@ -68,17 +68,29 @@ export class SoundManager {
           return;
       }
 
-      // Aggregate paths (take the strongest one for simplicity in this implementation)
-      // or average them. Let's find the most prominent path.
-      let bestPath = paths[0];
+      // Summation of paths:
+      // Total Volume = sqrt(sum of squares) - energy based
+      // Pan = weighted average based on volume
+      // Filter = lowest cutoff (most muffled)
+      let totalEnergy = 0;
+      let weightedPan = 0;
+      let minCutoff = 20000;
+
       for (const p of paths) {
-          if (p.volume > bestPath.volume) bestPath = p;
+          totalEnergy += p.volume * p.volume;
+          weightedPan += p.pan * p.volume;
+          minCutoff = Math.min(minCutoff, p.filterCutoff);
       }
 
+      const finalVolume = Math.min(1.0, Math.sqrt(totalEnergy));
+      const finalPan = paths.reduce((acc, p) => acc + p.volume, 0) > 0 
+          ? weightedPan / paths.reduce((acc, p) => acc + p.volume, 0) 
+          : 0;
+
       const now = this.audioCtx.currentTime;
-      voice.gain.gain.setTargetAtTime(bestPath.volume, now, 0.1);
-      voice.panner.pan.setTargetAtTime(bestPath.pan, now, 0.1);
-      voice.filter.frequency.setTargetAtTime(bestPath.filterCutoff, now, 0.1);
+      voice.gain.gain.setTargetAtTime(finalVolume, now, 0.1);
+      voice.panner.pan.setTargetAtTime(finalPan, now, 0.1);
+      voice.filter.frequency.setTargetAtTime(minCutoff, now, 0.1);
   }
 
   public playSoundSpatial(name: string, x: number, y: number): void {
@@ -88,19 +100,28 @@ export class SoundManager {
     const paths = SoundRaycaster.calculateAudiblePaths(x, y, this.listenerX, this.listenerY, this.world);
     if (paths.length === 0) return;
 
-    let bestPath = paths[0];
-    for (const p of paths) if (p.volume > bestPath.volume) bestPath = p;
+    let totalEnergy = 0;
+    let weightedPan = 0;
+    let minCutoff = 20000;
+    for (const p of paths) {
+        totalEnergy += p.volume * p.volume;
+        weightedPan += p.pan * p.volume;
+        minCutoff = Math.min(minCutoff, p.filterCutoff);
+    }
+    const finalVolume = Math.min(1.0, Math.sqrt(totalEnergy));
+    const totalVol = paths.reduce((acc, p) => acc + p.volume, 0);
+    const finalPan = totalVol > 0 ? weightedPan / totalVol : 0;
 
     const buffer = this.sounds.get(name);
     const filter = this.audioCtx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = bestPath.filterCutoff;
+    filter.frequency.value = minCutoff;
 
     const panner = this.audioCtx.createStereoPanner();
-    panner.pan.value = bestPath.pan;
+    panner.pan.value = finalPan;
 
     const gain = this.audioCtx.createGain();
-    gain.gain.value = bestPath.volume;
+    gain.gain.value = finalVolume;
 
     filter.connect(panner);
     panner.connect(gain);
@@ -112,7 +133,6 @@ export class SoundManager {
         source.connect(filter);
         source.start();
     } else {
-        // Fallback synthesis with spatial nodes
         this.synthesizeSpatial(name, filter);
     }
   }
