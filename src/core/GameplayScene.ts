@@ -91,6 +91,7 @@ export class GameplayScene implements Scene {
     
     // Load Sounds
     const sm = SoundManager.getInstance();
+    sm.setWorld(this.world);
     sm.loadSound('ping', '/assets/sounds/ping.wav');
     sm.loadSound('shoot_cannon', '/assets/sounds/shoot_cannon.wav');
     sm.loadSound('shoot_laser', '/assets/sounds/shoot_laser.wav');
@@ -157,10 +158,10 @@ export class GameplayScene implements Scene {
     this.physics = new PhysicsEngine();
     this.fogCanvas = null;
     this.fogCtx = null;
-    SoundManager.getInstance().stopLoop('shoot_laser');
-    SoundManager.getInstance().stopLoop('shoot_ray');
-    SoundManager.getInstance().stopLoop('hit_laser');
-    SoundManager.getInstance().stopLoop('hit_ray');
+    SoundManager.getInstance().stopLoopSpatial('shoot_laser');
+    SoundManager.getInstance().stopLoopSpatial('shoot_ray');
+    SoundManager.getInstance().stopLoopSpatial('hit_laser');
+    SoundManager.getInstance().stopLoopSpatial('hit_ray');
   }
 
   private createUI(): void {
@@ -414,6 +415,9 @@ export class GameplayScene implements Scene {
     });
 
     this.physics.update(dt);
+    if (this.player) {
+        SoundManager.getInstance().updateListener(this.player.x, this.player.y);
+    }
 
     this.nextDropSpawn -= dt;
     if (this.nextDropSpawn <= 0) {
@@ -466,7 +470,7 @@ export class GameplayScene implements Scene {
                 }
                 
                 this.projectiles.push(p);
-                SoundManager.getInstance().playSound(sfx);
+                SoundManager.getInstance().playSoundSpatial(sfx, this.player.x, this.player.y);
 
                 if (weapon !== 'cannon' && this.weaponAmmo.get(weapon)! <= 0) {
                     this.startReload(weapon);
@@ -479,7 +483,9 @@ export class GameplayScene implements Scene {
           if (currentAmmo > 0) {
             this.isFiringBeam = true;
             this.handleBeamFiring(weapon, dt);
-            SoundManager.getInstance().startLoop(weapon === 'laser' ? 'shoot_laser' : 'shoot_ray');
+            const loopSfx = weapon === 'laser' ? 'shoot_laser' : 'shoot_ray';
+            SoundManager.getInstance().startLoopSpatial(loopSfx, this.player.x, this.player.y);
+            SoundManager.getInstance().updateLoopPosition(loopSfx, this.player.x, this.player.y);
             
             const depletion = ConfigManager.getInstance().get<number>('Weapons', weapon + 'DepletionRate');
             const newAmmo = Math.max(0, currentAmmo - depletion * dt);
@@ -495,10 +501,10 @@ export class GameplayScene implements Scene {
     }
 
     if (!this.isFiringBeam) {
-        SoundManager.getInstance().stopLoop('shoot_laser');
-        SoundManager.getInstance().stopLoop('shoot_ray');
-        SoundManager.getInstance().stopLoop('hit_laser', 0.5);
-        SoundManager.getInstance().stopLoop('hit_ray', 0.5);
+        SoundManager.getInstance().stopLoopSpatial('shoot_laser');
+        SoundManager.getInstance().stopLoopSpatial('shoot_ray');
+        SoundManager.getInstance().stopLoopSpatial('hit_laser');
+        SoundManager.getInstance().stopLoopSpatial('hit_ray');
     }
 
     if (this.player) {
@@ -519,7 +525,7 @@ export class GameplayScene implements Scene {
                     this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
                 } else {
                     const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
-                    SoundManager.getInstance().playSound(sfx);
+                    SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
                     this.createImpactParticles(p.x, p.y, p.color);
                 }
                 p.active = false;
@@ -538,7 +544,7 @@ export class GameplayScene implements Scene {
                 } else {
                     e.takeDamage(p.damage);
                     const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
-                    SoundManager.getInstance().playSound(sfx);
+                    SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
                 }
                 p.active = false;
                 break;
@@ -631,7 +637,8 @@ export class GameplayScene implements Scene {
       const hitSfx = type === 'laser' ? 'hit_laser' : 'hit_ray';
 
       if (hitSomething) {
-          SoundManager.getInstance().startLoop(hitSfx);
+          SoundManager.getInstance().startLoopSpatial(hitSfx, this.beamEndPos.x, this.beamEndPos.y);
+          SoundManager.getInstance().updateLoopPosition(hitSfx, this.beamEndPos.x, this.beamEndPos.y);
           
           // --- Heat Simulation Update ---
           if (!hitEnemy) { // Only heat up environment
@@ -883,7 +890,7 @@ export class GameplayScene implements Scene {
   }
 
   private createExplosion(x: number, y: number, radius: number, damage: number): void {
-      SoundManager.getInstance().playSound('explosion_large');
+      SoundManager.getInstance().playSoundSpatial('explosion_large', x, y);
       // Damage enemies in radius
       this.enemies.forEach(e => {
           const dx = e.x - x;
@@ -925,8 +932,8 @@ export class GameplayScene implements Scene {
       this.weaponReloading.set(weapon, true);
       this.weaponReloadTimer.set(weapon, reloadTime);
       
-      if (weapon === ConfigManager.getInstance().get<string>('Player', 'activeWeapon')) {
-        SoundManager.getInstance().playSound('weapon_reload');
+      if (weapon === ConfigManager.getInstance().get<string>('Player', 'activeWeapon') && this.player) {
+        SoundManager.getInstance().playSoundSpatial('weapon_reload', this.player.x, this.player.y);
       }
   }
 

@@ -1,3 +1,15 @@
+import { World } from './World';
+import { SoundRaycaster, AudiblePath } from '../utils/SoundRaycaster';
+
+interface SpatialVoice {
+    source: AudioBufferSourceNode | OscillatorNode;
+    gain: GainNode;
+    panner: StereoPannerNode;
+    filter: BiquadFilterNode;
+    x: number;
+    y: number;
+}
+
 export class SoundManager {
   private static instance: SoundManager;
   private audioCtx: AudioContext | null = null;
@@ -6,6 +18,11 @@ export class SoundManager {
   private volume: number = 0.5;
   private sounds: Map<string, AudioBuffer> = new Map();
   private activeLoops: Map<string, { osc: OscillatorNode | AudioBufferSourceNode, gain: GainNode, startTime?: number, isEnding?: boolean }> = new Map();
+  
+  private spatialLoops: Map<string, SpatialVoice> = new Map();
+  private listenerX: number = 0;
+  private listenerY: number = 0;
+  private world: World | null = null;
 
   private constructor() {}
 
@@ -23,6 +40,148 @@ export class SoundManager {
       this.masterGain.gain.setValueAtTime(this.volume, this.audioCtx.currentTime);
       this.masterGain.connect(this.audioCtx.destination);
     }
+  }
+
+  public setWorld(world: World): void {
+      this.world = world;
+  }
+
+  public updateListener(x: number, y: number): void {
+      this.listenerX = x;
+      this.listenerY = y;
+      
+      // Update spatial loops
+      if (this.world) {
+          this.spatialLoops.forEach((voice) => {
+              this.updateVoiceSpatial(voice);
+          });
+      }
+  }
+
+  private updateVoiceSpatial(voice: SpatialVoice): void {
+      if (!this.world || !this.audioCtx) return;
+
+      const paths = SoundRaycaster.calculateAudiblePaths(voice.x, voice.y, this.listenerX, this.listenerY, this.world);
+      
+      if (paths.length === 0) {
+          voice.gain.gain.setTargetAtTime(0, this.audioCtx.currentTime, 0.1);
+          return;
+      }
+
+      // Aggregate paths (take the strongest one for simplicity in this implementation)
+      // or average them. Let's find the most prominent path.
+      let bestPath = paths[0];
+      for (const p of paths) {
+          if (p.volume > bestPath.volume) bestPath = p;
+      }
+
+      const now = this.audioCtx.currentTime;
+      voice.gain.gain.setTargetAtTime(bestPath.volume, now, 0.1);
+      voice.panner.pan.setTargetAtTime(bestPath.pan, now, 0.1);
+      voice.filter.frequency.setTargetAtTime(bestPath.filterCutoff, now, 0.1);
+  }
+
+  public playSoundSpatial(name: string, x: number, y: number): void {
+    if (this.isMuted || !this.audioCtx || !this.masterGain || !this.world) return;
+    if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
+
+    const paths = SoundRaycaster.calculateAudiblePaths(x, y, this.listenerX, this.listenerY, this.world);
+    if (paths.length === 0) return;
+
+    let bestPath = paths[0];
+    for (const p of paths) if (p.volume > bestPath.volume) bestPath = p;
+
+    const buffer = this.sounds.get(name);
+    const filter = this.audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = bestPath.filterCutoff;
+
+    const panner = this.audioCtx.createStereoPanner();
+    panner.pan.value = bestPath.pan;
+
+    const gain = this.audioCtx.createGain();
+    gain.gain.value = bestPath.volume;
+
+    filter.connect(panner);
+    panner.connect(gain);
+    gain.connect(this.masterGain);
+
+    if (buffer) {
+        const source = this.audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(filter);
+        source.start();
+    } else {
+        // Fallback synthesis with spatial nodes
+        this.synthesizeSpatial(name, filter);
+    }
+  }
+
+  private synthesizeSpatial(name: string, destination: AudioNode): void {
+    if (!this.audioCtx) return;
+    // Simplified version of synthesizeShoot that connects to destination
+    const duration = 0.15;
+    const osc = this.audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(600, this.audioCtx.currentTime);
+    osc.connect(destination);
+    osc.start();
+    osc.stop(this.audioCtx.currentTime + duration);
+  }
+
+  public startLoopSpatial(name: string, x: number, y: number): void {
+    if (this.isMuted || !this.audioCtx || !this.masterGain || this.spatialLoops.has(name)) return;
+    
+    const filter = this.audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    const panner = this.audioCtx.createStereoPanner();
+    const gain = this.audioCtx.createGain();
+
+    filter.connect(panner);
+    panner.connect(gain);
+    gain.connect(this.masterGain);
+
+    const buffer = this.sounds.get(name);
+    let source: AudioBufferSourceNode | OscillatorNode;
+
+    if (buffer) {
+        const bSource = this.audioCtx.createBufferSource();
+        bSource.buffer = buffer;
+        bSource.loop = true;
+        source = bSource;
+    } else {
+        const osc = this.audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 440;
+        source = osc;
+    }
+
+    source.connect(filter);
+    source.start();
+
+    const voice: SpatialVoice = { source, gain, panner, filter, x, y };
+    this.spatialLoops.set(name, voice);
+    this.updateVoiceSpatial(voice);
+  }
+
+  public updateLoopPosition(name: string, x: number, y: number): void {
+      const voice = this.spatialLoops.get(name);
+      if (voice) {
+          voice.x = x;
+          voice.y = y;
+          // updateVoiceSpatial is called in updateListener, but we can call it here too for immediate update
+          this.updateVoiceSpatial(voice);
+      }
+  }
+
+  public stopLoopSpatial(name: string): void {
+      const voice = this.spatialLoops.get(name);
+      if (voice && this.audioCtx) {
+          const now = this.audioCtx.currentTime;
+          voice.gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+          voice.source.stop(now + 0.1);
+          this.spatialLoops.delete(name);
+      }
   }
 
   public setVolume(val: number): void {
