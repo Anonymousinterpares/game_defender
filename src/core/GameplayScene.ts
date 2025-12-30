@@ -708,8 +708,16 @@ export class GameplayScene implements Scene {
       this.radar.update(dt);
     }
 
-    this.updateLightClusters();
-    this.updateProjectileLights();
+    const timeState = WorldClock.getInstance().getTimeState();
+    if (timeState.ambientIntensity < 0.8) {
+        this.updateLightClusters();
+        this.updateProjectileLights();
+    } else {
+        // Ensure constant lights from previous frames are cleared if it just became day
+        LightManager.getInstance().clearConstantLights();
+        LightManager.getInstance().clearType('fire');
+    }
+    
     this.heatMap?.update(dt);
   }
 
