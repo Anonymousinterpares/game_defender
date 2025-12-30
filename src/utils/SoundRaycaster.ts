@@ -80,7 +80,7 @@ export class SoundRaycaster {
         }
 
         const volume = muffle * (this.REFERENCE_DIST / Math.max(this.REFERENCE_DIST, dist));
-        const pan = dist > 0 ? Math.max(-1, Math.min(1, (lx - sx) / dist)) : 0;
+        const pan = dist > 0 ? Math.max(-1, Math.min(1, (sx - lx) / dist)) : 0;
 
         return { volume, pan, filterCutoff: cutoff, distance: dist };
     }
@@ -115,7 +115,9 @@ export class SoundRaycaster {
                 const dly = currY - ly;
                 if (dlx * dlx + dly * dly < this.LISTENER_RADIUS * this.LISTENER_RADIUS) {
                     const finalVol = intensity * (this.REFERENCE_DIST / Math.max(this.REFERENCE_DIST, totalDist));
-                    const pan = Math.max(-1, Math.min(1, (lx - (currX - dirX * 10)) / 10)); // Direction of arrival
+                    // Panning for reflection: arrival direction
+                    // If ray is moving right (dirX > 0), it hits from the left.
+                    const pan = Math.max(-1, Math.min(1, -dirX)); 
                     return { volume: finalVol, pan, filterCutoff: cutoff, distance: totalDist };
                 }
 
