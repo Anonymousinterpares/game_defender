@@ -11,6 +11,7 @@ export interface LightSource {
     ttl?: number;
     decay?: boolean;
     castsShadows?: boolean;
+    active?: boolean; // For pooling/reuse
 }
 
 export class LightManager {
@@ -28,7 +29,24 @@ export class LightManager {
     }
 
     public addLight(light: LightSource): void {
+        light.active = true;
         this.lights.set(light.id, light);
+    }
+
+    public updateOrAddLight(light: LightSource): void {
+        const existing = this.lights.get(light.id);
+        if (existing) {
+            existing.x = light.x;
+            existing.y = light.y;
+            existing.radius = light.radius;
+            existing.color = light.color;
+            existing.intensity = light.intensity;
+            existing.active = true;
+            existing.castsShadows = light.castsShadows;
+        } else {
+            light.active = true;
+            this.lights.set(light.id, light);
+        }
     }
 
     public addTransientLight(type: 'muzzle' | 'impact' | 'explosion', x: number, y: number): void {
@@ -48,21 +66,15 @@ export class LightManager {
             type: 'transient',
             ttl: settings.ttl,
             decay: true,
-            castsShadows: false // Explosions/Muzzles just glow
+            castsShadows: false,
+            active: true
         });
     }
 
     public update(dt: number): void {
-        // Update transient lights
         for (const [id, light] of this.lights.entries()) {
             if (light.type === 'transient' && light.ttl !== undefined) {
                 light.ttl -= dt;
-                if (light.decay) {
-                    // Simple linear decay for transient lights
-                    // We don't have the original TTL here, so it's a bit rough
-                    // but we can assume they just fade out
-                }
-                
                 if (light.ttl <= 0) {
                     this.lights.delete(id);
                 }
@@ -71,7 +83,12 @@ export class LightManager {
     }
 
     public getLights(): LightSource[] {
-        return Array.from(this.lights.values());
+        // Only return active lights
+        const result: LightSource[] = [];
+        this.lights.forEach(l => {
+            if (l.active !== false) result.push(l);
+        });
+        return result;
     }
 
     public removeLight(id: string): void {
@@ -81,7 +98,7 @@ export class LightManager {
     public clearType(type: 'fire' | 'transient' | 'static'): void {
         for (const [id, light] of this.lights.entries()) {
             if (light.type === type) {
-                this.lights.delete(id);
+                light.active = false; // Mark for reuse
             }
         }
     }
@@ -89,26 +106,33 @@ export class LightManager {
     public clearConstantLights(): void {
         for (const [id, light] of this.lights.entries()) {
             if (id.startsWith('const_')) {
-                this.lights.delete(id);
+                light.active = false; // Mark for reuse
             }
         }
     }
 
     public addConstantLight(light: LightSource): void {
-        this.lights.set(light.id, { ...light, type: 'transient', ttl: 0.05, decay: false, castsShadows: false });
+        const existing = this.lights.get(light.id);
+        if (existing) {
+            existing.x = light.x;
+            existing.y = light.y;
+            existing.radius = light.radius;
+            existing.color = light.color;
+            existing.intensity = light.intensity;
+            existing.active = true;
+            existing.castsShadows = false;
+        } else {
+            this.lights.set(light.id, { ...light, type: 'transient', ttl: 0.05, decay: false, castsShadows: false, active: true });
+        }
     }
 
-    /**
-     * Clusters fire light sources based on burning sub-tiles.
-     * Called by GameplayScene using HeatMap data.
-     */
     public updateFireLights(fireClusters: {x: number, y: number, intensity: number, color?: string}[]): void {
         this.clearType('fire');
         const defaultColor = ConfigManager.getInstance().get<string>('Lighting', 'fireLightColor') || '#ff6600';
         const baseRadius = ConfigManager.getInstance().get<number>('Lighting', 'fireLightRadius') || 250;
 
         fireClusters.forEach((cluster, index) => {
-            this.addLight({
+            this.addConstantLight({ // Reusing logic for consistency
                 id: `fire_cluster_${index}`,
                 x: cluster.x,
                 y: cluster.y,

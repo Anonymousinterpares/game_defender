@@ -142,7 +142,7 @@ export const MasterConfig: GameConfigSchema = {
   },
   TimeSystem: {
     realSecondsPerHour: { value: 120, type: 'number', description: 'Duration of one game hour (seconds)' },
-    startHour: { value: 10, type: 'number', description: 'Starting game hour (0-23)' },
+    startHour: { value: 20, type: 'number', description: 'Starting game hour (0-23)' },
     sunriseHour: { value: 6, type: 'number', description: 'Hour when sun starts rising' },
     sunsetHour: { value: 19, type: 'number', description: 'Hour when sun starts setting' }
   },
