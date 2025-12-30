@@ -10,9 +10,14 @@ export class World {
 
   // Optimized Shadow Geometry
   private cachedSegments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
+  private staticSegments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
+  private dynamicSegments: Map<string, {a: {x: number, y: number}, b: {x: number, y: number}}[]> = new Map();
+  private dirtyTiles: Set<string> = new Set();
+  
   private spatialGrid: Map<string, {a: {x: number, y: number}, b: {x: number, y: number}}[]> = new Map();
   private gridCellSize: number = 256;
   private isMeshDirty: boolean = true;
+  private isInitialMeshDone: boolean = false;
   private meshVersion: number = 0;
 
   // Render Caching
@@ -40,10 +45,11 @@ export class World {
       }
   }
 
-  public markMeshDirty(): void {
-      if (!this.isMeshDirty) {
-          this.isMeshDirty = true;
-          this.meshVersion++;
+  public markMeshDirty(tx?: number, ty?: number): void {
+      this.isMeshDirty = true;
+      this.meshVersion++;
+      if (tx !== undefined && ty !== undefined) {
+          this.dirtyTiles.add(`${tx},${ty}`);
       }
   }
 
@@ -244,51 +250,55 @@ export class World {
   }
 
   private rebuildMesh(): void {
-      const segments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
       const ts = this.tileSize;
 
-      // ... [Internal segment generation remains logicially similar but we will index them] ...
-      // 1. Process Healthy Tiles (Greedy horizontal merging)
-      const visitedH = new Set<string>();
-      for (let y = 0; y < this.height; y++) {
-          for (let x = 0; x < this.width; x++) {
-              if (this.tiles[y][x] === MaterialType.NONE || visitedH.has(`${x},${y}`)) continue;
-              if (this.heatMapRef && this.heatMapRef.hasTileData(x, y)) continue; 
+      // 1. Initial Static Mesh Generation (Only once)
+      if (!this.isInitialMeshDone) {
+          const segments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
+          const visitedH = new Set<string>();
+          for (let y = 0; y < this.height; y++) {
+              for (let x = 0; x < this.width; x++) {
+                  if (this.tiles[y][x] === MaterialType.NONE || visitedH.has(`${x},${y}`)) continue;
+                  
+                  let xEnd = x;
+                  while (xEnd + 1 < this.width && this.tiles[y][xEnd + 1] !== MaterialType.NONE) {
+                      xEnd++;
+                      visitedH.add(`${xEnd},${y}`);
+                  }
 
-              let xEnd = x;
-              while (xEnd + 1 < this.width && 
-                     this.tiles[y][xEnd + 1] !== MaterialType.NONE && 
-                     !(this.heatMapRef && this.heatMapRef.hasTileData(xEnd + 1, y))) {
-                  xEnd++;
-                  visitedH.add(`${xEnd},${y}`);
+                  const x1 = x * ts;
+                  const x2 = (xEnd + 1) * ts;
+                  const y1 = y * ts;
+                  const y2 = (y + 1) * ts;
+
+                  if (y === 0 || this.tiles[y-1][x] === MaterialType.NONE)
+                      segments.push({a: {x: x1, y: y1}, b: {x: x2, y: y1}});
+                  if (y === this.height - 1 || this.tiles[y+1][x] === MaterialType.NONE)
+                      segments.push({a: {x: x1, y: y2}, b: {x: x2, y: y2}});
+                  
+                  segments.push({a: {x: x1, y: y1}, b: {x: x1, y: y2}});
+                  segments.push({a: {x: x2, y: y1}, b: {x: x2, y: y2}});
               }
-
-              const x1 = x * ts;
-              const x2 = (xEnd + 1) * ts;
-              const y1 = y * ts;
-              const y2 = (y + 1) * ts;
-
-              if (y === 0 || this.tiles[y-1][x] === MaterialType.NONE)
-                  segments.push({a: {x: x1, y: y1}, b: {x: x2, y: y1}});
-              if (y === this.height - 1 || this.tiles[y+1][x] === MaterialType.NONE)
-                  segments.push({a: {x: x1, y: y2}, b: {x: x2, y: y2}});
-              
-              segments.push({a: {x: x1, y: y1}, b: {x: x1, y: y2}});
-              segments.push({a: {x: x2, y: y1}, b: {x: x2, y: y2}});
           }
+          this.staticSegments = segments;
+          this.isInitialMeshDone = true;
       }
 
-      // 2. Damaged Tiles
-      for (let y = 0; y < this.height; y++) {
-          for (let x = 0; x < this.width; x++) {
-              if (this.tiles[y][x] === MaterialType.NONE) continue;
-              const hData = this.heatMapRef ? this.heatMapRef.getTileHP(x, y) : null;
-              if (!hData) continue;
+      // 2. Dynamic segments for Damaged Tiles (Only dirty ones)
+      if (this.dirtyTiles.size > 0) {
+          this.dirtyTiles.forEach(key => {
+              const [tx, ty] = key.split(',').map(Number);
+              const hData = this.heatMapRef ? this.heatMapRef.getTileHP(tx, ty) : null;
+              if (!hData) {
+                  this.dynamicSegments.delete(key);
+                  return;
+              }
 
+              const tileSegments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
               const subDiv = 10;
               const ss = ts / subDiv;
-              const wx = x * ts;
-              const wy = y * ts;
+              const wx = tx * ts;
+              const wy = ty * ts;
 
               for (let sy = 0; sy <= subDiv; sy++) {
                   let startX: number | null = null;
@@ -300,11 +310,11 @@ export class World {
                                       (sy > 0 && sy < subDiv && (hData[idx] > 0) !== (hData[idxAbove] > 0));
                       if (needsEdge) { if (startX === null) startX = sx; } 
                       else { if (startX !== null) {
-                          segments.push({a: {x: wx + startX * ss, y: wy + sy * ss}, b: {x: wx + sx * ss, y: wy + sy * ss}});
+                          tileSegments.push({a: {x: wx + startX * ss, y: wy + sy * ss}, b: {x: wx + sx * ss, y: wy + sy * ss}});
                           startX = null;
                       }}
                   }
-                  if (startX !== null) segments.push({a: {x: wx + startX * ss, y: wy + sy * ss}, b: {x: wx + ts, y: wy + sy * ss}});
+                  if (startX !== null) tileSegments.push({a: {x: wx + startX * ss, y: wy + sy * ss}, b: {x: wx + ts, y: wy + sy * ss}});
               }
 
               for (let sx = 0; sx <= subDiv; sx++) {
@@ -317,20 +327,24 @@ export class World {
                                       (sx > 0 && sx < subDiv && (hData[idx] > 0) !== (hData[idxLeft] > 0));
                       if (needsEdge) { if (startY === null) startY = sy; }
                       else { if (startY !== null) {
-                          segments.push({a: {x: wx + sx * ss, y: wy + startY * ss}, b: {x: wx + sx * ss, y: wy + sy * ss}});
+                          tileSegments.push({a: {x: wx + sx * ss, y: wy + startY * ss}, b: {x: wx + sx * ss, y: wy + sy * ss}});
                           startY = null;
                       }}
                   }
-                  if (startY !== null) segments.push({a: {x: wx + sx * ss, y: wy + startY * ss}, b: {x: wx + sx * ss, y: wy + ts}});
+                  if (startY !== null) tileSegments.push({a: {x: wx + sx * ss, y: wy + startY * ss}, b: {x: wx + sx * ss, y: wy + ts}});
               }
-          }
+              this.dynamicSegments.set(key, tileSegments);
+          });
+          this.dirtyTiles.clear();
       }
 
-      this.cachedSegments = segments;
+      // 3. Combine and Refresh Spatial Grid
+      const allSegments = [...this.staticSegments];
+      this.dynamicSegments.forEach(segs => allSegments.push(...segs));
+      this.cachedSegments = allSegments;
       
-      // Update Spatial Grid
       this.spatialGrid.clear();
-      segments.forEach(seg => {
+      this.cachedSegments.forEach(seg => {
           const gx1 = Math.floor(Math.min(seg.a.x, seg.b.x) / this.gridCellSize);
           const gy1 = Math.floor(Math.min(seg.a.y, seg.b.y) / this.gridCellSize);
           const gx2 = Math.floor(Math.max(seg.a.x, seg.b.x) / this.gridCellSize);

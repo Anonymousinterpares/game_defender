@@ -345,7 +345,7 @@ export class HeatMap {
             if (dist < effectiveRadius) {
                 hData[i] = 0;
                 if (this.worldRef) {
-                    this.worldRef.markMeshDirty();
+                    this.worldRef.markMeshDirty(tx, ty);
                     this.worldRef.invalidateTileCache(tx, ty);
                 }
                 // Once destroyed, clear heat/fire
@@ -414,7 +414,7 @@ export class HeatMap {
                             if (wData[idx] >= MATERIAL_PROPS[mat].vaporizeTime) {
                                 hData![idx] = 0;
                                 if (this.worldRef) {
-                                    this.worldRef.markMeshDirty();
+                                    this.worldRef.markMeshDirty(tx, ty);
                                     this.worldRef.invalidateTileCache(tx, ty);
                                 }
                                 nextData[idx] = 0;
@@ -450,7 +450,7 @@ export class HeatMap {
 
                             if (hData![idx] <= 0) {
                                 if (this.worldRef) {
-                                    this.worldRef.markMeshDirty();
+                                    this.worldRef.markMeshDirty(tx, ty);
                                     this.worldRef.invalidateTileCache(tx, ty);
                                 }
                                 nextFire[idx] = 0;
