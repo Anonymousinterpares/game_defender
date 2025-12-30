@@ -983,17 +983,24 @@ export class GameplayScene implements Scene {
       }
 
       // --- 2. ACCUMULATE DYNAMIC LIGHTS ---
-      // ... [Dynamic lights logic stays same but we ensure we use 'screen' or 'lighter'] ...
       if (ambientIntensity < 0.95) {
           const lights = LightManager.getInstance().getLights();
           const segments = this.world.getOcclusionSegments(this.cameraX, this.cameraY, w, h);
           
-          lights.forEach(light => {
+          const shadowLights = lights.filter(l => l.castsShadows);
+          const glowLights = lights.filter(l => !l.castsShadows);
+
+          // 2a. Shadow lights
+          shadowLights.forEach(light => {
               const screenX = light.x - this.cameraX;
               const screenY = light.y - this.cameraY;
               
               if (screenX < -light.radius || screenX > w + light.radius || 
                   screenY < -light.radius || screenY > h + light.radius) return;
+
+              lctx.save();
+              lctx.globalCompositeOperation = 'screen';
+              lctx.globalAlpha = light.intensity * (1.0 - ambientIntensity * 0.5);
 
               let polygon = this.lightPolygonCache.get(light.id);
               const lastPos = (light as any)._lastShadowPos || {x: 0, y: 0};
@@ -1006,10 +1013,6 @@ export class GameplayScene implements Scene {
               }
 
               if (polygon.length > 0) {
-                  lctx.save();
-                  lctx.globalCompositeOperation = 'screen';
-                  lctx.globalAlpha = light.intensity * (1.0 - ambientIntensity * 0.5);
-
                   lctx.beginPath();
                   lctx.moveTo(polygon[0].x - this.cameraX, polygon[0].y - this.cameraY);
                   for (let i = 1; i < polygon.length; i++) {
@@ -1017,15 +1020,36 @@ export class GameplayScene implements Scene {
                   }
                   lctx.closePath();
                   lctx.clip();
+              }
 
+              const grad = lctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, light.radius);
+              grad.addColorStop(0, light.color);
+              grad.addColorStop(1, 'rgba(0,0,0,0)');
+              lctx.fillStyle = grad;
+              lctx.fillRect(screenX - light.radius, screenY - light.radius, light.radius * 2, light.radius * 2);
+              lctx.restore();
+          });
+
+          // 2b. Glow lights (Batched)
+          if (glowLights.length > 0) {
+              lctx.save();
+              lctx.globalCompositeOperation = 'screen';
+              glowLights.forEach(light => {
+                  const screenX = light.x - this.cameraX;
+                  const screenY = light.y - this.cameraY;
+                  
+                  if (screenX < -light.radius || screenX > w + light.radius || 
+                      screenY < -light.radius || screenY > h + light.radius) return;
+
+                  lctx.globalAlpha = light.intensity * (1.0 - ambientIntensity * 0.5);
                   const grad = lctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, light.radius);
                   grad.addColorStop(0, light.color);
                   grad.addColorStop(1, 'rgba(0,0,0,0)');
                   lctx.fillStyle = grad;
                   lctx.fillRect(screenX - light.radius, screenY - light.radius, light.radius * 2, light.radius * 2);
-                  lctx.restore();
-              }
-          });
+              });
+              lctx.restore();
+          }
       }
 
       // --- 3. UN-SHADOW CASTERS (Mathematically Correct unshadowing for multiply) ---
