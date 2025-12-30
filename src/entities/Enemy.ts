@@ -33,12 +33,20 @@ export class Enemy extends Entity {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+      this.renderInternal(ctx, false);
+  }
+
+  public renderAsSilhouette(ctx: CanvasRenderingContext2D, color: string): void {
+      this.renderInternal(ctx, true, color);
+  }
+
+  private renderInternal(ctx: CanvasRenderingContext2D, silhouette: boolean, silColor?: string): void {
     if (!this.active) return;
     
     ctx.save();
     
     // Apply visual scale bump
-    if (this.visualScale !== 1.0) {
+    if (!silhouette && this.visualScale !== 1.0) {
         ctx.translate(this.x, this.y);
         ctx.scale(this.visualScale, this.visualScale);
         ctx.translate(-this.x, -this.y);
@@ -48,40 +56,49 @@ export class Enemy extends Entity {
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     
-    const grad = ctx.createRadialGradient(this.x - 3, this.y - 3, 1, this.x, this.y, this.radius);
-    grad.addColorStop(0, '#757575');
-    grad.addColorStop(0.6, '#434b4d'); // Iron
-    grad.addColorStop(1, '#2a2a2a');
+    if (silhouette) {
+        ctx.fillStyle = silColor || '#fff';
+    } else {
+        const grad = ctx.createRadialGradient(this.x - 3, this.y - 3, 1, this.x, this.y, this.radius);
+        grad.addColorStop(0, '#757575');
+        grad.addColorStop(0.6, '#434b4d'); // Iron
+        grad.addColorStop(1, '#2a2a2a');
+        ctx.fillStyle = grad;
+    }
     
-    ctx.fillStyle = grad;
     ctx.fill();
-    ctx.strokeStyle = '#222';
-    ctx.stroke();
 
-    // Eye (Glowing Ember)
-    const eyeX = this.x + Math.cos(this.rotation) * 6;
-    const eyeY = this.y + Math.sin(this.rotation) * 6;
-    
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#ff4500';
-    ctx.fillStyle = '#ff4500';
-    
-    ctx.beginPath();
-    ctx.arc(eyeX, eyeY, 4, 0, Math.PI * 2);
-    ctx.fill();
-    
-    ctx.shadowBlur = 0; // Reset
+    if (!silhouette) {
+        ctx.strokeStyle = '#222';
+        ctx.stroke();
 
-    // Damage Flash Overlay
-    if (this.damageFlash > 0) {
-        ctx.globalCompositeOperation = 'source-atop';
-        ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
-        ctx.fillRect(this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+        // Eye (Glowing Ember)
+        const eyeX = this.x + Math.cos(this.rotation) * 6;
+        const eyeY = this.y + Math.sin(this.rotation) * 6;
+        
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#ff4500';
+        ctx.fillStyle = '#ff4500';
+        
+        ctx.beginPath();
+        ctx.arc(eyeX, eyeY, 4, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.shadowBlur = 0; // Reset
+
+        // Damage Flash Overlay
+        if (this.damageFlash > 0) {
+            ctx.globalCompositeOperation = 'source-atop';
+            ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
+            ctx.fillRect(this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+        }
     }
 
     ctx.restore();
 
-    // Render fire if burning (outside the scale/tint for clarity)
-    this.renderFire(ctx);
+    if (!silhouette) {
+        // Render fire if burning (outside the scale/tint for clarity)
+        this.renderFire(ctx);
+    }
   }
 }
