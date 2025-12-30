@@ -91,6 +91,7 @@ export class GameplayScene implements Scene {
     
     // Load Sounds
     const sm = SoundManager.getInstance();
+    sm.init(); // Initialize with config values
     sm.setWorld(this.world);
     sm.loadSound('ping', '/assets/sounds/ping.wav');
     sm.loadSound('shoot_cannon', '/assets/sounds/shoot_cannon.wav');
@@ -101,11 +102,15 @@ export class GameplayScene implements Scene {
     sm.loadSound('place_mine', '/assets/sounds/place_mine.wav');
     sm.loadSound('weapon_reload', '/assets/sounds/weapon_reload.wav');
     sm.loadSound('hit_cannon', '/assets/sounds/hit_cannon.wav');
+    sm.loadSound('hit_missile', '/assets/sounds/hit_missile.wav');
     sm.loadSound('hit_laser', '/assets/sounds/hit_laser.wav');
     sm.loadSound('hit_ray', '/assets/sounds/hit_ray.wav');
     sm.loadSound('explosion_large', '/assets/sounds/explosion_large.wav');
     sm.loadSound('collect_coin', '/assets/sounds/collect_coin.wav');
     sm.loadSound('ui_click', '/assets/sounds/ui_click.wav');
+
+    // Automatically discover and load all material hit variants
+    sm.discoverMaterialVariants(['wood', 'brick', 'stone', 'metal', 'indestructible']);
 
     const centerX = this.world.getWidthPixels() / 2;
     const centerY = this.world.getHeightPixels() / 2;
@@ -640,7 +645,6 @@ export class GameplayScene implements Scene {
           SoundManager.getInstance().startLoopSpatial(hitSfx, this.beamEndPos.x, this.beamEndPos.y);
           SoundManager.getInstance().updateLoopPosition(hitSfx, this.beamEndPos.x, this.beamEndPos.y);
           
-          // --- Heat Simulation Update ---
           if (!hitEnemy) { // Only heat up environment
               const heatAmount = type === 'laser' ? 0.4 : 0.6; // Heat per frame
               this.heatMap.addHeat(this.beamEndPos.x, this.beamEndPos.y, heatAmount * dt * 5, 12);
@@ -891,6 +895,16 @@ export class GameplayScene implements Scene {
 
   private createExplosion(x: number, y: number, radius: number, damage: number): void {
       SoundManager.getInstance().playSoundSpatial('explosion_large', x, y);
+      
+      // Hit sound for explosion center
+      if (this.heatMap) {
+          const mat = this.heatMap.getMaterialAt(x, y);
+          if (mat !== MaterialType.NONE) {
+              const matName = MaterialType[mat].toLowerCase();
+              SoundManager.getInstance().playMaterialHit(matName, x, y);
+          }
+      }
+
       // Damage enemies in radius
       this.enemies.forEach(e => {
           const dx = e.x - x;

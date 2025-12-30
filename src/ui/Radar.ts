@@ -113,7 +113,7 @@ export class Radar {
     });
 
     if (pingTriggered) {
-        SoundManager.getInstance().playSound('ping');
+        SoundManager.getInstance().playSoundSpatial('ping', player.x, player.y);
     }
 
     // 3. Render Blips

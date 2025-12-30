@@ -1,5 +1,6 @@
 import { World } from './World';
 import { SoundRaycaster, AudiblePath } from '../utils/SoundRaycaster';
+import { ConfigManager } from '../config/MasterConfig';
 
 interface SpatialVoice {
     source: AudioBufferSourceNode | OscillatorNode;
@@ -8,6 +9,13 @@ interface SpatialVoice {
     filter: BiquadFilterNode;
     x: number;
     y: number;
+}
+
+interface QueuedSound {
+    name: string;
+    x: number;
+    y: number;
+    count: number;
 }
 
 export class SoundManager {
@@ -24,6 +32,13 @@ export class SoundManager {
   private listenerY: number = 0;
   private world: World | null = null;
 
+  // Track available variants per material category
+  private materialVariants: Map<string, string[]> = new Map();
+
+  // Sound Accumulator
+  private soundQueue: Map<string, QueuedSound> = new Map();
+  private readonly CLUSTER_GRID_SIZE = 64;
+
   private constructor() {}
 
   public static getInstance(): SoundManager {
@@ -37,6 +52,10 @@ export class SoundManager {
     if (!this.audioCtx) {
       this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       this.masterGain = this.audioCtx.createGain();
+      
+      const configVol = ConfigManager.getInstance().get<number>('Audio', 'masterVolume');
+      this.volume = configVol;
+
       this.masterGain.gain.setValueAtTime(this.volume, this.audioCtx.currentTime);
       this.masterGain.connect(this.audioCtx.destination);
     }
@@ -46,10 +65,52 @@ export class SoundManager {
       this.world = world;
   }
 
+  public queueSoundSpatial(name: string, x: number, y: number): void {
+    // Clustering Logic: Group by Sound Name + Grid Cell
+    const gx = Math.floor(x / this.CLUSTER_GRID_SIZE);
+    const gy = Math.floor(y / this.CLUSTER_GRID_SIZE);
+    const key = `${name}_${gx}_${gy}`;
+
+    const existing = this.soundQueue.get(key);
+    if (existing) {
+        // Centroid calculation: average positions
+        const n = existing.count;
+        existing.x = (existing.x * n + x) / (n + 1);
+        existing.y = (existing.y * n + y) / (n + 1);
+        existing.count++;
+    } else {
+        this.soundQueue.set(key, { name, x, y, count: 1 });
+    }
+  }
+
+  public processQueue(): void {
+      if (this.soundQueue.size === 0) return;
+
+      this.soundQueue.forEach((q) => {
+          // Calculate volume boost based on count
+          const boost = 1 + Math.log10(q.count);
+          this.playSoundSpatial(q.name, q.x, q.y, boost);
+      });
+      this.soundQueue.clear();
+  }
+
+  public playMaterialHit(material: string, x: number, y: number): void {
+    const matLower = material.toLowerCase();
+    const available = this.materialVariants.get(matLower);
+    
+    if (available && available.length > 0) {
+        // Pick randomly from only what was actually loaded
+        const name = available[Math.floor(Math.random() * available.length)];
+        this.queueSoundSpatial(name, x, y);
+    }
+  }
+
   public updateListener(x: number, y: number): void {
       this.listenerX = x;
       this.listenerY = y;
       
+      this.processQueue(); // Automatically process queued hits every frame
+
       // Update spatial loops
       if (this.world) {
           this.spatialLoops.forEach((voice) => {
@@ -93,7 +154,7 @@ export class SoundManager {
       voice.filter.frequency.setTargetAtTime(minCutoff, now, 0.1);
   }
 
-  public playSoundSpatial(name: string, x: number, y: number): void {
+  public playSoundSpatial(name: string, x: number, y: number, volumeScale: number = 1.0): void {
     if (this.isMuted || !this.audioCtx || !this.masterGain || !this.world) return;
     if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
 
@@ -108,11 +169,30 @@ export class SoundManager {
         weightedPan += p.pan * p.volume;
         minCutoff = Math.min(minCutoff, p.filterCutoff);
     }
-    const finalVolume = Math.min(1.0, Math.sqrt(totalEnergy));
+
+    const pathVol = Math.sqrt(totalEnergy);
     const totalVol = paths.reduce((acc, p) => acc + p.volume, 0);
     const finalPan = totalVol > 0 ? weightedPan / totalVol : 0;
 
+    // Load base volume from config
+    let baseVol = ConfigManager.getInstance().get<number>('Audio', 'vol_' + name);
+    
+    // Fallback for material hits (e.g., wood_hit_1 -> vol_hit_material)
+    if (baseVol === undefined) {
+        if (name.includes('_hit_')) {
+            baseVol = ConfigManager.getInstance().get<number>('Audio', 'vol_hit_material');
+        }
+    }
+    
+    if (baseVol === undefined) baseVol = 1.0;
+
+    const finalVolume = Math.min(2.0, pathVol * baseVol * volumeScale);
+
     const buffer = this.sounds.get(name);
+    if (!buffer) {
+        console.warn(`Sound buffer not found: ${name}. Falling back to synthesis.`);
+    }
+
     const filter = this.audioCtx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.value = minCutoff;
@@ -227,16 +307,53 @@ export class SoundManager {
     return this.isMuted;
   }
 
-  public async loadSound(name: string, url: string): Promise<void> {
+  public async loadSound(name: string, url: string): Promise<boolean> {
     if (!this.audioCtx) this.init();
     try {
       const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await this.audioCtx!.decodeAudioData(arrayBuffer);
       this.sounds.set(name, audioBuffer);
+      
+      // Track material variants automatically
+      if (name.includes('_hit_')) {
+          const category = name.split('_hit_')[0];
+          if (!this.materialVariants.has(category)) {
+              this.materialVariants.set(category, []);
+          }
+          if (!this.materialVariants.get(category)!.includes(name)) {
+            this.materialVariants.get(category)!.push(name);
+          }
+      }
+      return true;
     } catch (e) {
-      console.warn(`Failed to load sound ${name} from ${url}. Using fallback.`);
+      // Do not log warning for material hit probing
+      if (!name.includes('_hit_')) {
+          console.warn(`Failed to load sound ${name} from ${url}. Using fallback.`);
+      }
+      return false;
     }
+  }
+
+  /**
+   * Automatically discovers and loads material hit variants by probing 
+   * until a file is not found.
+   */
+  public async discoverMaterialVariants(materials: string[]): Promise<void> {
+      for (const mat of materials) {
+          let i = 1;
+          let found = true;
+          while (found && i < 20) { // Safety cap of 20 variants
+              const name = `${mat}_hit_${i}`;
+              const url = `/assets/sounds/${name}.wav`;
+              found = await this.loadSound(name, url);
+              if (found) {
+                  i++;
+              }
+          }
+          console.log(`Discovered ${i-1} variants for material: ${mat}`);
+      }
   }
 
   public playSound(name: string): void {

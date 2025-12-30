@@ -70,8 +70,8 @@ export class SoundRaycaster {
             const px = sx + (dx / steps) * i;
             const py = sy + (dy / steps) * i;
             if (world.isWall(px, py)) {
-                const mat = (world as any).heatMapRef?.getMaterialAt(px, py) ?? MaterialType.STONE;
-                const props = this.MATERIAL_PROPS[mat];
+                const mat = ((world as any).heatMapRef?.getMaterialAt(px, py) ?? MaterialType.STONE) as MaterialType;
+                const props = SoundRaycaster.MATERIAL_PROPS[mat];
                 muffle *= (1 - props.absorption);
                 cutoff = Math.min(cutoff, props.cutoff);
                 
@@ -124,8 +124,8 @@ export class SoundRaycaster {
                 // Check hit wall
                 if (world.isWall(currX, currY)) {
                     // Reflect
-                    const mat = (world as any).heatMapRef?.getMaterialAt(currX, currY) ?? MaterialType.STONE;
-                    const props = this.MATERIAL_PROPS[mat];
+                    const mat = ((world as any).heatMapRef?.getMaterialAt(currX, currY) ?? MaterialType.STONE) as MaterialType;
+                    const props = SoundRaycaster.MATERIAL_PROPS[mat];
                     intensity *= (1 - props.absorption);
                     cutoff = Math.min(cutoff, props.cutoff);
 

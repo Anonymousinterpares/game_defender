@@ -86,6 +86,29 @@ export const MasterConfig: GameConfigSchema = {
     coneAngle: { value: 60, type: 'number', min: 10, max: 180, step: 5, description: 'Vision Cone Angle (Degrees)' },
     coneDistance: { value: 20.0, type: 'number', min: 5, max: 100, step: 1, description: 'Vision Cone Distance' }
   },
+  Audio: {
+    masterVolume: { value: 0.5, type: 'number', min: 0, max: 1, step: 0.05, description: 'Master Volume' },
+    
+    // Per-sound base volumes
+    vol_shoot_cannon: { value: 0.4, type: 'number', description: 'Cannon Shot Volume' },
+    vol_shoot_laser: { value: 0.3, type: 'number', description: 'Laser Loop Volume' },
+    vol_shoot_ray: { value: 0.5, type: 'number', description: 'Ray Loop Volume' },
+    vol_shoot_rocket: { value: 0.5, type: 'number', description: 'Rocket Shot Volume' },
+    vol_shoot_missile: { value: 0.4, type: 'number', description: 'Missile Shot Volume' },
+    vol_place_mine: { value: 0.4, type: 'number', description: 'Mine Place Volume' },
+    
+    vol_hit_cannon: { value: 0.4, type: 'number', description: 'Cannon Hit Volume' },
+    vol_hit_missile: { value: 0.4, type: 'number', description: 'Missile Hit Volume' },
+    vol_hit_laser: { value: 0.2, type: 'number', description: 'Laser Hit Volume' },
+    vol_hit_ray: { value: 0.3, type: 'number', description: 'Ray Hit Volume' },
+    
+    vol_explosion_large: { value: 0.8, type: 'number', description: 'Explosion Volume' },
+    vol_weapon_reload: { value: 0.5, type: 'number', description: 'Reload Volume' },
+    vol_hit_material: { value: 0.3, type: 'number', description: 'Material Hit Volume' },
+    vol_ui_click: { value: 0.2, type: 'number', description: 'UI Click Volume' },
+    vol_collect_coin: { value: 0.4, type: 'number', description: 'Collect Coin Volume' },
+    vol_ping: { value: 0.1, type: 'number', description: 'Radar Ping Volume' }
+  },
   Keybindings: {
       openDock: { value: 'KeyP', type: 'string', description: 'Open Dock/Shop' }
   }
@@ -111,7 +134,12 @@ export class ConfigManager {
 
   public get<T>(category: string, key: string): T {
     // @ts-ignore
-    return MasterConfig[category][key].value as T;
+    const cat = MasterConfig[category];
+    if (cat && cat[key]) {
+        return cat[key].value as T;
+    }
+    // @ts-ignore
+    return undefined;
   }
 
   public set<T>(category: string, key: string, newValue: T): void {
