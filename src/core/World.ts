@@ -119,27 +119,44 @@ export class World {
           
           if (!isMostlyDestroyed) {
               const h = 8;
-              ctx.fillStyle = sideColor;
-              ctx.fillRect(worldX, worldY, this.tileSize, this.tileSize);
-              ctx.fillStyle = color;
-              ctx.fillRect(worldX, worldY - h, this.tileSize, this.tileSize);
-              ctx.fillStyle = topColor;
-              ctx.fillRect(worldX, worldY - h, this.tileSize, 2);
-              ctx.fillRect(worldX, worldY - h, 2, this.tileSize);
+              const subDiv = 10;
+              const subSize = this.tileSize / subDiv;
+              const hasData = this.heatMapRef && this.heatMapRef.hasTileData(x, y);
 
-              if (this.heatMapRef && this.heatMapRef.hasTileData(x, y)) {
-                  const subDiv = 10;
-                  const subSize = this.tileSize / subDiv;
-                  ctx.save();
-                  ctx.globalCompositeOperation = 'destination-out';
+              if (hasData) {
+                  // Damaged tile: Draw both side and top sub-tile by sub-tile
                   for (let sy = 0; sy < subDiv; sy++) {
                       for (let sx = 0; sx < subDiv; sx++) {
-                          if (this.heatMapRef.isSubTileDestroyed(worldX + sx * subSize + subSize/2, worldY + sy * subSize + subSize/2)) {
-                              ctx.fillRect(worldX + sx * subSize, worldY - h + sy * subSize, subSize, subSize);
+                          const subWorldX = worldX + sx * subSize;
+                          const subWorldY = worldY + sy * subSize;
+                          
+                          if (!this.heatMapRef.isSubTileDestroyed(subWorldX + subSize/2, subWorldY + subSize/2)) {
+                              // Side shadow
+                              ctx.fillStyle = sideColor;
+                              ctx.fillRect(subWorldX, subWorldY, subSize + 0.2, subSize + 0.2);
+                              
+                              // Top face
+                              ctx.fillStyle = color;
+                              ctx.fillRect(subWorldX, subWorldY - h, subSize + 0.2, subSize + 0.2);
+                              
+                              // Optional: Small top highlight for each sub-tile edge
+                              if (sy === 0 || sx === 0) {
+                                  ctx.fillStyle = topColor;
+                                  if (sy === 0) ctx.fillRect(subWorldX, subWorldY - h, subSize, 1);
+                                  if (sx === 0) ctx.fillRect(subWorldX, subWorldY - h, 1, subSize);
+                              }
                           }
                       }
                   }
-                  ctx.restore();
+              } else {
+                  // Healthy tile: Fast path draw big rects
+                  ctx.fillStyle = sideColor;
+                  ctx.fillRect(worldX, worldY, this.tileSize, this.tileSize);
+                  ctx.fillStyle = color;
+                  ctx.fillRect(worldX, worldY - h, this.tileSize, this.tileSize);
+                  ctx.fillStyle = topColor;
+                  ctx.fillRect(worldX, worldY - h, this.tileSize, 2);
+                  ctx.fillRect(worldX, worldY - h, 2, this.tileSize);
               }
           } else {
               const subDiv = 10;

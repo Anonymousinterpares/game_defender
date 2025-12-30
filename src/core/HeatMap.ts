@@ -366,7 +366,7 @@ export class HeatMap {
                         // Vaporization logic
                         if (nextData[idx] > 0.95) {
                             wData[idx] += effectiveDT;
-                            const mat = mData ? mData[idx] : MaterialType.STONE;
+                            const mat = (mData ? mData[idx] : MaterialType.STONE) as MaterialType;
                             if (wData[idx] >= MATERIAL_PROPS[mat].vaporizeTime) {
                                 hData![idx] = 0;
                                 nextData[idx] = 0;

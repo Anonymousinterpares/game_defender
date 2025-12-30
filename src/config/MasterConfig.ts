@@ -78,7 +78,8 @@ export const MasterConfig: GameConfigSchema = {
     showHitboxes: { value: false, type: 'boolean', description: 'Show Hitboxes' },
     showGrid: { value: true, type: 'boolean', description: 'Show Map Grid' },
     fpsCounter: { value: true, type: 'boolean', description: 'Show FPS' },
-    devModeAlwaysOn: { value: true, type: 'boolean', description: 'Dev commands always active' }
+    devModeAlwaysOn: { value: true, type: 'boolean', description: 'Dev commands always active' },
+    enableEnemySpawning: { value: false, type: 'boolean', description: 'Enable Enemy Spawning' }
   },
   Visuals: {
     fogOfWar: { value: true, type: 'boolean', description: 'Enable Fog of War' },

@@ -156,6 +156,9 @@ export class GameplayScene implements Scene {
 
     this.initWeaponState();
     
+    // Dev Mode initialization
+    this.spawnEnemies = ConfigManager.getInstance().get<boolean>('Debug', 'enableEnemySpawning');
+
     // Init Fog Canvas
     this.fogCanvas = document.createElement('canvas');
     this.fogCtx = this.fogCanvas.getContext('2d');
@@ -1238,14 +1241,16 @@ export class GameplayScene implements Scene {
         }
     }
 
-    if (cleanCmd === 'activate_enemy_spawn') {
+    if (cleanCmd === 'activate_enemy_spawn' || cleanCmd === 'spawn_on') {
         this.spawnEnemies = true;
+        ConfigManager.getInstance().set('Debug', 'enableEnemySpawning', true);
         console.log('Enemy spawning activated');
         return true;
     }
 
-    if (cleanCmd === 'deactivate_enemy_spawn') {
+    if (cleanCmd === 'deactivate_enemy_spawn' || cleanCmd === 'spawn_off') {
         this.spawnEnemies = false;
+        ConfigManager.getInstance().set('Debug', 'enableEnemySpawning', false);
         console.log('Enemy spawning deactivated');
         return true;
     }
