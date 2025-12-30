@@ -234,9 +234,8 @@ export class Player extends Entity {
 
           // Damage Flash Overlay for segments
           if (s.damageFlash > 0) {
-              ctx.globalCompositeOperation = 'source-atop';
               ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (s.damageFlash / 0.2)})`;
-              ctx.fillRect(s.x - s.radius, s.y - s.radius, s.radius * 2, s.radius * 2);
+              ctx.fill();
           }
       }
       ctx.restore();
@@ -278,9 +277,8 @@ export class Player extends Entity {
 
         // Damage Flash Overlay for head
         if (this.damageFlash > 0) {
-            ctx.globalCompositeOperation = 'source-atop';
             ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
-            ctx.fillRect(this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+            ctx.fill();
         }
     }
     ctx.restore();

@@ -86,11 +86,14 @@ export class Enemy extends Entity {
         
         ctx.shadowBlur = 0; // Reset
 
-        // Damage Flash Overlay
+        // Damage Flash Overlay (Applied to the body path)
         if (this.damageFlash > 0) {
-            ctx.globalCompositeOperation = 'source-atop';
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
-            ctx.fillRect(this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+            ctx.fill();
+            ctx.restore();
         }
     }
 
