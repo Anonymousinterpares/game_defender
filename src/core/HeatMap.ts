@@ -410,7 +410,10 @@ export class HeatMap {
                             const mat = (mData ? mData[idx] : MaterialType.STONE) as MaterialType;
                             if (wData[idx] >= MATERIAL_PROPS[mat].vaporizeTime) {
                                 hData![idx] = 0;
-                                if (this.worldRef) this.worldRef.markMeshDirty();
+                                if (this.worldRef) {
+                                    this.worldRef.markMeshDirty();
+                                    this.worldRef.invalidateTileCache(tx, ty);
+                                }
                                 nextData[idx] = 0;
                             }
                         } else {
@@ -443,7 +446,10 @@ export class HeatMap {
                             }
 
                             if (hData![idx] <= 0) {
-                                if (this.worldRef) this.worldRef.markMeshDirty();
+                                if (this.worldRef) {
+                                    this.worldRef.markMeshDirty();
+                                    this.worldRef.invalidateTileCache(tx, ty);
+                                }
                                 nextFire[idx] = 0;
                                 nextData[idx] = 0;
                             }

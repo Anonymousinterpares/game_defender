@@ -161,14 +161,18 @@ export class World {
         ctx.fillStyle = '#111111';
         ctx.fillRect(cameraX, cameraY, viewWidth, viewHeight);
 
-        ctx.beginPath();
-        ctx.strokeStyle = '#1a1a1a';
-        ctx.lineWidth = 1;
-
+        // Render Ground/Floor color
+        ctx.fillStyle = '#1c1c1c'; // Slightly lighter than the void to represent the floor
         const startX = Math.floor(cameraX / this.tileSize) * this.tileSize;
         const endX = cameraX + viewWidth;
         const startY = Math.floor(cameraY / this.tileSize) * this.tileSize;
         const endY = cameraY + viewHeight;
+        
+        ctx.fillRect(startX, startY, endX - startX, endY - startY);
+
+        ctx.beginPath();
+        ctx.strokeStyle = '#222222'; // Darker grid for subtle floor texture
+        ctx.lineWidth = 1;
 
         for (let x = startX; x <= endX; x += this.tileSize) {
             ctx.moveTo(x, cameraY);
