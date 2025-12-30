@@ -44,6 +44,7 @@ export class HeatMap {
     private simInterval: number = 3; 
     private frameCount: number = 0;
     private fireAsset: HTMLImageElement | null = null;
+    private worldRef: any = null;
 
     constructor(private tileSize: number) {
         // Pre-load fire spritesheet if configured
@@ -56,6 +57,10 @@ export class HeatMap {
                 this.fireAsset = null;
             };
         }
+    }
+
+    public setWorldRef(world: any): void {
+        this.worldRef = world;
     }
 
     public isSubTileBurning(worldX: number, worldY: number): boolean {
@@ -304,6 +309,7 @@ export class HeatMap {
 
             if (dist < effectiveRadius) {
                 hData[i] = 0;
+                if (this.worldRef) this.worldRef.markMeshDirty();
                 // Once destroyed, clear heat/fire
                 const heat = this.heatData.get(key);
                 if (heat) heat[i] = 0;
@@ -369,6 +375,7 @@ export class HeatMap {
                             const mat = (mData ? mData[idx] : MaterialType.STONE) as MaterialType;
                             if (wData[idx] >= MATERIAL_PROPS[mat].vaporizeTime) {
                                 hData![idx] = 0;
+                                if (this.worldRef) this.worldRef.markMeshDirty();
                                 nextData[idx] = 0;
                             }
                         } else {
@@ -401,6 +408,7 @@ export class HeatMap {
                             }
 
                             if (hData![idx] <= 0) {
+                                if (this.worldRef) this.worldRef.markMeshDirty();
                                 nextFire[idx] = 0;
                                 nextData[idx] = 0;
                             }
@@ -559,12 +567,38 @@ export class HeatMap {
 
     
 
-        public hasTileData(tx: number, ty: number): boolean {
+            public hasTileData(tx: number, ty: number): boolean {
 
-            return this.hpData.has(`${tx},${ty}`);
+    
+
+                return this.hpData.has(`${tx},${ty}`);
+
+    
+
+            }
+
+    
+
+        
+
+    
+
+            public getTileHP(tx: number, ty: number): Float32Array | null {
+
+    
+
+                return this.hpData.get(`${tx},${ty}`) || null;
+
+    
+
+            }
+
+    
 
         }
 
-    }
+    
+
+        
 
     

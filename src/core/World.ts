@@ -8,6 +8,10 @@ export class World {
   private tiles: MaterialType[][]; // Material of the tile
   private heatMapRef: any = null;
 
+  // Optimized Shadow Geometry
+  private cachedSegments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
+  private isMeshDirty: boolean = true;
+
   constructor() {
     this.width = ConfigManager.getInstance().get('World', 'width');
     this.height = ConfigManager.getInstance().get('World', 'height');
@@ -19,6 +23,7 @@ export class World {
 
   public setHeatMap(hm: any): void {
       this.heatMapRef = hm;
+      this.heatMapRef.setWorldRef(this);
       // Initialize HeatMap materials from world
       for (let y = 0; y < this.height; y++) {
           for (let x = 0; x < this.width; x++) {
@@ -27,6 +32,10 @@ export class World {
               }
           }
       }
+  }
+
+  public markMeshDirty(): void {
+      this.isMeshDirty = true;
   }
 
   private generate(): void {
@@ -211,41 +220,103 @@ export class World {
     return { x, y, collided: false };
   }
 
-  public getOcclusionSegments(cameraX: number, cameraY: number, viewWidth: number, viewHeight: number): {a: {x: number, y: number}, b: {x: number, y: number}}[] {
+  private rebuildMesh(): void {
       const segments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
-      
-      const padding = this.tileSize * 2;
-      const startCol = Math.floor((cameraX - padding) / this.tileSize);
-      const endCol = Math.floor((cameraX + viewWidth + padding) / this.tileSize);
-      const startRow = Math.floor((cameraY - padding) / this.tileSize);
-      const endRow = Math.floor((cameraY + viewHeight + padding) / this.tileSize);
+      const ts = this.tileSize;
 
-      for (let y = startRow; y <= endRow; y++) {
-          if (y < 0 || y >= this.height) continue;
-          for (let x = startCol; x <= endCol; x++) {
-              if (x < 0 || x >= this.width) continue;
+      // 1. Process Healthy Tiles (Greedy horizontal merging)
+      const visitedH = new Set<string>();
+      for (let y = 0; y < this.height; y++) {
+          for (let x = 0; x < this.width; x++) {
+              if (this.tiles[y][x] === MaterialType.NONE || visitedH.has(`${x},${y}`)) continue;
+              if (this.heatMapRef && this.heatMapRef.hasTileData(x, y)) continue; 
 
-              const tileType = this.tiles[y][x];
-              if (tileType !== MaterialType.NONE) {
-                  const wx = x * this.tileSize;
-                  const wy = y * this.tileSize;
-                  const ts = this.tileSize;
-                  
-                  // For simplicity, we only add segments if the tile is NOT fully destroyed
-                  // A better way would be per sub-tile, but that's very expensive for raycasting.
-                  // We'll treat the whole tile as a shadow blocker if it's mostly there.
-                  if (this.heatMapRef && this.heatMapRef.isTileMostlyDestroyed(x, y)) {
-                      continue;
+              let xEnd = x;
+              while (xEnd + 1 < this.width && 
+                     this.tiles[y][xEnd + 1] !== MaterialType.NONE && 
+                     !(this.heatMapRef && this.heatMapRef.hasTileData(xEnd + 1, y))) {
+                  xEnd++;
+                  visitedH.add(`${xEnd},${y}`);
+              }
+
+              const x1 = x * ts;
+              const x2 = (xEnd + 1) * ts;
+              const y1 = y * ts;
+              const y2 = (y + 1) * ts;
+
+              if (y === 0 || this.tiles[y-1][x] === MaterialType.NONE)
+                  segments.push({a: {x: x1, y: y1}, b: {x: x2, y: y1}});
+              if (y === this.height - 1 || this.tiles[y+1][x] === MaterialType.NONE)
+                  segments.push({a: {x: x1, y: y2}, b: {x: x2, y: y2}});
+              
+              segments.push({a: {x: x1, y: y1}, b: {x: x1, y: y2}});
+              segments.push({a: {x: x2, y: y1}, b: {x: x2, y: y2}});
+          }
+      }
+
+      // 2. Process Damaged Tiles (Intra-tile edge merging)
+      for (let y = 0; y < this.height; y++) {
+          for (let x = 0; x < this.width; x++) {
+              if (this.tiles[y][x] === MaterialType.NONE) continue;
+              const hData = this.heatMapRef ? this.heatMapRef.getTileHP(x, y) : null;
+              if (!hData) continue;
+
+              const subDiv = 10;
+              const ss = ts / subDiv;
+              const wx = x * ts;
+              const wy = y * ts;
+
+              for (let sy = 0; sy <= subDiv; sy++) {
+                  let startX: number | null = null;
+                  for (let sx = 0; sx < subDiv; sx++) {
+                      const idx = sy * subDiv + sx;
+                      const idxAbove = (sy - 1) * subDiv + sx;
+                      const needsEdge = (sy === 0 && hData[idx] > 0) ||
+                                      (sy === subDiv && hData[idxAbove] > 0) ||
+                                      (sy > 0 && sy < subDiv && (hData[idx] > 0) !== (hData[idxAbove] > 0));
+                      if (needsEdge) { if (startX === null) startX = sx; } 
+                      else { if (startX !== null) {
+                          segments.push({a: {x: wx + startX * ss, y: wy + sy * ss}, b: {x: wx + sx * ss, y: wy + sy * ss}});
+                          startX = null;
+                      }}
                   }
+                  if (startX !== null) segments.push({a: {x: wx + startX * ss, y: wy + sy * ss}, b: {x: wx + ts, y: wy + sy * ss}});
+              }
 
-                  // Add 4 segments of the tile
-                  segments.push({a: {x: wx, y: wy}, b: {x: wx + ts, y: wy}});
-                  segments.push({a: {x: wx + ts, y: wy}, b: {x: wx + ts, y: wy + ts}});
-                  segments.push({a: {x: wx + ts, y: wy + ts}, b: {x: wx, y: wy + ts}});
-                  segments.push({a: {x: wx, y: wy + ts}, b: {x: wx, y: wy}});
+              for (let sx = 0; sx <= subDiv; sx++) {
+                  let startY: number | null = null;
+                  for (let sy = 0; sy < subDiv; sy++) {
+                      const idx = sy * subDiv + sx;
+                      const idxLeft = sy * subDiv + (sx - 1);
+                      const needsEdge = (sx === 0 && hData[idx] > 0) ||
+                                      (sx === subDiv && hData[idxLeft] > 0) ||
+                                      (sx > 0 && sx < subDiv && (hData[idx] > 0) !== (hData[idxLeft] > 0));
+                      if (needsEdge) { if (startY === null) startY = sy; }
+                      else { if (startY !== null) {
+                          segments.push({a: {x: wx + sx * ss, y: wy + startY * ss}, b: {x: wx + sx * ss, y: wy + sy * ss}});
+                          startY = null;
+                      }}
+                  }
+                  if (startY !== null) segments.push({a: {x: wx + sx * ss, y: wy + startY * ss}, b: {x: wx + sx * ss, y: wy + ts}});
               }
           }
       }
-      return segments;
+
+      this.cachedSegments = segments;
+      this.isMeshDirty = false;
+  }
+
+  public getOcclusionSegments(cameraX: number, cameraY: number, viewWidth: number, viewHeight: number): {a: {x: number, y: number}, b: {x: number, y: number}}[] {
+      if (this.isMeshDirty) {
+          this.rebuildMesh();
+      }
+
+      const padding = 200;
+      return this.cachedSegments.filter(s => {
+          return (s.a.x > cameraX - padding && s.a.x < cameraX + viewWidth + padding &&
+                  s.a.y > cameraY - padding && s.a.y < cameraY + viewHeight + padding) ||
+                 (s.b.x > cameraX - padding && s.b.x < cameraX + viewWidth + padding &&
+                  s.b.y > cameraY - padding && s.b.y < cameraY + viewHeight + padding);
+      });
   }
 }
