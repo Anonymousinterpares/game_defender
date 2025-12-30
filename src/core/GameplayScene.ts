@@ -589,12 +589,24 @@ export class GameplayScene implements Scene {
       const screenW = window.innerWidth;
       const screenH = window.innerHeight;
 
-      // Check environment fire for all entities
+      // Check environment effects for all entities
       const allActiveEntities: Entity[] = [this.player, ...this.player.segments, ...this.enemies];
       
       allActiveEntities.forEach(e => {
-          if (this.heatMap && this.heatMap.checkFireArea(e.x, e.y, e.radius)) {
-              this.tryIgniteEntity(e, dt);
+          if (this.heatMap) {
+              // 1. Check for ignition
+              if (this.heatMap.checkFireArea(e.x, e.y, e.radius)) {
+                  this.tryIgniteEntity(e, dt);
+              }
+
+              // 2. Damage from hot floor (any material)
+              const maxIntensity = this.heatMap.getMaxIntensityArea(e.x, e.y, e.radius);
+              if (maxIntensity > 0.05) {
+                  // Damage scale: 1 dps at low (0.05) to 20 dps at max (1.0)
+                  // Formula: ceil(20 * intensity)
+                  const heatDPS = Math.ceil(20 * maxIntensity);
+                  e.takeDamage(heatDPS * dt);
+              }
           }
       });
 

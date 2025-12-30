@@ -86,6 +86,23 @@ export class HeatMap {
         return false;
     }
 
+    public getMaxIntensityArea(x: number, y: number, radius: number): number {
+        const points = [
+            {x, y},
+            {x: x - radius, y},
+            {x: x + radius, y},
+            {x, y: y - radius},
+            {x, y: y + radius}
+        ];
+        
+        let max = 0;
+        for (const p of points) {
+            max = Math.max(max, this.getIntensityAt(p.x, p.y));
+        }
+        return max;
+    }
+
+
     public setMaterial(tx: number, ty: number, material: MaterialType): void {
         const key = `${tx},${ty}`;
         const mData = new Uint8Array(this.subDiv * this.subDiv).fill(material);
