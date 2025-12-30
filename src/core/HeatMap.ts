@@ -482,18 +482,24 @@ export class HeatMap {
         const viewH = ctx.canvas.height;
         const time = performance.now() * 0.001;
 
-        this.materialData.forEach((mData, key) => {
+        // Use a 1-tile buffer for rendering to avoid popping at edges
+        const buffer = this.tileSize;
+
+        this.activeTiles.forEach(key => {
             const [tx, ty] = key.split(',').map(Number);
             const worldX = tx * this.tileSize;
             const worldY = ty * this.tileSize;
 
-            if (worldX + this.tileSize < cameraX || worldX > cameraX + viewW ||
-                worldY + this.tileSize < cameraY || worldY > cameraY + viewH) return;
+            // View Culling with 1-tile buffer
+            if (worldX + this.tileSize < cameraX - buffer || worldX > cameraX + viewW + buffer ||
+                worldY + this.tileSize < cameraY - buffer || worldY > cameraY + viewH + buffer) return;
+
+            const mData = this.materialData.get(key);
+            if (!mData) return;
 
             const hData = this.hpData.get(key)!;
             const heatData = this.heatData.get(key);
             const fireData = this.fireData.get(key);
-            const sData = this.scorchData.get(key);
 
             for (let i = 0; i < mData.length; i++) {
                 if (hData[i] <= 0) continue; // Destroyed
