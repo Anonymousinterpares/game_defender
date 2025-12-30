@@ -14,6 +14,9 @@ import { Drop, DropType } from '../entities/Drop';
 import { Particle } from '../entities/Particle';
 import { TurretUpgrade, ShieldUpgrade } from '../entities/upgrades/Upgrade';
 import { HeatMap, MaterialType } from './HeatMap';
+import { WorldClock } from './WorldClock';
+import { LightManager } from './LightManager';
+import { VisibilitySystem, Point } from './VisibilitySystem';
 
 export class GameplayScene implements Scene {
   private world: World | null = null;
@@ -41,6 +44,7 @@ export class GameplayScene implements Scene {
   private backButton: HTMLButtonElement | null = null;
   private muteButton: HTMLButtonElement | null = null;
   private volumeSlider: HTMLInputElement | null = null;
+  private clockDisplay: HTMLElement | null = null;
   private dockButton: HTMLButtonElement | null = null;
   private dockContainer: HTMLElement | null = null;
   private isDockOpen: boolean = false;
@@ -75,6 +79,13 @@ export class GameplayScene implements Scene {
   // Fog of War state
   private fogCanvas: HTMLCanvasElement | null = null;
   private fogCtx: CanvasRenderingContext2D | null = null;
+
+  // Lighting System
+  private lightCanvas: HTMLCanvasElement | null = null;
+  private lightCtx: CanvasRenderingContext2D | null = null;
+  private lightUpdateCounter: number = 0;
+  private lastTime: number = 0;
+  private lightPolygonCache: Map<string, Point[]> = new Map();
 
   constructor(
     private sceneManager: SceneManager,
@@ -148,6 +159,10 @@ export class GameplayScene implements Scene {
     this.fogCanvas = document.createElement('canvas');
     this.fogCtx = this.fogCanvas.getContext('2d');
 
+    // Init Light Canvas
+    this.lightCanvas = document.createElement('canvas');
+    this.lightCtx = this.lightCanvas.getContext('2d');
+
     this.createUI();
   }
 
@@ -217,6 +232,20 @@ export class GameplayScene implements Scene {
       });
       uiLayer.appendChild(this.volumeSlider);
 
+      this.clockDisplay = document.createElement('div');
+      this.clockDisplay.className = 'hud-text';
+      this.clockDisplay.style.position = 'absolute';
+      this.clockDisplay.style.top = '10px';
+      this.clockDisplay.style.right = '390px'; // 280 + 100 for dock + padding
+      this.clockDisplay.style.fontSize = '1.2em';
+      this.clockDisplay.style.color = '#cfaa6e';
+      this.clockDisplay.style.fontFamily = '"Share Tech Mono", monospace';
+      this.clockDisplay.style.padding = '5px 10px';
+      this.clockDisplay.style.background = 'rgba(0,0,0,0.5)';
+      this.clockDisplay.style.borderRadius = '5px';
+      this.clockDisplay.textContent = '00:00';
+      uiLayer.appendChild(this.clockDisplay);
+
       this.dockButton = document.createElement('button');
       this.dockButton.textContent = 'DOCK (P)';
       this.dockButton.className = 'hud-btn';
@@ -241,6 +270,7 @@ export class GameplayScene implements Scene {
       if (this.dockButton) { this.dockButton.remove(); this.dockButton = null; }
       if (this.muteButton) { this.muteButton.remove(); this.muteButton = null; }
       if (this.volumeSlider) { this.volumeSlider.remove(); this.volumeSlider = null; }
+      if (this.clockDisplay) { this.clockDisplay.remove(); this.clockDisplay = null; }
       if (this.dockContainer) { this.dockContainer.remove(); this.dockContainer = null; }
   }
 
@@ -383,6 +413,22 @@ export class GameplayScene implements Scene {
       this.sceneManager.switchScene('menu');
       return;
     }
+
+    // Update Systems
+    WorldClock.getInstance().update(dt);
+    LightManager.getInstance().update(dt);
+    this.lightUpdateCounter++;
+    
+    if (this.clockDisplay) {
+        const state = WorldClock.getInstance().getTimeState();
+        const ampm = state.hour >= 12 ? 'PM' : 'AM';
+        let displayHour = state.hour % 12;
+        if (displayHour === 0) displayHour = 12;
+        
+        const hh = displayHour.toString().padStart(2, '0');
+        const mm = state.minute.toString().padStart(2, '0');
+        this.clockDisplay.textContent = `${hh}:${mm} ${ampm}`;
+    }
     
     const dockKey = ConfigManager.getInstance().get<string>('Keybindings', 'openDock');
     if (this.inputManager.isKeyJustPressed(dockKey)) {
@@ -464,6 +510,11 @@ export class GameplayScene implements Scene {
                 
                 const p = new Projectile(this.player.x, this.player.y, this.player.rotation, pType);
                 
+                // Muzzle Flash
+                if (weapon !== 'mine') {
+                    LightManager.getInstance().addTransientLight('muzzle', this.player.x, this.player.y);
+                }
+
                 if (weapon === 'missile') {
                     // Find closest enemy for missile
                     let bestDist = 1000;
@@ -648,6 +699,7 @@ export class GameplayScene implements Scene {
       this.radar.update(dt);
     }
 
+    this.updateLightClusters();
     this.heatMap?.update(dt);
   }
 
@@ -724,6 +776,128 @@ export class GameplayScene implements Scene {
       }
   }
 
+  private updateLightClusters(): void {
+      const freq = ConfigManager.getInstance().get<number>('Lighting', 'updateFrequency') || 3;
+      if (this.lightUpdateCounter % freq !== 0) return;
+
+      if (this.heatMap) {
+          const clusters = this.heatMap.getFireClusters(128); 
+          LightManager.getInstance().updateFireLights(clusters);
+      }
+  }
+
+  private renderLighting(ctx: CanvasRenderingContext2D): void {
+      const lightingEnabled = ConfigManager.getInstance().get<boolean>('Lighting', 'enabled');
+      if (!lightingEnabled || !this.lightCanvas || !this.lightCtx || !this.world) return;
+
+      const { ambientIntensity, sunColor, sunDirection } = WorldClock.getInstance().getTimeState();
+      
+      const w = ctx.canvas.width;
+      const h = ctx.canvas.height;
+      if (this.lightCanvas.width !== w || this.lightCanvas.height !== h) {
+          this.lightCanvas.width = w;
+          this.lightCanvas.height = h;
+      }
+
+      const lctx = this.lightCtx;
+      lctx.clearRect(0, 0, w, h);
+
+      // 1. Ambient Background
+      lctx.fillStyle = sunColor;
+      lctx.globalAlpha = 1.0;
+      lctx.fillRect(0, 0, w, h);
+
+      const segments = this.world.getOcclusionSegments(this.cameraX, this.cameraY, w, h);
+
+      // 1.5 Sun Shadows (Parallel)
+      // Visible throughout the day until very dark night
+      if (ambientIntensity > 0.1) {
+          lctx.save();
+          // Shadow color: becomes more opaque as ambient decreases (night)
+          // But during day it should be a consistent subtle dark tint
+          const shadowAlpha = 0.4 * (1.0 - ambientIntensity * 0.2);
+          lctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`; 
+          lctx.globalCompositeOperation = 'multiply';
+          
+          // Longer shadows when sun is low (sunrise/sunset)
+          const shadowLen = 80 * (1.0 - Math.pow(ambientIntensity, 0.5)); 
+          
+          segments.forEach(seg => {
+              const a = { x: seg.a.x - this.cameraX, y: seg.a.y - this.cameraY };
+              const b = { x: seg.b.x - this.cameraX, y: seg.b.y - this.cameraY };
+              const a2 = { x: a.x + sunDirection.x * shadowLen, y: a.y + sunDirection.y * shadowLen };
+              const b2 = { x: b.x + sunDirection.x * shadowLen, y: b.y + sunDirection.y * shadowLen };
+              
+              lctx.beginPath();
+              lctx.moveTo(a.x, a.y);
+              lctx.lineTo(b.x, b.y);
+              lctx.lineTo(b2.x, b2.y);
+              lctx.lineTo(a2.x, a2.y);
+              lctx.closePath();
+              lctx.fill();
+          });
+          lctx.restore();
+      }
+
+      // 2. Point Lights with Shadows
+      if (ambientIntensity < 0.9) {
+          const lights = LightManager.getInstance().getLights();
+          const freq = ConfigManager.getInstance().get<number>('Lighting', 'updateFrequency') || 3;
+          const shouldUpdatePolygons = (this.lightUpdateCounter % freq === 0);
+          
+          const segments = this.world.getOcclusionSegments(this.cameraX, this.cameraY, w, h);
+
+          lights.forEach(light => {
+              const screenX = light.x - this.cameraX;
+              const screenY = light.y - this.cameraY;
+              
+              if (screenX < -light.radius || screenX > w + light.radius || 
+                  screenY < -light.radius || screenY > h + light.radius) return;
+
+              let polygon = this.lightPolygonCache.get(light.id);
+              if (shouldUpdatePolygons || !polygon) {
+                  polygon = VisibilitySystem.calculateVisibility({x: light.x, y: light.y}, segments);
+                  this.lightPolygonCache.set(light.id, polygon);
+              }
+
+              if (polygon.length > 0) {
+                  lctx.save();
+                  lctx.globalCompositeOperation = 'screen';
+                  lctx.globalAlpha = light.intensity * (1.0 - ambientIntensity * 0.5);
+
+                  lctx.beginPath();
+                  const first = polygon[0];
+                  lctx.moveTo(first.x - this.cameraX, first.y - this.cameraY);
+                  for (let i = 1; i < polygon.length; i++) {
+                      lctx.lineTo(polygon[i].x - this.cameraX, polygon[i].y - this.cameraY);
+                  }
+                  lctx.closePath();
+                  lctx.clip();
+
+                  const grad = lctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, light.radius);
+                  grad.addColorStop(0, light.color);
+                  grad.addColorStop(1, 'rgba(0,0,0,0)');
+                  lctx.fillStyle = grad;
+                  lctx.fillRect(screenX - light.radius, screenY - light.radius, light.radius * 2, light.radius * 2);
+                  
+                  lctx.restore();
+              }
+          });
+      }
+
+      if (this.lightUpdateCounter % 60 === 0) {
+          const currentIds = new Set(LightManager.getInstance().getLights().map(l => l.id));
+          for (const id of this.lightPolygonCache.keys()) {
+              if (!currentIds.has(id)) this.lightPolygonCache.delete(id);
+          }
+      }
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.drawImage(this.lightCanvas, 0, 0);
+      ctx.restore();
+  }
+
   private renderHeatMarks(ctx: CanvasRenderingContext2D): void {
       if (!this.heatMap) return;
       this.heatMap.render(ctx, this.cameraX, this.cameraY);
@@ -778,6 +952,9 @@ export class GameplayScene implements Scene {
     }
 
     ctx.restore();
+
+    // --- Lighting Layer ---
+    this.renderLighting(ctx);
 
     // --- Fog of War ---
     const useFog = ConfigManager.getInstance().get<boolean>('Visuals', 'fogOfWar');
@@ -865,6 +1042,16 @@ export class GameplayScene implements Scene {
   private renderFogOfWar(mainCtx: CanvasRenderingContext2D): void {
       if (!this.fogCanvas || !this.fogCtx || !this.player || !this.world) return;
 
+      const { ambientIntensity } = WorldClock.getInstance().getTimeState();
+      
+      // Base darkness: 0.85 at night, 0.0 at full day
+      // Transition: fully revealed if intensity > 0.8
+      let fogAlpha = (1.0 - (ambientIntensity - 0.05) / 0.75) * 0.85;
+      if (ambientIntensity > 0.8) fogAlpha = 0;
+      if (fogAlpha < 0) fogAlpha = 0;
+
+      if (fogAlpha === 0) return; // Skip rendering if full day
+
       const w = mainCtx.canvas.width;
       const h = mainCtx.canvas.height;
       if (this.fogCanvas.width !== w || this.fogCanvas.height !== h) {
@@ -875,9 +1062,9 @@ export class GameplayScene implements Scene {
       const fctx = this.fogCtx;
       const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
 
-      // 1. Fill with darkness
+      // 1. Fill with darkness based on time
       fctx.globalCompositeOperation = 'source-over';
-      fctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+      fctx.fillStyle = `rgba(0, 0, 0, ${fogAlpha})`;
       fctx.fillRect(0, 0, w, h);
 
       // 2. Punch holes (Destination-Out)
@@ -948,6 +1135,7 @@ export class GameplayScene implements Scene {
 
   private createExplosion(x: number, y: number, radius: number, damage: number): void {
       SoundManager.getInstance().playSoundSpatial('explosion_large', x, y);
+      LightManager.getInstance().addTransientLight('explosion', x, y);
       
       // Hit sound for explosion center
       if (this.heatMap) {
@@ -972,6 +1160,7 @@ export class GameplayScene implements Scene {
   }
 
   private createImpactParticles(x: number, y: number, color: string): void {
+      LightManager.getInstance().addTransientLight('impact', x, y);
       const count = 5 + Math.floor(Math.random() * 5);
       for (let i = 0; i < count; i++) {
           const angle = Math.random() * Math.PI * 2;

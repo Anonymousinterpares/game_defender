@@ -120,6 +120,31 @@ export const MasterConfig: GameConfigSchema = {
     maxClusterVolume: { value: 0.8, type: 'number', description: 'Maximum volume for a single fire cluster' },
     soundTTL: { value: 0.2, type: 'number', description: 'Time (s) to keep area sound alive between updates' }
   },
+  Lighting: {
+    enabled: { value: true, type: 'boolean', description: 'Enable Advanced Lighting System' },
+    updateFrequency: { value: 3, type: 'number', description: 'Light update frequency (every N frames)' },
+    shadowResolution: { value: 0.5, type: 'number', description: 'Resolution scale for shadow map (0.1 - 1.0)' },
+    giBlurAmount: { value: 4, type: 'number', description: 'Global Illumination blur intensity' },
+    ambientMin: { value: 0.05, type: 'number', description: 'Minimum ambient light (Night)' },
+    ambientMax: { value: 1.0, type: 'number', description: 'Maximum ambient light (Day)' },
+    fireLightColor: { value: '#ff6600', type: 'string', description: 'Color of fire light' },
+    fireLightRadius: { value: 250, type: 'number', description: 'Radius of fire light clusters' },
+    transientLights: { 
+        value: {
+            muzzle: { color: '#ffcc66', intensity: 1.2, radius: 180, ttl: 0.06 },
+            impact: { color: '#ffffff', intensity: 1.5, radius: 120, ttl: 0.1 },
+            explosion: { color: '#ff5500', intensity: 3.0, radius: 400, ttl: 0.5 }
+        }, 
+        type: 'string', // Actually object, but schema uses 'string'/'number'/'boolean'
+        description: 'Settings for short-lived light sources' 
+    }
+  },
+  TimeSystem: {
+    realSecondsPerHour: { value: 120, type: 'number', description: 'Duration of one game hour (seconds)' },
+    startHour: { value: 10, type: 'number', description: 'Starting game hour (0-23)' },
+    sunriseHour: { value: 6, type: 'number', description: 'Hour when sun starts rising' },
+    sunsetHour: { value: 19, type: 'number', description: 'Hour when sun starts setting' }
+  },
   Keybindings: {
       openDock: { value: 'KeyP', type: 'string', description: 'Open Dock/Shop' }
   }

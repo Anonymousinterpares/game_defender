@@ -125,6 +125,59 @@ export class HeatMap {
         return hp[idx] <= 0;
     }
 
+    public isTileMostlyDestroyed(tx: number, ty: number): boolean {
+        const hData = this.hpData.get(`${tx},${ty}`);
+        if (!hData) return false;
+        
+        let destroyedCount = 0;
+        for (let i = 0; i < hData.length; i++) {
+            if (hData[i] <= 0) destroyedCount++;
+        }
+        return destroyedCount > (hData.length * 0.8);
+    }
+
+    public getFireClusters(gridSize: number): {x: number, y: number, intensity: number}[] {
+        const clusters: Map<string, {x: number, y: number, intensity: number, count: number}> = new Map();
+
+        this.activeTiles.forEach(key => {
+            const fData = this.fireData.get(key);
+            if (!fData) return;
+
+            const [tx, ty] = key.split(',').map(Number);
+            const worldX = tx * this.tileSize;
+            const worldY = ty * this.tileSize;
+
+            for (let i = 0; i < fData.length; i++) {
+                if (fData[i] > 0.1) {
+                    const subX = i % this.subDiv;
+                    const subY = Math.floor(i / this.subDiv);
+                    const px = worldX + (subX + 0.5) * (this.tileSize / this.subDiv);
+                    const py = worldY + (subY + 0.5) * (this.tileSize / this.subDiv);
+
+                    const cx = Math.floor(px / gridSize);
+                    const cy = Math.floor(py / gridSize);
+                    const cKey = `${cx},${cy}`;
+
+                    let cluster = clusters.get(cKey);
+                    if (!cluster) {
+                        cluster = { x: 0, y: 0, intensity: 0, count: 0 };
+                        clusters.set(cKey, cluster);
+                    }
+                    cluster.x += px;
+                    cluster.y += py;
+                    cluster.intensity += fData[i];
+                    cluster.count++;
+                }
+            }
+        });
+
+        return Array.from(clusters.values()).map(c => ({
+            x: c.x / c.count,
+            y: c.y / c.count,
+            intensity: c.intensity / c.count
+        }));
+    }
+
     public addHeat(worldX: number, worldY: number, amount: number, radius: number): void {
         const tx = Math.floor(worldX / this.tileSize);
         const ty = Math.floor(worldY / this.tileSize);

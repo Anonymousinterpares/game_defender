@@ -162,4 +162,42 @@ export class World {
     
     return { x, y, collided: false };
   }
+
+  public getOcclusionSegments(cameraX: number, cameraY: number, viewWidth: number, viewHeight: number): {a: {x: number, y: number}, b: {x: number, y: number}}[] {
+      const segments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
+      
+      const padding = this.tileSize * 2;
+      const startCol = Math.floor((cameraX - padding) / this.tileSize);
+      const endCol = Math.floor((cameraX + viewWidth + padding) / this.tileSize);
+      const startRow = Math.floor((cameraY - padding) / this.tileSize);
+      const endRow = Math.floor((cameraY + viewHeight + padding) / this.tileSize);
+
+      for (let y = startRow; y <= endRow; y++) {
+          if (y < 0 || y >= this.height) continue;
+          for (let x = startCol; x <= endCol; x++) {
+              if (x < 0 || x >= this.width) continue;
+
+              const tileType = this.tiles[y][x];
+              if (tileType !== MaterialType.NONE) {
+                  const wx = x * this.tileSize;
+                  const wy = y * this.tileSize;
+                  const ts = this.tileSize;
+                  
+                  // For simplicity, we only add segments if the tile is NOT fully destroyed
+                  // A better way would be per sub-tile, but that's very expensive for raycasting.
+                  // We'll treat the whole tile as a shadow blocker if it's mostly there.
+                  if (this.heatMapRef && this.heatMapRef.isTileMostlyDestroyed(x, y)) {
+                      continue;
+                  }
+
+                  // Add 4 segments of the tile
+                  segments.push({a: {x: wx, y: wy}, b: {x: wx + ts, y: wy}});
+                  segments.push({a: {x: wx + ts, y: wy}, b: {x: wx + ts, y: wy + ts}});
+                  segments.push({a: {x: wx + ts, y: wy + ts}, b: {x: wx, y: wy + ts}});
+                  segments.push({a: {x: wx, y: wy + ts}, b: {x: wx, y: wy}});
+              }
+          }
+      }
+      return segments;
+  }
 }
