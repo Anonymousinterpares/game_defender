@@ -594,18 +594,29 @@ export class GameplayScene implements Scene {
       
       allActiveEntities.forEach(e => {
           if (this.heatMap) {
-              // 1. Check for ignition
-              if (this.heatMap.checkFireArea(e.x, e.y, e.radius)) {
-                  this.tryIgniteEntity(e, dt);
+              const maxIntensity = this.heatMap.getMaxIntensityArea(e.x, e.y, e.radius);
+              
+              // 1. Dynamic Ignition from Heat (if not already on fire)
+              if (!e.isOnFire && maxIntensity > 0.05) {
+                  // Probability: 10% at min (0.05ish) to 100% at max (1.0)
+                  // P = round(10 + 90 * intensity)
+                  const ignitionPercent = Math.round(10 + 90 * maxIntensity);
+                  const catchProbability = (ignitionPercent / 100) * dt;
+                  
+                  if (Math.random() < catchProbability) {
+                      e.isOnFire = true;
+                  }
               }
 
               // 2. Damage from hot floor (any material)
-              const maxIntensity = this.heatMap.getMaxIntensityArea(e.x, e.y, e.radius);
               if (maxIntensity > 0.05) {
-                  // Damage scale: 1 dps at low (0.05) to 20 dps at max (1.0)
-                  // Formula: ceil(20 * intensity)
                   const heatDPS = Math.ceil(20 * maxIntensity);
                   e.takeDamage(heatDPS * dt);
+              }
+
+              // 3. Fallback check for active fire tiles (guaranteed check)
+              if (!e.isOnFire && this.heatMap.checkFireArea(e.x, e.y, e.radius)) {
+                  this.tryIgniteEntity(e, dt);
               }
           }
       });
