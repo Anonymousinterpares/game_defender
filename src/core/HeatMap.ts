@@ -141,19 +141,26 @@ export class HeatMap {
         return destroyedCount > (hData.length * 0.8);
     }
 
-    public getFireClusters(gridSize: number): {x: number, y: number, intensity: number}[] {
-        const clusters: Map<string, {x: number, y: number, intensity: number, count: number}> = new Map();
+    public getFireClusters(gridSize: number): {x: number, y: number, intensity: number, color: string}[] {
+        const clusters: Map<string, {x: number, y: number, intensity: number, count: number, r: number, g: number, b: number}> = new Map();
+        const fireColor = { r: 255, g: 102, b: 0 }; // Default fire orange
 
         this.activeTiles.forEach(key => {
             const fData = this.fireData.get(key);
-            if (!fData) return;
+            const hData = this.heatData.get(key);
+            if (!fData && !hData) return;
 
             const [tx, ty] = key.split(',').map(Number);
             const worldX = tx * this.tileSize;
             const worldY = ty * this.tileSize;
 
-            for (let i = 0; i < fData.length; i++) {
-                if (fData[i] > 0.1) {
+            const dataLen = fData ? fData.length : (hData ? hData.length : 0);
+            for (let i = 0; i < dataLen; i++) {
+                const fire = fData ? fData[i] : 0;
+                const heat = hData ? hData[i] : 0;
+                
+                // Lower threshold to 0.3 for red glow on heated walls
+                if (fire > 0.1 || heat > 0.3) {
                     const subX = i % this.subDiv;
                     const subY = Math.floor(i / this.subDiv);
                     const px = worldX + (subX + 0.5) * (this.tileSize / this.subDiv);
@@ -165,13 +172,24 @@ export class HeatMap {
 
                     let cluster = clusters.get(cKey);
                     if (!cluster) {
-                        cluster = { x: 0, y: 0, intensity: 0, count: 0 };
+                        cluster = { x: 0, y: 0, intensity: 0, count: 0, r: 0, g: 0, b: 0 };
                         clusters.set(cKey, cluster);
                     }
+                    
                     cluster.x += px;
                     cluster.y += py;
-                    cluster.intensity += fData[i];
+                    
+                    const inst = Math.max(fire, (heat - 0.2) * 1.5);
+                    cluster.intensity += inst;
                     cluster.count++;
+
+                    // Color mix
+                    if (fire > 0.1) {
+                        cluster.r += fireColor.r; cluster.g += fireColor.g; cluster.b += fireColor.b;
+                    } else {
+                        const hc = this.getHeatColorComponents(heat);
+                        cluster.r += hc.r; cluster.g += hc.g; cluster.b += hc.b;
+                    }
                 }
             }
         });
@@ -179,8 +197,22 @@ export class HeatMap {
         return Array.from(clusters.values()).map(c => ({
             x: c.x / c.count,
             y: c.y / c.count,
-            intensity: c.intensity / c.count
+            intensity: c.intensity / c.count,
+            color: `rgb(${Math.floor(c.r/c.count)}, ${Math.floor(c.g/c.count)}, ${Math.floor(c.b/c.count)})`
         }));
+    }
+
+    private getHeatColorComponents(intensity: number): {r: number, g: number, b: number} {
+        if (intensity < 0.4) {
+            const r = Math.floor(100 + 155 * (intensity / 0.4));
+            return { r, g: 0, b: 0 };
+        } else if (intensity < 0.8) {
+            const g = Math.floor(255 * ((intensity - 0.4) / 0.4));
+            return { r: 255, g, b: 0 };
+        } else {
+            const b = Math.floor(255 * ((intensity - 0.8) / 0.2));
+            return { r: 255, g: 255, b };
+        }
     }
 
     public addHeat(worldX: number, worldY: number, amount: number, radius: number): void {

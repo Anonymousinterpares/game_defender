@@ -85,7 +85,7 @@ export const MasterConfig: GameConfigSchema = {
     fogOfWar: { value: true, type: 'boolean', description: 'Enable Fog of War' },
     segmentVisibilityRadius: { value: 5.0, type: 'number', min: 1, max: 20, step: 0.5, description: 'Visibility around segments' },
     coneAngle: { value: 60, type: 'number', min: 10, max: 180, step: 5, description: 'Vision Cone Angle (Degrees)' },
-    coneDistance: { value: 20.0, type: 'number', min: 5, max: 100, step: 1, description: 'Vision Cone Distance' }
+    coneDistance: { value: 5.0, type: 'number', min: 5, max: 100, step: 1, description: 'Vision Cone Distance' }
   },
   Audio: {
     masterVolume: { value: 0.5, type: 'number', min: 0, max: 1, step: 0.05, description: 'Master Volume' },
@@ -142,7 +142,7 @@ export const MasterConfig: GameConfigSchema = {
   },
   TimeSystem: {
     realSecondsPerHour: { value: 120, type: 'number', description: 'Duration of one game hour (seconds)' },
-    startHour: { value: 7, type: 'number', description: 'Starting game hour (0-23)' },
+    startHour: { value: 20, type: 'number', description: 'Starting game hour (0-23)' },
     sunriseHour: { value: 6, type: 'number', description: 'Hour when sun starts rising' },
     sunsetHour: { value: 19, type: 'number', description: 'Hour when sun starts setting' }
   },

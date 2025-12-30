@@ -10,6 +10,7 @@ export interface LightSource {
     type: 'static' | 'transient' | 'fire';
     ttl?: number;
     decay?: boolean;
+    castsShadows?: boolean;
 }
 
 export class LightManager {
@@ -46,7 +47,8 @@ export class LightManager {
             intensity: settings.intensity,
             type: 'transient',
             ttl: settings.ttl,
-            decay: true
+            decay: true,
+            castsShadows: false // Explosions/Muzzles just glow
         });
     }
 
@@ -72,6 +74,10 @@ export class LightManager {
         return Array.from(this.lights.values());
     }
 
+    public removeLight(id: string): void {
+        this.lights.delete(id);
+    }
+
     public clearType(type: 'fire' | 'transient' | 'static'): void {
         for (const [id, light] of this.lights.entries()) {
             if (light.type === type) {
@@ -80,13 +86,25 @@ export class LightManager {
         }
     }
 
+    public clearConstantLights(): void {
+        for (const [id, light] of this.lights.entries()) {
+            if (id.startsWith('const_')) {
+                this.lights.delete(id);
+            }
+        }
+    }
+
+    public addConstantLight(light: LightSource): void {
+        this.lights.set(light.id, { ...light, type: 'transient', ttl: 0.05, decay: false, castsShadows: false });
+    }
+
     /**
      * Clusters fire light sources based on burning sub-tiles.
      * Called by GameplayScene using HeatMap data.
      */
-    public updateFireLights(fireClusters: {x: number, y: number, intensity: number}[]): void {
+    public updateFireLights(fireClusters: {x: number, y: number, intensity: number, color?: string}[]): void {
         this.clearType('fire');
-        const color = ConfigManager.getInstance().get<string>('Lighting', 'fireLightColor') || '#ff6600';
+        const defaultColor = ConfigManager.getInstance().get<string>('Lighting', 'fireLightColor') || '#ff6600';
         const baseRadius = ConfigManager.getInstance().get<number>('Lighting', 'fireLightRadius') || 250;
 
         fireClusters.forEach((cluster, index) => {
@@ -95,9 +113,10 @@ export class LightManager {
                 x: cluster.x,
                 y: cluster.y,
                 radius: baseRadius * (0.5 + cluster.intensity * 0.5),
-                color: color,
+                color: cluster.color || defaultColor,
                 intensity: Math.min(1.5, cluster.intensity),
-                type: 'fire'
+                type: 'fire',
+                castsShadows: false
             });
         });
     }

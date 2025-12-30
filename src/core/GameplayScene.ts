@@ -709,7 +709,48 @@ export class GameplayScene implements Scene {
     }
 
     this.updateLightClusters();
+    this.updateProjectileLights();
     this.heatMap?.update(dt);
+  }
+
+  private updateProjectileLights(): void {
+      const lm = LightManager.getInstance();
+      lm.clearConstantLights();
+
+      this.projectiles.forEach((p, i) => {
+          if (p.type === ProjectileType.ROCKET || p.type === ProjectileType.MISSILE) {
+              lm.addConstantLight({
+                  id: `const_proj_${i}`,
+                  x: p.x,
+                  y: p.y,
+                  radius: 120,
+                  color: p.type === ProjectileType.ROCKET ? '#ff6600' : '#00ffff',
+                  intensity: 1.0,
+                  type: 'transient'
+              });
+          }
+      });
+
+      if (this.isFiringBeam && this.player) {
+          const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+          const color = weapon === 'laser' ? '#ff0000' : '#00ffff';
+          const dist = Math.sqrt((this.beamEndPos.x - this.player.x)**2 + (this.beamEndPos.y - this.player.y)**2);
+          const segments = 5;
+          for (let i = 0; i <= segments; i++) {
+              const t = i / segments;
+              const lx = this.player.x + (this.beamEndPos.x - this.player.x) * t;
+              const ly = this.player.y + (this.beamEndPos.y - this.player.y) * t;
+              lm.addConstantLight({
+                  id: `const_beam_${i}`,
+                  x: lx,
+                  y: ly,
+                  radius: weapon === 'laser' ? 60 : 100,
+                  color: color,
+                  intensity: 0.8,
+                  type: 'transient'
+              });
+          }
+      }
   }
 
   private handleBeamFiring(type: string, dt: number): void {
@@ -829,6 +870,37 @@ export class GameplayScene implements Scene {
       });
   }
 
+  private renderEntityShadow(ctx: CanvasRenderingContext2D, e: Entity, sunDir: {x: number, y: number}, len: number): void {
+      const ex = e.x - this.cameraX;
+      const ey = e.y - this.cameraY;
+      const r = e.radius;
+
+      // Calculate tangent points for a circle shadow
+      const angle = Math.atan2(sunDir.y, sunDir.x);
+      const t1x = ex + Math.cos(angle - Math.PI/2) * r;
+      const t1y = ey + Math.sin(angle - Math.PI/2) * r;
+      const t2x = ex + Math.cos(angle + Math.PI/2) * r;
+      const t2y = ey + Math.sin(angle + Math.PI/2) * r;
+
+      const t3x = t2x + sunDir.x * len;
+      const t3y = t2y + sunDir.y * len;
+      const t4x = t1x + sunDir.x * len;
+      const t4y = t1y + sunDir.y * len;
+
+      ctx.beginPath();
+      ctx.moveTo(t1x, t1y);
+      ctx.lineTo(t2x, t2y);
+      ctx.lineTo(t3x, t3y);
+      ctx.lineTo(t4x, t4y);
+      ctx.closePath();
+      ctx.fill();
+
+      // Add a circle at the end to round it off
+      ctx.beginPath();
+      ctx.arc(ex + sunDir.x * len, ey + sunDir.y * len, r, 0, Math.PI * 2);
+      ctx.fill();
+  }
+
   private renderLighting(ctx: CanvasRenderingContext2D): void {
       const lightingEnabled = ConfigManager.getInstance().get<boolean>('Lighting', 'enabled');
       if (!lightingEnabled || !this.lightCanvas || !this.lightCtx || !this.world) return;
@@ -877,6 +949,29 @@ export class GameplayScene implements Scene {
 
               lctx.drawImage(chunk.canvas, gx * this.chunkSize - this.cameraX, gy * this.chunkSize - this.cameraY);
           }
+      }
+
+      // --- 1.5 ACCUMULATE DYNAMIC ENTITY SHADOWS ---
+      const { sunDirection: sunDir, ambientIntensity: intensity } = WorldClock.getInstance().getTimeState();
+      const shadowLen = 20 + 150 * (1.0 - Math.pow(intensity, 0.4));
+      
+      if (intensity > 0.1) {
+          lctx.save();
+          lctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+          
+          const entitiesToShadow = [];
+          if (this.player) {
+              entitiesToShadow.push(this.player);
+              entitiesToShadow.push(...this.player.segments);
+          }
+          entitiesToShadow.push(...this.enemies);
+
+          entitiesToShadow.forEach(e => {
+              if (e.active) {
+                  this.renderEntityShadow(lctx, e, sunDir, shadowLen);
+              }
+          });
+          lctx.restore();
       }
 
       // --- 2. ACCUMULATE DYNAMIC LIGHTS ---
@@ -1096,14 +1191,11 @@ export class GameplayScene implements Scene {
       if (!this.fogCanvas || !this.fogCtx || !this.player || !this.world) return;
 
       const { ambientIntensity } = WorldClock.getInstance().getTimeState();
-      
-      // Base darkness: 0.85 at night, 0.0 at full day
-      // Transition: fully revealed if intensity > 0.8
       let fogAlpha = (1.0 - (ambientIntensity - 0.05) / 0.75) * 0.85;
       if (ambientIntensity > 0.8) fogAlpha = 0;
       if (fogAlpha < 0) fogAlpha = 0;
 
-      if (fogAlpha === 0) return; // Skip rendering if full day
+      if (fogAlpha === 0) return;
 
       const w = mainCtx.canvas.width;
       const h = mainCtx.canvas.height;
@@ -1115,14 +1207,32 @@ export class GameplayScene implements Scene {
       const fctx = this.fogCtx;
       const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
 
-      // 1. Fill with darkness based on time
       fctx.globalCompositeOperation = 'source-over';
       fctx.fillStyle = `rgba(0, 0, 0, ${fogAlpha})`;
       fctx.fillRect(0, 0, w, h);
 
-      // 2. Punch holes (Destination-Out)
       fctx.globalCompositeOperation = 'destination-out';
       
+      // 1. Light sources punch holes in fog
+      const lights = LightManager.getInstance().getLights();
+      lights.forEach(light => {
+          const screenX = light.x - this.cameraX;
+          const screenY = light.y - this.cameraY;
+          if (screenX < -light.radius || screenX > w + light.radius || 
+              screenY < -light.radius || screenY > h + light.radius) return;
+
+          const grad = fctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, light.radius);
+          const alpha = Math.min(1.0, light.intensity * 0.8);
+          grad.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
+          grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          
+          fctx.fillStyle = grad;
+          fctx.beginPath();
+          fctx.arc(screenX, screenY, light.radius, 0, Math.PI * 2);
+          fctx.fill();
+      });
+
+      // 2. Personal radius around segments
       const segRad = ConfigManager.getInstance().get<number>('Visuals', 'segmentVisibilityRadius') * tileSize;
       const coneDist = ConfigManager.getInstance().get<number>('Visuals', 'coneDistance') * tileSize;
       const coneAngleDeg = ConfigManager.getInstance().get<number>('Visuals', 'coneAngle');
