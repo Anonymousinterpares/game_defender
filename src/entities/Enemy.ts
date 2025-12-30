@@ -35,6 +35,15 @@ export class Enemy extends Entity {
   render(ctx: CanvasRenderingContext2D): void {
     if (!this.active) return;
     
+    ctx.save();
+    
+    // Apply visual scale bump
+    if (this.visualScale !== 1.0) {
+        ctx.translate(this.x, this.y);
+        ctx.scale(this.visualScale, this.visualScale);
+        ctx.translate(-this.x, -this.y);
+    }
+
     // Body (Iron/Rust)
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
@@ -62,5 +71,17 @@ export class Enemy extends Entity {
     ctx.fill();
     
     ctx.shadowBlur = 0; // Reset
+
+    // Damage Flash Overlay
+    if (this.damageFlash > 0) {
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
+        ctx.fillRect(this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+    }
+
+    ctx.restore();
+
+    // Render fire if burning (outside the scale/tint for clarity)
+    this.renderFire(ctx);
   }
 }

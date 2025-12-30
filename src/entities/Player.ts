@@ -92,6 +92,7 @@ export class Player extends Entity {
     const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
     const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
     this.handleFireLogic(dt, fireDPS, baseExtinguish);
+    this.segments.forEach(seg => seg.handleFireLogic(dt, fireDPS, baseExtinguish));
 
     if (!this.active) return;
 
@@ -192,6 +193,14 @@ export class Player extends Entity {
       const s = this.segments[i];
       const size = this.radius; 
       
+      ctx.save();
+      // Apply visual scale bump for segments
+      if (s.visualScale !== 1.0) {
+          ctx.translate(s.x, s.y);
+          ctx.scale(s.visualScale, s.visualScale);
+          ctx.translate(-s.x, -s.y);
+      }
+
       ctx.beginPath();
       ctx.arc(s.x, s.y, size, 0, Math.PI * 2);
       
@@ -206,9 +215,30 @@ export class Player extends Entity {
       ctx.strokeStyle = '#3d2e1e';
       ctx.lineWidth = 2;
       ctx.stroke();
+
+      // Damage Flash Overlay for segments
+      if (s.damageFlash > 0) {
+          ctx.globalCompositeOperation = 'source-atop';
+          ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (s.damageFlash / 0.2)})`;
+          ctx.fillRect(s.x - s.radius, s.y - s.radius, s.radius * 2, s.radius * 2);
+      }
+      ctx.restore();
+
+      // Render fire on segment if burning
+      if (s.isOnFire) {
+          s.renderFire(ctx);
+      }
     }
 
     // Draw Head
+    ctx.save();
+    // Apply visual scale bump for head
+    if (this.visualScale !== 1.0) {
+        ctx.translate(this.x, this.y);
+        ctx.scale(this.visualScale, this.visualScale);
+        ctx.translate(-this.x, -this.y);
+    }
+
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     
@@ -222,6 +252,17 @@ export class Player extends Entity {
     ctx.strokeStyle = '#594326';
     ctx.lineWidth = 3;
     ctx.stroke();
+
+    // Damage Flash Overlay for head
+    if (this.damageFlash > 0) {
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
+        ctx.fillRect(this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+    }
+    ctx.restore();
+
+    // Render fire on head if burning
+    this.renderFire(ctx);
     
     // Cannon
     const cannonLen = 25;

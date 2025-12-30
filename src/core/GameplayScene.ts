@@ -589,26 +589,21 @@ export class GameplayScene implements Scene {
       const screenW = window.innerWidth;
       const screenH = window.innerHeight;
 
-      // Check environment fire
-      this.player.getAllBodies().forEach(b => {
-          const eb = b as Entity;
-          if (this.heatMap && this.heatMap.isSubTileBurning(eb.x, eb.y)) {
-              this.tryIgniteEntity(eb, dt);
-          }
-      });
+      // Check environment fire for all entities
+      const allActiveEntities: Entity[] = [this.player, ...this.player.segments, ...this.enemies];
       
-      this.enemies.forEach(e => {
-          if (this.heatMap && this.heatMap.isSubTileBurning(e.x, e.y)) {
+      allActiveEntities.forEach(e => {
+          if (this.heatMap && this.heatMap.checkFireArea(e.x, e.y, e.radius)) {
               this.tryIgniteEntity(e, dt);
           }
       });
 
       // Entity vs Entity fire spread
-      const allBurning = this.entities.filter(e => e.isOnFire && e.active);
+      const allBurning = allActiveEntities.filter(e => e.isOnFire && e.active);
       const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
 
       allBurning.forEach(source => {
-          this.entities.forEach(target => {
+          allActiveEntities.forEach(target => {
               if (source !== target && target.active && !target.isOnFire) {
                   const dx = source.x - target.x;
                   const dy = source.y - target.y;
@@ -989,7 +984,9 @@ export class GameplayScene implements Scene {
   private tryIgniteEntity(e: Entity, dt: number): void {
       if (e.isOnFire) return;
       const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
-      if (Math.random() < catchChance * dt) {
+      // If catchChance is 0.5, it means 50% chance per second.
+      // We want environment fire to be quite dangerous, so we'll boost this for environmental contact
+      if (Math.random() < catchChance * dt * 5) { 
           e.isOnFire = true;
       }
   }

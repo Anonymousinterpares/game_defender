@@ -67,7 +67,23 @@ export class HeatMap {
         const subX = Math.floor((worldX % this.tileSize) / (this.tileSize / this.subDiv));
         const subY = Math.floor((worldY % this.tileSize) / (this.tileSize / this.subDiv));
         const idx = subY * this.subDiv + subX;
-        return fData[idx] > 0.5; // Burning threshold
+        return fData[idx] > 0.1; // Lowered threshold for ignition
+    }
+
+    public checkFireArea(x: number, y: number, radius: number): boolean {
+        // Check center and 4 points around the radius for fire
+        const points = [
+            {x, y},
+            {x: x - radius, y},
+            {x: x + radius, y},
+            {x, y: y - radius},
+            {x, y: y + radius}
+        ];
+        
+        for (const p of points) {
+            if (this.isSubTileBurning(p.x, p.y)) return true;
+        }
+        return false;
     }
 
     public setMaterial(tx: number, ty: number, material: MaterialType): void {
