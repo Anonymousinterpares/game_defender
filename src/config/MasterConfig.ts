@@ -62,7 +62,7 @@ export const MasterConfig: GameConfigSchema = {
     mineAOE: { value: 4.0, type: 'number', min: 1, max: 15, step: 0.5, description: 'Mine AOE Radius' },
     mineArmTime: { value: 1.0, type: 'number', min: 0, max: 5, step: 0.1, description: 'Mine Arming Time (sec)' },
 
-    flamethrowerDamage: { value: 5w, type: 'number', min: 1, max: 200, step: 5, description: 'Flamethrower DPS (Direct)' },
+    flamethrowerDamage: { value: 5, type: 'number', min: 1, max: 200, step: 5, description: 'Flamethrower DPS (Direct)' },
     flamethrowerRange: { value: 3.0, type: 'number', min: 1, max: 10, step: 0.5, description: 'Flamethrower Range (Tiles)' },
     flamethrowerMaxEnergy: { value: 100.0, type: 'number', min: 1, max: 500, step: 1, description: 'Fuel Capacity' },
     flamethrowerDepletionRate: { value: 20.0, type: 'number', min: 0.1, max: 100, step: 0.5, description: 'Fuel Consumption (/s)' },
