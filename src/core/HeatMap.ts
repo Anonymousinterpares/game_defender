@@ -46,6 +46,9 @@ export class HeatMap {
     private fireAsset: HTMLImageElement | null = null;
     private worldRef: any = null;
 
+    private scratchCanvas: HTMLCanvasElement | null = null;
+    private scratchCtx: CanvasRenderingContext2D | null = null;
+
     constructor(private tileSize: number) {
         // Pre-load fire spritesheet if configured
         const useSprite = ConfigManager.getInstance().get<boolean>('Fire', 'isFireSpritesheet');
@@ -544,12 +547,21 @@ export class HeatMap {
     }
 
     public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
-        const subSize = this.tileSize / this.subDiv;
         const viewW = ctx.canvas.width;
         const viewH = ctx.canvas.height;
         const time = performance.now() * 0.001;
 
-        this.materialData.forEach((mData, key) => {
+        if (!this.scratchCanvas) {
+            this.scratchCanvas = document.createElement('canvas');
+            this.scratchCanvas.width = this.subDiv;
+            this.scratchCanvas.height = this.subDiv;
+            this.scratchCtx = this.scratchCanvas.getContext('2d')!;
+        }
+
+        const sCtx = this.scratchCtx!;
+        const sCanv = this.scratchCanvas!;
+
+        this.activeTiles.forEach(key => {
             const [tx, ty] = key.split(',').map(Number);
             const worldX = tx * this.tileSize;
             const worldY = ty * this.tileSize;
@@ -557,56 +569,72 @@ export class HeatMap {
             if (worldX + this.tileSize < cameraX || worldX > cameraX + viewW ||
                 worldY + this.tileSize < cameraY || worldY > cameraY + viewH) return;
 
-            const hData = this.hpData.get(key)!;
             const heatData = this.heatData.get(key);
             const fireData = this.fireData.get(key);
-            const sData = this.scorchData.get(key);
+            const hData = this.hpData.get(key);
 
-            for (let i = 0; i < mData.length; i++) {
-                if (hData[i] <= 0) continue; // Destroyed
+            if (!heatData && !fireData) return;
 
-                const sx = i % this.subDiv;
-                const sy = Math.floor(i / this.subDiv);
-                let rx = worldX + sx * subSize;
-                let ry = worldY + sy * subSize;
-
-                const heat = heatData ? heatData[i] : 0;
-                const fire = fireData ? fireData[i] : 0;
-
-                // High intensity heat (animated) or fire only
-                if (heat > 0.6 || fire > 0) {
-                    if (heat > 0.6) {
-                        rx += Math.sin(time * 20 + rx) * 2 * heat;
-                        ry += Math.cos(time * 20 + ry) * 2 * heat;
-                        
-                        ctx.fillStyle = this.getHeatColor(heat);
-                        ctx.fillRect(rx, ry, subSize + 0.5, subSize + 0.5);
+            // 1. Render Blended Heat Glow
+            if (heatData) {
+                sCtx.clearRect(0, 0, this.subDiv, this.subDiv);
+                let hasSignificantHeat = false;
+                
+                const imgData = sCtx.createImageData(this.subDiv, this.subDiv);
+                for (let i = 0; i < heatData.length; i++) {
+                    const h = heatData[i];
+                    if (h > 0.4 && hData && hData[i] > 0) {
+                        hasSignificantHeat = true;
+                        const color = this.getHeatColorComponents(h);
+                        const alpha = Math.floor((h < 0.8 ? (0.4 + h * 0.6) : 1.0) * 255);
+                        const idx = i * 4;
+                        imgData.data[idx] = color.r;
+                        imgData.data[idx+1] = color.g;
+                        imgData.data[idx+2] = color.b;
+                        imgData.data[idx+3] = alpha;
                     }
+                }
 
-                    if (fire > 0) {
+                if (hasSignificantHeat) {
+                    sCtx.putImageData(imgData, 0, 0);
+                    
+                    ctx.save();
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.drawImage(sCanv, worldX, worldY, this.tileSize, this.tileSize);
+                    ctx.restore();
+                }
+            }
+
+            // 2. Render Fire
+            if (fireData) {
+                const subSize = this.tileSize / this.subDiv;
+                for (let i = 0; i < fireData.length; i++) {
+                    const fire = fireData[i];
+                    if (fire > 0 && hData && hData[i] > 0) {
+                        const sx = i % this.subDiv;
+                        const sy = Math.floor(i / this.subDiv);
+                        const rx = worldX + sx * subSize;
+                        const ry = worldY + sy * subSize;
+
                         if (this.fireAsset) {
-                            // Approach B: Sprite-sheet (8-frame linear)
                             const frameCount = 8;
                             const frame = Math.floor((time * 15 + i) % frameCount);
                             const fw = this.fireAsset.width / frameCount;
                             const fh = this.fireAsset.height;
                             const fx = frame * fw;
-                            const fy = 0;
-                            
-                            ctx.drawImage(this.fireAsset, fx, fy, fw, fh, rx - subSize*0.5, ry - subSize, subSize*2, subSize*2);
+                            ctx.drawImage(this.fireAsset, fx, 0, fw, fh, rx - subSize*0.5, ry - subSize, subSize*2, subSize*2);
                         } else {
-                            // Approach A: Procedural Fallback
-                            const pulse = 0.8 + Math.sin(time * 30 + i) * 0.2;
-                            ctx.fillStyle = `rgba(255, ${Math.floor(100 + Math.random() * 100)}, 0, ${pulse})`;
-                            ctx.fillRect(rx, ry, subSize + 0.5, subSize + 0.5);
-                            
-                            // More detailed flame-like particles for Procedural
-                            ctx.fillStyle = `rgba(255, ${Math.floor(200 + Math.random() * 55)}, 0, 0.8)`;
-                            ctx.fillRect(rx + subSize*0.2, ry - subSize*0.5*fire, subSize*0.6, subSize*fire);
+                            // Blended procedural fire fallback
+                            const pulse = 0.6 + Math.sin(time * 30 + i) * 0.4;
+                            const grad = ctx.createRadialGradient(rx + subSize/2, ry + subSize/2, 0, rx + subSize/2, ry + subSize/2, subSize * 1.5);
+                            grad.addColorStop(0, `rgba(255, 200, 0, ${fire * pulse})`);
+                            grad.addColorStop(0.5, `rgba(255, 50, 0, ${fire * pulse * 0.5})`);
+                            grad.addColorStop(1, 'rgba(255, 0, 0, 0)');
+                            ctx.fillStyle = grad;
+                            ctx.fillRect(rx - subSize, ry - subSize, subSize * 3, subSize * 3);
                         }
-                        
-                        // Sparks (shared)
-                        if (Math.random() < 0.1) {
+
+                        if (Math.random() < 0.1 * fire) {
                             ctx.fillStyle = '#fff';
                             ctx.fillRect(rx + Math.random() * subSize, ry - Math.random() * 10, 1, 1);
                         }

@@ -120,14 +120,14 @@ export class World {
                       
                       // 1. Render Side & Top
                       ctx.fillStyle = sideColor;
-                      ctx.fillRect(lx, ly, subSize + 0.3, subSize + 0.3);
+                      ctx.fillRect(lx, ly, subSize, subSize);
                       ctx.fillStyle = color;
-                      ctx.fillRect(lx, ly - h, subSize + 0.3, subSize + 0.3);
+                      ctx.fillRect(lx, ly - h, subSize, subSize);
                       
                       // 2. Render Scorch Marks (Cached)
                       if (sData && sData[idx]) {
                           ctx.fillStyle = tileType === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
-                          ctx.fillRect(lx, ly - h, subSize + 0.3, subSize + 0.3);
+                          ctx.fillRect(lx, ly - h, subSize, subSize);
                       }
 
                       // 3. Render Static Heat Glow (Low intensity heat bakes into cache)
@@ -137,7 +137,7 @@ export class World {
                           if (heat < 0.6) {
                               const r = Math.floor(100 + 155 * (heat / 0.4));
                               ctx.fillStyle = `rgba(${r}, 0, 0, ${0.2 + heat * 0.4})`;
-                              ctx.fillRect(lx, ly - h, subSize + 0.3, subSize + 0.3);
+                              ctx.fillRect(lx, ly - h, subSize, subSize);
                           }
                       }
 
