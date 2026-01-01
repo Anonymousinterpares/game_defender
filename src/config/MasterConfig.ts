@@ -60,7 +60,13 @@ export const MasterConfig: GameConfigSchema = {
     mineMaxAmmo: { value: 20, type: 'number', min: 1, max: 200, step: 1, description: 'Mine Mag Size' },
     mineReloadTime: { value: 2.0, type: 'number', min: 0.5, max: 10, step: 0.1, description: 'Mine Reload (s)' },
     mineAOE: { value: 4.0, type: 'number', min: 1, max: 15, step: 0.5, description: 'Mine AOE Radius' },
-    mineArmTime: { value: 1.0, type: 'number', min: 0, max: 5, step: 0.1, description: 'Mine Arming Time (sec)' }
+    mineArmTime: { value: 1.0, type: 'number', min: 0, max: 5, step: 0.1, description: 'Mine Arming Time (sec)' },
+
+    flamethrowerDamage: { value: 5w, type: 'number', min: 1, max: 200, step: 5, description: 'Flamethrower DPS (Direct)' },
+    flamethrowerRange: { value: 3.0, type: 'number', min: 1, max: 10, step: 0.5, description: 'Flamethrower Range (Tiles)' },
+    flamethrowerMaxEnergy: { value: 100.0, type: 'number', min: 1, max: 500, step: 1, description: 'Fuel Capacity' },
+    flamethrowerDepletionRate: { value: 20.0, type: 'number', min: 0.1, max: 100, step: 0.5, description: 'Fuel Consumption (/s)' },
+    flamethrowerReloadTime: { value: 4.0, type: 'number', min: 1, max: 20, step: 1, description: 'Refuel Time (s)' }
   },
   Upgrades: {
       hullRepairCost: { value: 50, type: 'number', description: 'Repair Cost' },
@@ -98,6 +104,7 @@ export const MasterConfig: GameConfigSchema = {
     vol_shoot_rocket: { value: 0.5, type: 'number', description: 'Rocket Shot Volume' },
     vol_shoot_missile: { value: 0.4, type: 'number', description: 'Missile Shot Volume' },
     vol_place_mine: { value: 0.4, type: 'number', description: 'Mine Place Volume' },
+    vol_shoot_flamethrower: { value: 0.5, type: 'number', description: 'Flamethrower Volume' },
     
     vol_hit_cannon: { value: 0.4, type: 'number', description: 'Cannon Hit Volume' },
     vol_hit_missile: { value: 0.4, type: 'number', description: 'Missile Hit Volume' },
@@ -143,7 +150,7 @@ export const MasterConfig: GameConfigSchema = {
   },
   TimeSystem: {
     realSecondsPerHour: { value: 120, type: 'number', description: 'Duration of one game hour (seconds)' },
-    startHour: { value: 10, type: 'number', description: 'Starting game hour (0-23)' },
+    startHour: { value: 22, type: 'number', description: 'Starting game hour (0-23)' },
     sunriseHour: { value: 6, type: 'number', description: 'Hour when sun starts rising' },
     sunsetHour: { value: 19, type: 'number', description: 'Hour when sun starts setting' }
   },

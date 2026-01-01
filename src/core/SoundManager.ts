@@ -9,6 +9,7 @@ interface SpatialVoice {
     filter: BiquadFilterNode;
     x: number;
     y: number;
+    baseVolume: number; // Store base volume from config
     lastSeen?: number; // Persistence for area sounds
     intensity?: number; // Current intensity for area sounds
 }
@@ -131,7 +132,8 @@ export class SoundManager {
             source.connect(filter);
             source.start();
 
-            voice = { source, gain, panner, filter, x: data.x, y: data.y, lastSeen: now, intensity: data.intensity };
+            const baseVolume = ConfigManager.getInstance().get<number>('Audio', 'vol_' + soundName) || 1.0;
+            voice = { source, gain, panner, filter, x: data.x, y: data.y, baseVolume, lastSeen: now, intensity: data.intensity };
             this.activeAreaLoops.set(key, voice);
         } else {
             // New simulation update received
@@ -265,7 +267,7 @@ export class SoundManager {
           minCutoff = Math.min(minCutoff, p.filterCutoff);
       }
 
-      const finalVolume = Math.min(1.0, Math.sqrt(totalEnergy));
+      const finalVolume = Math.min(1.0, Math.sqrt(totalEnergy) * voice.baseVolume);
       const finalPan = paths.reduce((acc, p) => acc + p.volume, 0) > 0 
           ? weightedPan / paths.reduce((acc, p) => acc + p.volume, 0) 
           : 0;
@@ -381,7 +383,10 @@ export class SoundManager {
     source.connect(filter);
     source.start();
 
-    const voice: SpatialVoice = { source, gain, panner, filter, x, y };
+    let baseVolume = ConfigManager.getInstance().get<number>('Audio', 'vol_' + name);
+    if (baseVolume === undefined) baseVolume = 1.0;
+
+    const voice: SpatialVoice = { source, gain, panner, filter, x, y, baseVolume };
     this.spatialLoops.set(name, voice);
     this.updateVoiceSpatial(voice);
   }

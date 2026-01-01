@@ -256,21 +256,17 @@ export class HeatMap {
             const dist = Math.sqrt(dx*dx + dy*dy);
 
             if (dist < radius) {
-                const effect = (1 - dist/radius) * amount;
-                data[i] = Math.min(1.0, data[i] + effect);
-                
-                // Carbonization: Wood chars immediately on contact with heat sources (beams)
-                if (mData && mData[i] === MaterialType.WOOD) {
+                // If the user wants other materials to be fully immune to flamethrower heat:
+                if (mData && MATERIAL_PROPS[mData[i] as MaterialType].flammable) {
+                    const effect = (1 - dist/radius) * amount;
+                    data[i] = Math.min(1.0, data[i] + effect);
+                    
                     this.applyScorch(tx, ty, i);
-                }
 
-                // Wood Flammability
-                if (mData && mData[i] === MaterialType.WOOD && data[i] > 0.6) {
-                    this.ignite(tx, ty, i);
-                }
-
-                if (data[i] > 0.5) {
-                    this.applyScorch(tx, ty, i);
+                    // Wood Flammability
+                    if (data[i] > 0.6) {
+                        this.ignite(tx, ty, i);
+                    }
                 }
             }
         }
@@ -298,6 +294,80 @@ export class HeatMap {
         }
         if (fData[idx] === 0) fData[idx] = 0.1;
         this.activeTiles.add(key);
+    }
+
+    public forceIgniteArea(worldX: number, worldY: number, radius: number): void {
+        const tx = Math.floor(worldX / this.tileSize);
+        const ty = Math.floor(worldY / this.tileSize);
+        const tileRadius = Math.ceil(radius / this.tileSize);
+
+        for (let ry = -tileRadius; ry <= tileRadius; ry++) {
+            for (let rx = -tileRadius; rx <= tileRadius; rx++) {
+                this.igniteInTile(tx + rx, ty + ry, worldX, worldY, radius);
+            }
+        }
+    }
+
+    private igniteInTile(tx: number, ty: number, hitX: number, hitY: number, radius: number): void {
+        const key = `${tx},${ty}`;
+        const mData = this.materialData.get(key);
+        const hData = this.hpData.get(key);
+        if (!mData || !hData) return;
+
+        const tileWorldX = tx * this.tileSize;
+        const tileWorldY = ty * this.tileSize;
+        const subSize = this.tileSize / this.subDiv;
+
+        for (let i = 0; i < mData.length; i++) {
+            if (hData[i] <= 0 || !MATERIAL_PROPS[mData[i] as MaterialType].flammable) continue;
+
+            const subX = i % this.subDiv;
+            const subY = Math.floor(i / this.subDiv);
+            const centerX = tileWorldX + (subX + 0.5) * subSize;
+            const centerY = tileWorldY + (subY + 0.5) * subSize;
+
+            const dx = centerX - hitX;
+            const dy = centerY - hitY;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+
+            if (dist < radius) {
+                // Only ignite if it's on the surface (exposed to air/destroyed sub-tile)
+                if (this.isSubTileSurface(tx, ty, i)) {
+                    this.ignite(tx, ty, i);
+                    this.applyScorch(tx, ty, i);
+                }
+            }
+        }
+    }
+
+    private isSubTileSurface(tx: number, ty: number, subIdx: number): boolean {
+        const sx = subIdx % this.subDiv;
+        const sy = Math.floor(subIdx / this.subDiv);
+
+        const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        for (const [nx, ny] of neighbors) {
+            const nsx = sx + nx;
+            const nsy = sy + ny;
+
+            let nKey = `${tx},${ty}`;
+            let nTargetSx = nsx;
+            let nTargetSy = nsy;
+
+            if (nsx < 0 || nsx >= this.subDiv || nsy < 0 || nsy >= this.subDiv) {
+                const ntx = tx + (nsx < 0 ? -1 : (nsx >= this.subDiv ? 1 : 0));
+                const nty = ty + (nsy < 0 ? -1 : (nsy >= this.subDiv ? 1 : 0));
+                nKey = `${ntx},${nty}`;
+                nTargetSx = (nsx + this.subDiv) % this.subDiv;
+                nTargetSy = (nsy + this.subDiv) % this.subDiv;
+            }
+
+            const nhData = this.hpData.get(nKey);
+            // If neighbor tile doesn't exist (air) or neighbor sub-tile is destroyed, it's a surface
+            if (!nhData || nhData[nTargetSy * this.subDiv + nTargetSx] <= 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public destroyArea(worldX: number, worldY: number, radius: number, isIrregular: boolean = false): void {
