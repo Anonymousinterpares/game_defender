@@ -508,7 +508,52 @@ export class GameplayScene implements Scene {
       const now = performance.now() / 1000;
       
       if (weapon === 'cannon' || weapon === 'rocket' || weapon === 'missile' || weapon === 'mine') {
-          // ... [existing logic] ...
+          const now = performance.now() / 1000;
+          if (now - this.lastShotTime > this.shootCooldown) {
+              if (currentAmmo > 0) {
+                  const weaponToType: Record<string, ProjectileType> = {
+                      'cannon': ProjectileType.CANNON,
+                      'rocket': ProjectileType.ROCKET,
+                      'missile': ProjectileType.MISSILE,
+                      'mine': ProjectileType.MINE
+                  };
+                  
+                  const pType = weaponToType[weapon] || ProjectileType.CANNON;
+                  const p = new Projectile(
+                      this.player.x + Math.cos(this.player.rotation) * 25,
+                      this.player.y + Math.sin(this.player.rotation) * 25,
+                      this.player.rotation,
+                      pType
+                  );
+
+                  if (pType === ProjectileType.MISSILE) {
+                      // Find nearest enemy for homing
+                      let nearest = null;
+                      let minDist = 1000;
+                      this.enemies.forEach(e => {
+                          const d = Math.sqrt((e.x - p.x)**2 + (e.y - p.y)**2);
+                          if (d < minDist) {
+                              minDist = d;
+                              nearest = e;
+                          }
+                      });
+                      p.target = nearest;
+                  }
+
+                  this.projectiles.push(p);
+                  this.weaponAmmo.set(weapon, currentAmmo - 1);
+                  this.lastShotTime = now;
+                  
+                  const sfx = 'shoot_' + weapon;
+                  SoundManager.getInstance().playSoundSpatial(sfx, this.player.x, this.player.y);
+
+                  if (this.weaponAmmo.get(weapon)! <= 0 && weapon !== 'cannon') {
+                      this.startReload(weapon);
+                  }
+              } else {
+                  this.startReload(weapon);
+              }
+          }
       } else if (weapon === 'laser' || weapon === 'ray' || weapon === 'flamethrower') {
           if (currentAmmo > 0) {
             if (weapon === 'flamethrower') {
@@ -891,16 +936,20 @@ export class GameplayScene implements Scene {
           if (this.world.isWall(tx, ty)) {
               finalRange = dist;
               
-              // Only ignite if it's wood
               const mat = this.heatMap!.getMaterialAt(tx, ty);
-              if (mat === MaterialType.WOOD) {
-                  // Jitter ignition around the hit point
-                  for (let j = 0; j < 3; j++) {
-                      const jx = tx + (Math.random() - 0.5) * 10;
-                      const jy = ty + (Math.random() - 0.5) * 10;
-                      this.heatMap!.forceIgniteArea(jx, jy, 12);
-                      this.heatMap!.addHeat(jx, jy, 0.8 * dt * 10, 15);
+              // Always apply heat to the impact point regardless of material
+              // Jitter heat/ignition around the hit point
+              for (let j = 0; j < 3; j++) {
+                  const jx = tx + (Math.random() - 0.5) * 10;
+                  const jy = ty + (Math.random() - 0.5) * 10;
+                  
+                  // Only wood can be "force ignited" (surface only check inside forceIgniteArea)
+                  if (mat === MaterialType.WOOD) {
+                    this.heatMap!.forceIgniteArea(jx, jy, 12);
                   }
+                  
+                  // All materials absorb heat (leads to glow and eventually vaporization)
+                  this.heatMap!.addHeat(jx, jy, 1.2 * dt * 10, 15);
               }
               break; // Stop raycasting
           }

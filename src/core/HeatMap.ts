@@ -256,17 +256,14 @@ export class HeatMap {
             const dist = Math.sqrt(dx*dx + dy*dy);
 
             if (dist < radius) {
-                // If the user wants other materials to be fully immune to flamethrower heat:
-                if (mData && MATERIAL_PROPS[mData[i] as MaterialType].flammable) {
-                    const effect = (1 - dist/radius) * amount;
-                    data[i] = Math.min(1.0, data[i] + effect);
-                    
-                    this.applyScorch(tx, ty, i);
+                const effect = (1 - dist/radius) * amount;
+                data[i] = Math.min(1.0, data[i] + effect);
+                
+                this.applyScorch(tx, ty, i);
 
-                    // Wood Flammability
-                    if (data[i] > 0.6) {
-                        this.ignite(tx, ty, i);
-                    }
+                // Wood Flammability
+                if (data[i] > 0.6 && mData && MATERIAL_PROPS[mData[i] as MaterialType].flammable) {
+                    this.ignite(tx, ty, i);
                 }
             }
         }
