@@ -81,6 +81,7 @@ export const MasterConfig: GameConfigSchema = {
     collisionPrecision: { value: 0.5, type: 'number', min: 0.1, max: 1.0, step: 0.1, description: 'Collision Check Step' }
   },
   Debug: {
+    startingCoins: { value: 100000, type: 'number', min: 0, max: 1000000, step: 100, description: 'Starting Coins' },
     showHitboxes: { value: false, type: 'boolean', description: 'Show Hitboxes' },
     showGrid: { value: true, type: 'boolean', description: 'Show Map Grid' },
     fpsCounter: { value: true, type: 'boolean', description: 'Show FPS' },

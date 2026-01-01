@@ -141,6 +141,7 @@ export class GameplayScene implements Scene {
 
     this.radar = new Radar();
     this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
+    this.coinsCollected = ConfigManager.getInstance().get<number>('Debug', 'startingCoins') || 0;
     
     // Initialize Ammo
     const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine', 'flamethrower'];
@@ -1524,6 +1525,15 @@ export class GameplayScene implements Scene {
             ConfigManager.getInstance().set('Player', 'activeWeapon', wName);
             this.initWeaponState();
             console.log(`Added and equipped weapon: ${wName}`);
+            return true;
+        }
+    }
+
+    if (cleanCmd.startsWith('add_coins')) {
+        const amount = parseInt(cleanCmd.replace('add_coins', ''));
+        if (!isNaN(amount)) {
+            this.coinsCollected += amount;
+            console.log(`Added ${amount} coins. Total: ${this.coinsCollected}`);
             return true;
         }
     }
