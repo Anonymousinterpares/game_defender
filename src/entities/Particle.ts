@@ -66,3 +66,101 @@ export class Particle extends Entity {
         ctx.restore();
     }
 }
+
+export class MoltenMetalParticle extends Particle {
+    private gravity: number = 80; // Very low gravity for slow motion feel
+    private vz: number = -60 - Math.random() * 40; // Gentle upward burst
+    private z: number = 0;
+    public damage: number = 5;
+
+    constructor(x: number, y: number, vx: number, vy: number) {
+        // High life to ensure they stay on ground for a bit
+        super(x, y, '#ffff00', vx, vy, 5.0 + Math.random() * 2.0);
+        this.radius = 4 + Math.random() * 2;
+    }
+
+    update(dt: number, world?: any): void {
+        const nextX = this.x + this.vx * dt;
+        const nextY = this.y + this.vy * dt;
+
+        // Collision with walls while in air
+        if (world && world.isWall(nextX, nextY)) {
+            this.vx *= -0.3; // Very soft bounce
+            this.vy *= -0.3;
+        } else {
+            this.x = nextX;
+            this.y = nextY;
+        }
+        
+        // Z-axis simulation (arc)
+        this.vz += this.gravity * dt;
+        this.z += this.vz * dt;
+
+        // Minimal friction for consistent slow glide
+        this.vx *= 0.995;
+        this.vy *= 0.995;
+
+        if (this.z > 0 && this.vz > 0) {
+            // Landed
+            if (this.z !== 0) { // First time landing
+                if (world && world.heatMap) {
+                    world.heatMap.addHeat(this.x, this.y, 0.6, 20);
+                }
+            }
+            this.z = 0;
+            this.vz = 0;
+            this.vx = 0;
+            this.vy = 0;
+        }
+
+        this.life -= dt;
+        if (this.life <= 0) {
+            this.active = false;
+        }
+        
+        // Pure bright glow while in air, cooling on ground
+        if (this.z < 0) {
+            this.color = '#fffbe6'; // White-ish yellow
+        } else {
+            const lifeRatio = this.life / 7.0;
+            if (lifeRatio > 0.6) this.color = '#ffff00';
+            else if (lifeRatio > 0.3) this.color = '#ffaa00';
+            else if (lifeRatio > 0.1) this.color = '#ff4400';
+            else this.color = '#222';
+        }
+    }
+
+    render(ctx: CanvasRenderingContext2D): void {
+        const rx = this.x;
+        const ry = this.y + this.z; // Apply Z offset
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen'; // additive-like glow
+        
+        // Larger, more intense white-heat glow for visibility
+        const glowRadius = this.radius * (this.z < 0 ? 6 : 4);
+        const grad = ctx.createRadialGradient(rx, ry, 0, rx, ry, glowRadius);
+        const alpha = this.z < 0 ? 0.9 : (this.life / 7.0) * 0.9;
+        
+        grad.addColorStop(0, '#ffffff'); // Pure white center
+        grad.addColorStop(0.2, '#ffff00'); // Yellow transition
+        grad.addColorStop(0.5, this.color);
+        grad.addColorStop(1, 'rgba(255, 100, 0, 0)');
+        
+        ctx.fillStyle = grad;
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(rx, ry, glowRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Solid core for definition
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = 1.0;
+        ctx.beginPath();
+        ctx.arc(rx, ry, this.radius * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+
+    }
+}

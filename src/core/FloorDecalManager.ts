@@ -36,6 +36,21 @@ export class FloorDecalManager {
         }
     }
 
+    public addCooledMetalMark(x: number, y: number, radius: number): void {
+        this.decals.push({
+            x,
+            y,
+            radius: radius * (0.9 + Math.random() * 0.2),
+            color: '#444444', // Dark grey solidified metal
+            opacity: 0.8,
+            rotation: Math.random() * Math.PI * 2
+        });
+
+        if (this.decals.length > this.maxDecals) {
+            this.decals.shift();
+        }
+    }
+
     public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
         const viewW = ctx.canvas.width;
         const viewH = ctx.canvas.height;

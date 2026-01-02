@@ -11,7 +11,7 @@ import { ConfigManager } from '../config/MasterConfig';
 import { Projectile, ProjectileType } from '../entities/Projectile';
 import { Enemy } from '../entities/Enemy';
 import { Drop, DropType } from '../entities/Drop';
-import { Particle } from '../entities/Particle';
+import { Particle, MoltenMetalParticle } from '../entities/Particle';
 import { TurretUpgrade, ShieldUpgrade } from '../entities/upgrades/Upgrade';
 import { HeatMap, MaterialType } from './HeatMap';
 import { WorldClock } from './WorldClock';
@@ -504,7 +504,7 @@ export class GameplayScene implements Scene {
     const isReloading = this.weaponReloading.get(weapon);
     const currentAmmo = this.weaponAmmo.get(weapon) || 0;
 
-    if (this.inputManager.isKeyDown('Space') && this.player && !isReloading) {
+    if (this.inputManager.isKeyDown('Space') && this.player && this.player.active && !isReloading) {
       const now = performance.now() / 1000;
       
       if (weapon === 'cannon' || weapon === 'rocket' || weapon === 'missile' || weapon === 'mine') {
@@ -601,10 +601,7 @@ export class GameplayScene implements Scene {
             const hitBorder = p.x < 0 || p.x > mapW || p.y < 0 || p.y > mapH;
 
             if (hitWall || hitBorder) {
-                if (hitWall && this.heatMap) {
-                    p.onWorldHit(this.heatMap, p.x, p.y);
-                }
-                
+                // 1. Trigger explosion first (checks for heat)
                 if (p.aoeRadius > 0) {
                     this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
                 } else {
@@ -612,6 +609,25 @@ export class GameplayScene implements Scene {
                     SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
                     this.createImpactParticles(p.x, p.y, p.color);
                 }
+
+                // 2. Then damage the world (structural change)
+                if (hitWall && this.heatMap) {
+                    // Single projectile hit molten synergy
+                    const mat = this.heatMap.getMaterialAt(p.x, p.y);
+                    const intensity = this.heatMap.getIntensityAt(p.x, p.y);
+                    
+                    p.onWorldHit(this.heatMap, p.x, p.y);
+                    
+                    if (mat === MaterialType.METAL && intensity > 0.4) {
+                        const count = 5 + Math.floor(Math.random() * 5);
+                        for (let i = 0; i < count; i++) {
+                            const angle = p.rotation + Math.PI + (Math.random() - 0.5);
+                            const speed = 40 + Math.random() * 40; // Slow motion glide
+                            this.particles.push(new MoltenMetalParticle(p.x, p.y, Math.cos(angle) * speed, Math.sin(angle) * speed));
+                        }
+                    }
+                }
+                
                 p.active = false;
                 continue;
             }
@@ -659,7 +675,27 @@ export class GameplayScene implements Scene {
     this.drops.forEach(d => d.update(dt));
     
     this.projectiles = this.projectiles.filter(p => { p.update(dt); return p.active; });
-    this.particles = this.particles.filter(p => { p.update(dt, this.world); return p.active; });
+    this.particles = this.particles.filter(p => { 
+        p.update(dt, this.world); 
+        
+        // Molten shrapnel damage logic
+        if (p.active && p instanceof MoltenMetalParticle && p.z < -2) { // Only damage if in air
+            const targets = [this.player, ...this.enemies];
+            for (const t of targets) {
+                if (t && t.active) {
+                    const dx = t.x - p.x;
+                    const dy = t.y - p.y;
+                    const distSq = dx*dx + dy*dy;
+                    if (distSq < (t.radius + p.radius)**2) {
+                        t.takeDamage(p.damage);
+                        p.active = false; // Particle consumed on hit
+                        break;
+                    }
+                }
+            }
+        }
+        return p.active; 
+    });
     this.enemies = this.enemies.filter(e => { if(!e.active) this.physics.removeBody(e); return e.active; });
     this.drops = this.drops.filter(d => d.active);
 
@@ -727,11 +763,13 @@ export class GameplayScene implements Scene {
     }
 
     const timeState = WorldClock.getInstance().getTimeState();
-    if (timeState.ambientIntensity < 0.8) {
+    const useFog = ConfigManager.getInstance().get<boolean>('Visuals', 'fogOfWar');
+
+    if (timeState.ambientIntensity < 0.8 || useFog) {
         this.updateLightClusters();
         this.updateProjectileLights();
     } else {
-        // Ensure constant lights from previous frames are cleared if it just became day
+        // Ensure constant lights from previous frames are cleared if it just became day and no fog
         LightManager.getInstance().clearConstantLights();
         LightManager.getInstance().clearType('fire');
     }
@@ -743,10 +781,29 @@ export class GameplayScene implements Scene {
       const lm = LightManager.getInstance();
       lm.clearConstantLights();
 
-      this.projectiles.forEach((p, i) => {
+      // Molten Shrapnel Lights
+      this.particles.forEach((p) => {
+          if (p instanceof MoltenMetalParticle && p.active) {
+              const lifeRatio = p.life / 7.0;
+              const intensity = p.z < 0 ? 0.8 : 0.6 * lifeRatio;
+              if (intensity > 0.1) {
+                  lm.addConstantLight({
+                      id: `molten_${p.id}`,
+                      x: p.x,
+                      y: p.y + p.z,
+                      radius: 80,
+                      color: p.color,
+                      intensity: intensity,
+                      type: 'transient'
+                  });
+              }
+          }
+      });
+
+      this.projectiles.forEach((p) => {
           if (p.type === ProjectileType.ROCKET || p.type === ProjectileType.MISSILE) {
               lm.addConstantLight({
-                  id: `const_proj_${i}`,
+                  id: `const_proj_${p.id}`,
                   x: p.x,
                   y: p.y,
                   radius: 120,
@@ -1021,6 +1078,25 @@ export class GameplayScene implements Scene {
           ctx.fillStyle = isSelected ? '#00ff00' : (isUnlocked ? '#888' : '#444');
           ctx.fillText(`${i+1}: ${name.toUpperCase()}${isSelected ? ' <' : ''}`, slotX, 90 + i * 15);
       });
+
+      if (!this.player.active) {
+          ctx.save();
+          ctx.fillStyle = 'rgba(100, 0, 0, 0.4)';
+          ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+          
+          ctx.fillStyle = '#ff3300';
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = '#000';
+          ctx.font = 'bold 32px "Share Tech Mono"';
+          ctx.textAlign = 'center';
+          ctx.fillText('CRITICAL FAILURE: AVATAR OFFLINE', ctx.canvas.width / 2, ctx.canvas.height / 2 - 20);
+          
+          ctx.font = '16px "Share Tech Mono"';
+          ctx.fillStyle = '#fff';
+          ctx.fillText('EXCESSIVE HEAT DAMAGE DETECTED', ctx.canvas.width / 2, ctx.canvas.height / 2 + 20);
+          ctx.fillText('RELOAD PAGE TO RESTART', ctx.canvas.width / 2, ctx.canvas.height / 2 + 50);
+          ctx.restore();
+      }
   }
 
   private renderEntityShadow(ctx: CanvasRenderingContext2D, e: Entity, sunDir: {x: number, y: number}, len: number): void {
@@ -1478,12 +1554,44 @@ export class GameplayScene implements Scene {
       LightManager.getInstance().addTransientLight('explosion', x, y);
       FloorDecalManager.getInstance().addScorchMark(x, y, radius);
       
-      // Hit sound for explosion center
       if (this.heatMap) {
-          const mat = this.heatMap.getMaterialAt(x, y);
-          if (mat !== MaterialType.NONE) {
-              const matName = MaterialType[mat].toLowerCase();
-              SoundManager.getInstance().playMaterialHit(matName, x, y);
+          // Explosions add heat to the environment
+          this.heatMap.addHeat(x, y, 0.8, radius * 1.5);
+
+          // Check center material for sound
+          const centerMat = this.heatMap.getMaterialAt(x, y);
+          if (centerMat !== MaterialType.NONE) {
+              SoundManager.getInstance().playMaterialHit(MaterialType[centerMat].toLowerCase(), x, y);
+          }
+
+          // Scan explosion area for Hot Metal to spawn shrapnel
+          // Grid-based scan for higher reliability. Minimum 32px scan to catch nearby walls for small projectiles.
+          let hotMetalIntensity = 0;
+          const scanRadius = Math.max(radius, 32); 
+          const step = 16; // Half a tile
+          for (let dy = -scanRadius; dy <= scanRadius; dy += step) {
+              for (let dx = -scanRadius; dx <= scanRadius; dx += step) {
+                  if (dx*dx + dy*dy <= scanRadius*scanRadius) {
+                      const mat = this.heatMap.getMaterialAt(x + dx, y + dy);
+                      const inst = this.heatMap.getIntensityAt(x + dx, y + dy);
+                      if (mat === MaterialType.METAL && inst > 0.3) {
+                          hotMetalIntensity = Math.max(hotMetalIntensity, inst);
+                      }
+                  }
+              }
+          }
+
+          if (hotMetalIntensity > 0) {
+              const shrapnelCount = 20 + Math.floor(Math.random() * 20);
+              for (let i = 0; i < shrapnelCount; i++) {
+                  const angle = Math.random() * Math.PI * 2;
+                  // Land within 2-3 big tiles (64-128 pixels approx)
+                  const dist = 64 + Math.random() * 64;
+                  // Flight time is approx 1.5s with new gravity (80) and vz (-60)
+                  const speed = dist / 1.5; 
+                  const p = new MoltenMetalParticle(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed);
+                  this.particles.push(p);
+              }
           }
       }
 
