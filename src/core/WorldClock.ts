@@ -8,6 +8,10 @@ export interface TimeState {
     sunColor: string;
     sunAngle: number; // 0 to 2*PI
     sunDirection: {x: number, y: number};
+    moonDirection: {x: number, y: number};
+    moonIntensity: number;
+    moonPhase: number;
+    moonShadowLen: number;
     isDaylight: boolean;
 }
 
@@ -15,11 +19,28 @@ export class WorldClock {
     private static instance: WorldClock;
     private gameSeconds: number = 0;
     private realSecondsPerHour: number = 120;
+    
+    private moonPhase: number = 1.0;
+    private isMoonPhaseIncreasing: boolean = true;
+    private currentNightShadowLen: number = 100;
+    private lastWasDay: boolean = true;
 
     private constructor() {
-        const startHour = ConfigManager.getInstance().get<number>('TimeSystem', 'startHour') ?? 10;
-        this.realSecondsPerHour = ConfigManager.getInstance().get<number>('TimeSystem', 'realSecondsPerHour') || 120;
+        const config = ConfigManager.getInstance();
+        const startHour = config.get<number>('TimeSystem', 'startHour') ?? 10;
+        this.realSecondsPerHour = config.get<number>('TimeSystem', 'realSecondsPerHour') || 120;
         this.gameSeconds = startHour * 3600;
+
+        const randomPhase = config.get<boolean>('TimeSystem', 'randomMoonPhase');
+        if (randomPhase) {
+            this.moonPhase = Math.random();
+            this.isMoonPhaseIncreasing = Math.random() > 0.5;
+        } else {
+            this.moonPhase = config.get<number>('TimeSystem', 'moonPhase') ?? 1.0;
+            this.isMoonPhaseIncreasing = this.moonPhase < 0.5; // Arbitrary: if low phase, increase it
+        }
+
+        this.randomizeShadowLen();
     }
 
     public static getInstance(): WorldClock {
@@ -29,11 +50,40 @@ export class WorldClock {
         return WorldClock.instance;
     }
 
+    private randomizeShadowLen(): void {
+        const minLen = ConfigManager.getInstance().get<number>('Lighting', 'moonShadowMinLen') || 50;
+        const maxLen = ConfigManager.getInstance().get<number>('Lighting', 'moonShadowMaxLen') || 250;
+        this.currentNightShadowLen = minLen + Math.random() * (maxLen - minLen);
+    }
+
     public update(dt: number): void {
-        // Convert real dt to game seconds
-        // 3600 game seconds / realSecondsPerHour
         const gameSecondsPassed = dt * (3600 / this.realSecondsPerHour);
+        const oldSeconds = this.gameSeconds;
         this.gameSeconds = (this.gameSeconds + gameSecondsPassed) % (24 * 3600);
+
+        // Update moon phase slowly (e.g. 0.05 per game day)
+        const phaseChange = (gameSecondsPassed / (24 * 3600)) * 0.1;
+        if (this.isMoonPhaseIncreasing) {
+            this.moonPhase += phaseChange;
+            if (this.moonPhase >= 1) {
+                this.moonPhase = 1;
+                this.isMoonPhaseIncreasing = false;
+            }
+        } else {
+            this.moonPhase -= phaseChange;
+            if (this.moonPhase <= 0) {
+                this.moonPhase = 0;
+                this.isMoonPhaseIncreasing = true;
+            }
+        }
+
+        // New night check
+        const hour = Math.floor(this.gameSeconds / 3600);
+        const isDay = hour >= 6 && hour < 19;
+        if (this.lastWasDay && !isDay) {
+            this.randomizeShadowLen();
+        }
+        this.lastWasDay = isDay;
     }
 
     public getTimeState(): TimeState {
@@ -41,16 +91,20 @@ export class WorldClock {
         const hour = Math.floor(totalSeconds / 3600);
         const minute = Math.floor((totalSeconds % 3600) / 60);
 
-        const sunrise = ConfigManager.getInstance().get<number>('TimeSystem', 'sunriseHour') || 6;
-        const sunset = ConfigManager.getInstance().get<number>('TimeSystem', 'sunsetHour') || 19;
-        
         // Sun Angle: Ensure it's never perfectly 90 degrees (vertical)
         const dayProgress = (totalSeconds / (24 * 3600)); 
-        const sunAngle = (dayProgress * Math.PI * 2) + 0.5; // Constant offset ensures slant
+        const sunAngle = (dayProgress * Math.PI * 2) + 0.5; 
         
         const sunDirection = {
             x: Math.cos(sunAngle),
             y: Math.sin(sunAngle)
+        };
+
+        // Moon Direction: Opposite to sun
+        const moonAngle = sunAngle + Math.PI;
+        const moonDirection = {
+            x: Math.cos(moonAngle),
+            y: Math.sin(moonAngle)
         };
 
         const ambient = this.calculateAmbient(hour, minute, totalSeconds % 3600);
@@ -63,6 +117,10 @@ export class WorldClock {
             sunColor: ambient.color,
             sunAngle: sunAngle,
             sunDirection,
+            moonDirection,
+            moonIntensity: this.moonPhase,
+            moonPhase: this.moonPhase,
+            moonShadowLen: this.currentNightShadowLen,
             isDaylight: hour >= 7 && hour < 18
         };
     }
@@ -121,7 +179,22 @@ export class WorldClock {
             g = Math.floor(80 * (1 - t) + 15 * t);
             b = Math.floor(40 * (1 - t) + 60 * t);
         } else { // Night
-            r = 15; g = 15; b = 60;
+            // Apply moon color influence
+            const moonColorHex = ConfigManager.getInstance().get<string>('Lighting', 'moonColor') || '#aaccff';
+            const mR = parseInt(moonColorHex.slice(1, 3), 16);
+            const mG = parseInt(moonColorHex.slice(3, 5), 16);
+            const mB = parseInt(moonColorHex.slice(5, 7), 16);
+            
+            // Base night color
+            const baseR = 15, baseG = 15, baseB = 60;
+            
+            // Interpolate based on moon intensity
+            r = Math.floor(baseR * (1 - this.moonPhase) + mR * this.moonPhase * 0.5);
+            g = Math.floor(baseG * (1 - this.moonPhase) + mG * this.moonPhase * 0.5);
+            b = Math.floor(baseB * (1 - this.moonPhase) + mB * this.moonPhase * 0.5);
+            
+            // Boost intensity slightly with moon
+            intensity = minAmb + (0.1 * this.moonPhase);
         }
 
         return { intensity, color: `rgb(${r},${g},${b})` };

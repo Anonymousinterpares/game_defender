@@ -90,7 +90,7 @@ export const MasterConfig: GameConfigSchema = {
     enableEnemySpawning: { value: false, type: 'boolean', description: 'Enable Enemy Spawning' }
   },
   Visuals: {
-    fogOfWar: { value: true, type: 'boolean', description: 'Enable Fog of War' },
+    fogOfWar: { value: false, type: 'boolean', description: 'Enable Fog of War' },
     segmentVisibilityRadius: { value: 5.0, type: 'number', min: 1, max: 20, step: 0.5, description: 'Visibility around segments' },
     coneAngle: { value: 60, type: 'number', min: 10, max: 180, step: 5, description: 'Vision Cone Angle (Degrees)' },
     coneDistance: { value: 5.0, type: 'number', min: 5, max: 100, step: 1, description: 'Vision Cone Distance' }
@@ -139,6 +139,9 @@ export const MasterConfig: GameConfigSchema = {
     ambientMax: { value: 1.0, type: 'number', description: 'Maximum ambient light (Day)' },
     fireLightColor: { value: '#ff6600', type: 'string', description: 'Color of fire light' },
     fireLightRadius: { value: 250, type: 'number', description: 'Radius of fire light clusters' },
+    moonColor: { value: '#aaccff', type: 'string', description: 'Color of moonlight' },
+    moonShadowMinLen: { value: 50, type: 'number', description: 'Minimum moon shadow length' },
+    moonShadowMaxLen: { value: 250, type: 'number', description: 'Maximum moon shadow length' },
     transientLights: { 
         value: {
             muzzle: { color: '#ffcc66', intensity: 1.2, radius: 180, ttl: 0.06 },
@@ -153,7 +156,9 @@ export const MasterConfig: GameConfigSchema = {
     realSecondsPerHour: { value: 120, type: 'number', description: 'Duration of one game hour (seconds)' },
     startHour: { value: 22, type: 'number', description: 'Starting game hour (0-23)' },
     sunriseHour: { value: 6, type: 'number', description: 'Hour when sun starts rising' },
-    sunsetHour: { value: 19, type: 'number', description: 'Hour when sun starts setting' }
+    sunsetHour: { value: 19, type: 'number', description: 'Hour when sun starts setting' },
+    moonPhase: { value: 1.0, type: 'number', min: 0, max: 1, step: 0.01, description: 'Starting Moon Phase (0=Null, 1=Full)' },
+    randomMoonPhase: { value: false, type: 'boolean', description: 'Randomize starting moon phase' }
   },
   Keybindings: {
       openDock: { value: 'KeyP', type: 'string', description: 'Open Dock/Shop' }

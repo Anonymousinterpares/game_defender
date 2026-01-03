@@ -59,10 +59,15 @@ export class LightingRenderer {
             this.lightCanvas.width = w; this.lightCanvas.height = h;
         }
 
-        const { ambientIntensity, sunColor, sunDirection } = WorldClock.getInstance().getTimeState();
+        const { ambientIntensity, sunColor, sunDirection, moonDirection, moonIntensity, moonShadowLen, isDaylight } = WorldClock.getInstance().getTimeState();
         const worldMeshVersion = this.parent.world.getMeshVersion();
-        const sunAngle = Math.atan2(sunDirection.y, sunDirection.x);
-        const bakeVersion = `${worldMeshVersion}_${Math.round(sunAngle * 10)}`; 
+        
+        // Use either sun or moon for shadows
+        const activeDir = isDaylight ? sunDirection : moonDirection;
+        const activeIntensity = isDaylight ? ambientIntensity : moonIntensity;
+        const activeAngle = Math.atan2(activeDir.y, activeDir.x);
+        
+        const bakeVersion = `${worldMeshVersion}_${Math.round(activeAngle * 10)}_${isDaylight ? 'D' : 'N'}_${Math.round(activeIntensity * 10)}`; 
 
         const lctx = this.lightCtx;
         lctx.globalCompositeOperation = 'source-over'; 
@@ -86,7 +91,11 @@ export class LightingRenderer {
                     this.shadowChunks.set(key, chunk);
                 }
                 if (chunk.version !== bakeVersion) {
-                    this.rebuildShadowChunk(chunk, gx, gy, sunDirection, ambientIntensity);
+                    if (isDaylight) {
+                        this.rebuildShadowChunk(chunk, gx, gy, sunDirection, ambientIntensity);
+                    } else {
+                        this.rebuildMoonShadowChunk(chunk, gx, gy, moonDirection, moonIntensity, moonShadowLen);
+                    }
                     chunk.version = bakeVersion;
                 }
                 lctx.drawImage(chunk.canvas, gx * this.chunkSize - this.parent.cameraX, gy * this.chunkSize - this.parent.cameraY);
@@ -94,10 +103,26 @@ export class LightingRenderer {
         }
 
         // Dynamic Entity Shadows
-        const shadowLen = 20 + 150 * (1.0 - Math.pow(ambientIntensity, 0.4));
-        if (ambientIntensity > 0.1) {
+        if (isDaylight) {
+            const shadowLen = 20 + 150 * (1.0 - Math.pow(ambientIntensity, 0.4));
+            if (ambientIntensity > 0.1) {
+                lctx.save();
+                lctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                const entitiesToShadow = [];
+                if (this.parent.player) {
+                    entitiesToShadow.push(this.parent.player);
+                    entitiesToShadow.push(...this.parent.player.segments);
+                }
+                entitiesToShadow.push(...this.parent.enemies);
+                entitiesToShadow.forEach(e => {
+                    if (e.active) this.renderEntityShadow(lctx, e, sunDirection, shadowLen);
+                });
+                lctx.restore();
+            }
+        } else if (moonIntensity > 0.1) {
+            // Moon Entity Shadows
             lctx.save();
-            lctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            lctx.fillStyle = `rgba(0, 0, 0, ${0.4 * moonIntensity})`;
             const entitiesToShadow = [];
             if (this.parent.player) {
                 entitiesToShadow.push(this.parent.player);
@@ -105,7 +130,7 @@ export class LightingRenderer {
             }
             entitiesToShadow.push(...this.parent.enemies);
             entitiesToShadow.forEach(e => {
-                if (e.active) this.renderEntityShadow(lctx, e, sunDirection, shadowLen);
+                if (e.active) this.renderEntityShadow(lctx, e, moonDirection, moonShadowLen);
             });
             lctx.restore();
         }
@@ -212,6 +237,36 @@ export class LightingRenderer {
             const b = { x: seg.b.x - worldX, y: seg.b.y - worldY };
             const a2 = { x: a.x + sunDir.x * shadowLen, y: a.y + sunDir.y * shadowLen };
             const b2 = { x: b.x + sunDir.x * shadowLen, y: b.y + sunDir.y * shadowLen };
+            sctx.moveTo(a.x, a.y);
+            sctx.lineTo(b.x, b.y);
+            sctx.lineTo(b2.x, b2.y);
+            sctx.lineTo(a2.x, a2.y);
+            sctx.closePath();
+        });
+        sctx.fill();
+        sctx.restore();
+    }
+
+    private rebuildMoonShadowChunk(chunk: any, gx: number, gy: number, moonDir: {x: number, y: number}, intensity: number, shadowLen: number): void {
+        const sctx = chunk.ctx;
+        sctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
+        if (intensity <= 0.1 || !this.parent.world) return;
+
+        const worldX = gx * this.chunkSize;
+        const worldY = gy * this.chunkSize;
+        const segments = this.parent.world.getOcclusionSegments(worldX, worldY, this.chunkSize, this.chunkSize);
+        
+        sctx.save();
+        // Moon shadow opacity scales with phase
+        sctx.fillStyle = `rgba(0, 0, 0, ${0.6 * intensity})`; 
+        
+        sctx.beginPath();
+        segments.forEach(seg => {
+            const a = { x: seg.a.x - worldX, y: seg.a.y - worldY };
+            const b = { x: seg.b.x - worldX, y: seg.b.y - worldY };
+            const a2 = { x: a.x + moonDir.x * shadowLen, y: a.y + moonDir.y * shadowLen };
+            const b2 = { x: b.x + moonDir.x * shadowLen, y: b.y + moonDir.y * shadowLen };
+
             sctx.moveTo(a.x, a.y);
             sctx.lineTo(b.x, b.y);
             sctx.lineTo(b2.x, b2.y);
