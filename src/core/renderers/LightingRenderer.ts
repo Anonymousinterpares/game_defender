@@ -172,7 +172,8 @@ export class LightingRenderer {
         lctx.save();
         lctx.globalCompositeOperation = 'screen'; 
         lctx.translate(-this.parent.cameraX, -this.parent.cameraY);
-        const silColor = isDaylight ? 'rgb(60, 60, 60)' : 'rgb(30, 35, 50)';
+        // Slightly warmer silhouette during day
+        const silColor = isDaylight ? 'rgb(70, 65, 60)' : 'rgb(30, 35, 50)';
         this.parent.world.renderAsSilhouette(lctx, this.parent.cameraX, this.parent.cameraY, silColor);
         if (this.parent.player) this.parent.player.renderAsSilhouette(lctx, silColor);
         this.parent.enemies.forEach(e => e.renderAsSilhouette(lctx, silColor));
@@ -188,9 +189,8 @@ export class LightingRenderer {
 
         // 5. POINT LIGHTS
         const activeIntensity = isDaylight ? sun.intensity : moon.intensity;
-        if (activeIntensity < 0.95) {
-            this.renderPointLights(lctx, activeIntensity, worldMeshVersion, w, h);
-        }
+        // Always render point lights, but they are naturally washed out by high sun intensity
+        this.renderPointLights(lctx, activeIntensity, worldMeshVersion, w, h);
 
         // 6. CLOUD SHADOWS (Still in lightmap)
         if (weather.cloudType !== CloudType.NONE) {

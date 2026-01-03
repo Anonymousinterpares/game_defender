@@ -467,6 +467,15 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     if (cleanCmd === 'set_weather_fog') { WeatherManager.getInstance().setWeather(WeatherType.FOG); return true; }
     if (cleanCmd === 'set_weather_rain') { WeatherManager.getInstance().setWeather(WeatherType.RAIN); return true; }
     if (cleanCmd === 'set_weather_snow') { WeatherManager.getInstance().setWeather(WeatherType.SNOW); return true; }
+
+    if (cleanCmd.startsWith('set_time_speed ')) {
+        const val = parseFloat(cleanCmd.split(' ')[1]);
+        if (!isNaN(val)) { ConfigManager.getInstance().set('TimeSystem', 'realSecondsPerHour', val); return true; }
+    }
+    if (cleanCmd.startsWith('set_time_hour ')) {
+        const val = parseFloat(cleanCmd.split(' ')[1]);
+        if (!isNaN(val)) { WorldClock.getInstance().setHour(val); return true; }
+    }
     
     return false;
   }
