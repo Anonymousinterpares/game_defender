@@ -154,10 +154,10 @@ export const MasterConfig: GameConfigSchema = {
   },
   TimeSystem: {
     realSecondsPerHour: { value: 120, type: 'number', description: 'Duration of one game hour (seconds)' },
-    startHour: { value: 12, type: 'number', description: 'Starting game hour (0-23)' },
+    startHour: { value: 23, type: 'number', description: 'Starting game hour (0-23)' },
     sunriseHour: { value: 6, type: 'number', description: 'Hour when sun starts rising' },
     sunsetHour: { value: 19, type: 'number', description: 'Hour when sun starts setting' },
-    moonPhase: { value: 0.9, type: 'number', min: 0, max: 1, step: 0.01, description: 'Starting Moon Phase (0=Null, 1=Full)' },
+    moonPhase: { value: 0.2, type: 'number', min: 0, max: 1, step: 0.01, description: 'Starting Moon Phase (0=Null, 1=Full)' },
     randomMoonPhase: { value: false, type: 'boolean', description: 'Randomize starting moon phase' }
   },
   Keybindings: {

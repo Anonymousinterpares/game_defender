@@ -20,6 +20,7 @@ import { GameplayHUD, HUDParent } from '../ui/GameplayHUD';
 import { WeaponSystem, WeaponParent } from '../systems/WeaponSystem';
 import { CombatSystem, CombatParent } from '../systems/CombatSystem';
 import { LightingRenderer, LightingParent } from './renderers/LightingRenderer';
+import { WeatherManager, WeatherType } from './WeatherManager';
 
 export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatParent, LightingParent {
   public world: World | null = null;
@@ -460,6 +461,13 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     }
     if (cleanCmd === 'spawn_on') { this.spawnEnemies = true; ConfigManager.getInstance().set('Debug', 'enableEnemySpawning', true); return true; }
     if (cleanCmd === 'spawn_off') { this.spawnEnemies = false; ConfigManager.getInstance().set('Debug', 'enableEnemySpawning', false); return true; }
+    
+    // Weather Commands
+    if (cleanCmd === 'set_weather_clear') { WeatherManager.getInstance().setWeather(WeatherType.CLEAR); return true; }
+    if (cleanCmd === 'set_weather_fog') { WeatherManager.getInstance().setWeather(WeatherType.FOG); return true; }
+    if (cleanCmd === 'set_weather_rain') { WeatherManager.getInstance().setWeather(WeatherType.RAIN); return true; }
+    if (cleanCmd === 'set_weather_snow') { WeatherManager.getInstance().setWeather(WeatherType.SNOW); return true; }
+    
     return false;
   }
 }

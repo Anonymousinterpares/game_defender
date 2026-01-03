@@ -39,6 +39,10 @@ export class LightingRenderer {
     // Weather Visuals
     private cloudCanvas: HTMLCanvasElement;
     private cloudCtx: CanvasRenderingContext2D;
+    private fogCanvas: HTMLCanvasElement;
+    private fogCtx: CanvasRenderingContext2D;
+    private fogNoise: HTMLCanvasElement | null = null;
+    private fogOffset: { x: number, y: number } = { x: 0, y: 0 };
     private cloudOffset: { x: number, y: number } = { x: 0, y: 0 };
     private cloudShapes: HTMLCanvasElement[] = [];
     private particles: { x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number }[] = [];
@@ -55,8 +59,45 @@ export class LightingRenderer {
 
         this.cloudCanvas = document.createElement('canvas');
         this.cloudCtx = this.cloudCanvas.getContext('2d')!;
+        this.fogCanvas = document.createElement('canvas');
+        this.fogCtx = this.fogCanvas.getContext('2d')!;
+        
         this.generateCloudShapes();
+        this.generateFogNoise();
         this.initParticles();
+    }
+
+    private generateFogNoise(): void {
+        this.fogNoise = document.createElement('canvas');
+        const size = 512;
+        this.fogNoise.width = size;
+        this.fogNoise.height = size;
+        const ctx = this.fogNoise.getContext('2d')!;
+        
+        // Wraparound Procedural Noise
+        for (let i = 0; i < 30; i++) {
+            const x = Math.random() * size;
+            const y = Math.random() * size;
+            const r = 60 + Math.random() * 100;
+            
+            // Draw circle with 9-tap wraparound to ensure seamless tiling
+            const offsets = [
+                {ox: 0, oy: 0}, {ox: size, oy: 0}, {ox: -size, oy: 0},
+                {ox: 0, oy: size}, {ox: 0, oy: -size},
+                {ox: size, oy: size}, {ox: size, oy: -size},
+                {ox: -size, oy: size}, {ox: -size, oy: -size}
+            ];
+
+            offsets.forEach(off => {
+                const grad = ctx.createRadialGradient(x + off.ox, y + off.oy, 0, x + off.ox, y + off.oy, r);
+                grad.addColorStop(0, 'rgba(255,255,255,0.4)');
+                grad.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath(); 
+                ctx.arc(x + off.ox, y + off.oy, r, 0, Math.PI * 2); 
+                ctx.fill();
+            });
+        }
     }
 
     private generateCloudShapes(): void {
@@ -65,12 +106,12 @@ export class LightingRenderer {
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d')!;
             
-            // Draw a cluster of soft circles
+            // Draw a cluster of soft circles, constrained to center to ensure 0 alpha at edges
             ctx.fillStyle = '#000000';
             for (let j = 0; j < 10; j++) {
-                const x = 256 + (Math.random() - 0.5) * 300;
-                const y = 256 + (Math.random() - 0.5) * 300;
-                const r = 100 + Math.random() * 150;
+                const x = 256 + (Math.random() - 0.5) * 200;
+                const y = 256 + (Math.random() - 0.5) * 200;
+                const r = 80 + Math.random() * 120;
                 const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
                 grad.addColorStop(0, 'rgba(0,0,0,0.8)');
                 grad.addColorStop(1, 'rgba(0,0,0,0)');
@@ -115,6 +156,7 @@ export class LightingRenderer {
         const { sun, moon, baseAmbient, isDaylight } = WorldClock.getInstance().getTimeState();
         const worldMeshVersion = this.parent.world.getMeshVersion();
         const lctx = this.lightCtx;
+        const weather = WeatherManager.getInstance().getWeatherState();
 
         // 1. BASE FLOOR
         lctx.globalCompositeOperation = 'source-over'; 
@@ -149,38 +191,66 @@ export class LightingRenderer {
             this.renderPointLights(lctx, activeIntensity, worldMeshVersion, w, h);
         }
 
-        // 6. WEATHER EFFECTS (Clouds & Fog)
-        this.renderWeatherOverlays(lctx, w, h);
+        // 6. CLOUD SHADOWS (Still in lightmap)
+        if (weather.cloudType !== CloudType.NONE) {
+            this.renderCloudShadows(lctx, weather, w, h);
+        }
 
         this.meshVersion = worldMeshVersion;
 
-        // 7. APPLY TO WORLD
+        // 7. APPLY LIGHTMAP TO WORLD
         ctx.save();
         ctx.globalCompositeOperation = 'multiply';
         ctx.drawImage(this.lightCanvas, 0, 0);
         ctx.restore();
 
-        // 8. POST-LIGHTING PARTICLES (Rain/Snow)
+        // 8. POST-LIGHTING OVERLAYS (Fog & Particles)
+        if (weather.fogDensity > 0.05) {
+            this.renderFogOverlay(ctx, weather, w, h);
+        }
         this.renderParticles(ctx);
     }
 
-    private renderWeatherOverlays(lctx: CanvasRenderingContext2D, w: number, h: number): void {
-        const weather = WeatherManager.getInstance().getWeatherState();
+    private renderFogOverlay(ctx: CanvasRenderingContext2D, weather: any, w: number, h: number): void {
+        const { isDaylight } = WorldClock.getInstance().getTimeState();
         
-        // 1. Cloud Shadows
-        if (weather.cloudType !== CloudType.NONE) {
-            this.renderCloudShadows(lctx, weather, w, h);
+        // Update fog offset based on wind
+        const dt = 1/60; 
+        this.fogOffset.x += weather.windDir.x * weather.windSpeed * 10 * dt;
+        this.fogOffset.y += weather.windDir.y * weather.windSpeed * 10 * dt;
+
+        ctx.save();
+        
+        // DAYTIME WASHOUT: Use screen to brighten/haze the world
+        if (isDaylight) {
+            ctx.globalCompositeOperation = 'screen';
+            ctx.globalAlpha = weather.fogDensity * 0.4;
+        } else {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = weather.fogDensity * 0.3;
         }
 
-        // 2. Fog
-        if (weather.fogDensity > 0.05) {
-            lctx.save();
-            lctx.globalCompositeOperation = 'source-over';
-            const fogColor = weather.type === WeatherType.SNOW ? '200, 210, 230' : '100, 105, 115';
-            lctx.fillStyle = `rgba(${fogColor}, ${weather.fogDensity * 0.4})`;
-            lctx.fillRect(0, 0, w, h);
-            lctx.restore();
+        const fogColor = weather.type === WeatherType.SNOW ? '220, 230, 255' : '180, 185, 200';
+        
+        // Render noise-based banks
+        if (this.fogNoise) {
+            const spacing = 512;
+            const startX = Math.floor((this.parent.cameraX + this.fogOffset.x) / spacing) * spacing - (this.parent.cameraX + this.fogOffset.x);
+            const startY = Math.floor((this.parent.cameraY + this.fogOffset.y) / spacing) * spacing - (this.parent.cameraY + this.fogOffset.y);
+
+            for (let ox = startX; ox < w + spacing; ox += spacing) {
+                for (let oy = startY; oy < h + spacing; oy += spacing) {
+                    ctx.drawImage(this.fogNoise, ox, oy, spacing, spacing);
+                }
+            }
         }
+
+        // Global base fog haze
+        ctx.fillStyle = `rgb(${fogColor})`;
+        ctx.globalAlpha *= 0.6;
+        ctx.fillRect(0, 0, w, h);
+        
+        ctx.restore();
     }
 
     private renderCloudShadows(lctx: CanvasRenderingContext2D, weather: any, w: number, h: number): void {
@@ -501,6 +571,23 @@ export class LightingRenderer {
             lctx.fillStyle = grad;
             lctx.fillRect(screenX - light.radius, screenY - light.radius, light.radius * 2, light.radius * 2);
             lctx.restore();
+
+            // FOG SCATTER HALO (Larger, soft glow around lights in fog)
+            const weather = WeatherManager.getInstance().getWeatherState();
+            if (weather.fogDensity > 0.1) {
+                lctx.save();
+                lctx.globalCompositeOperation = 'screen';
+                const haloRadius = light.radius * (1.5 + weather.fogDensity * 2.0);
+                const haloAlpha = light.intensity * weather.fogDensity * 0.4;
+                lctx.globalAlpha = haloAlpha;
+
+                const haloGrad = lctx.createRadialGradient(screenX, screenY, light.radius * 0.2, screenX, screenY, haloRadius);
+                haloGrad.addColorStop(0, light.color);
+                haloGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                lctx.fillStyle = haloGrad;
+                lctx.fillRect(screenX - haloRadius, screenY - haloRadius, haloRadius * 2, haloRadius * 2);
+                lctx.restore();
+            }
         });
         lctx.restore();
     }
@@ -555,6 +642,32 @@ export class LightingRenderer {
         lctx.fillStyle = coneGrad;
         lctx.fillRect(playerScreenX - coneDist, playerScreenY - coneDist, coneDist * 2, coneDist * 2);
         lctx.restore();
+
+        // FOG CONE SCATTER
+        const weather = WeatherManager.getInstance().getWeatherState();
+        if (weather.fogDensity > 0.1) {
+            lctx.save();
+            lctx.globalCompositeOperation = 'screen';
+            lctx.globalAlpha = weather.fogDensity * 0.25;
+            
+            // Draw the same cone but without world occlusion clipping, 
+            // and slightly larger/softer to simulate light scattering in air
+            lctx.beginPath();
+            lctx.moveTo(playerScreenX, playerScreenY);
+            const startAngleScatter = this.parent.player.rotation - (coneAngleRad * 1.2) / 2;
+            for (let i = 0; i <= 30; i++) {
+                const angle = startAngleScatter + (i / 30) * (coneAngleRad * 1.2);
+                lctx.lineTo(playerScreenX + Math.cos(angle) * coneDist * 0.8, playerScreenY + Math.sin(angle) * coneDist * 0.8);
+            }
+            lctx.closePath();
+            
+            const scatterGrad = lctx.createRadialGradient(playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, coneDist);
+            scatterGrad.addColorStop(0, revealColor);
+            scatterGrad.addColorStop(1, 'rgba(0,0,0,0)');
+            lctx.fillStyle = scatterGrad;
+            lctx.fill();
+            lctx.restore();
+        }
     }
 
     public clearCache(): void {
