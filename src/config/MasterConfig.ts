@@ -143,7 +143,7 @@ export const MasterConfig: GameConfigSchema = {
         value: {
             muzzle: { color: '#ffcc66', intensity: 1.2, radius: 180, ttl: 0.06 },
             impact: { color: '#ffffff', intensity: 1.5, radius: 120, ttl: 0.1 },
-            explosion: { color: '#ff5500', intensity: 3.0, radius: 400, ttl: 0.5 }
+            explosion: { color: '#ff7700', intensity: 6.0, radius: 600, ttl: 0.6 }
         }, 
         type: 'string', // Actually object, but schema uses 'string'/'number'/'boolean'
         description: 'Settings for short-lived light sources' 
@@ -151,7 +151,7 @@ export const MasterConfig: GameConfigSchema = {
   },
   TimeSystem: {
     realSecondsPerHour: { value: 120, type: 'number', description: 'Duration of one game hour (seconds)' },
-    startHour: { value: 10, type: 'number', description: 'Starting game hour (0-23)' },
+    startHour: { value: 22, type: 'number', description: 'Starting game hour (0-23)' },
     sunriseHour: { value: 6, type: 'number', description: 'Hour when sun starts rising' },
     sunsetHour: { value: 19, type: 'number', description: 'Hour when sun starts setting' }
   },
