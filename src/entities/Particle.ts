@@ -58,8 +58,83 @@ export class Particle extends Entity {
 
     render(ctx: CanvasRenderingContext2D): void {
         ctx.save();
-        ctx.globalAlpha = this.alpha;
+        ctx.globalAlpha = Math.max(0, this.alpha);
         ctx.fillStyle = this.color;
+        
+        if (this.isFlame) {
+            ctx.globalCompositeOperation = this.alpha > 0.4 ? 'screen' : 'source-over';
+            // Soft glow for flame
+            const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius);
+            grad.addColorStop(0, this.color);
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+        }
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+export class ShockwaveParticle extends Entity {
+    public active: boolean = true;
+    public id: string = Math.random().toString(36).substr(2, 9);
+    private life: number = 0.4;
+    private maxLife: number = 0.4;
+    private maxRadius: number;
+
+    constructor(x: number, y: number, radius: number) {
+        super(x, y);
+        this.maxRadius = radius;
+    }
+
+    update(dt: number): void {
+        this.life -= dt;
+        if (this.life <= 0) this.active = false;
+    }
+
+    render(ctx: CanvasRenderingContext2D): void {
+        const ratio = 1 - (this.life / this.maxLife);
+        const currentRadius = this.maxRadius * Math.pow(ratio, 0.5);
+        const alpha = 0.8 * (1 - ratio);
+
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, alpha);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, currentRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+export class FlashParticle extends Entity {
+    public active: boolean = true;
+    public id: string = Math.random().toString(36).substr(2, 9);
+    private life: number = 0.1;
+    private maxLife: number = 0.1;
+    private radius: number;
+
+    constructor(x: number, y: number, radius: number) {
+        super(x, y);
+        this.radius = radius;
+    }
+
+    update(dt: number): void {
+        this.life -= dt;
+        if (this.life <= 0) this.active = false;
+    }
+
+    render(ctx: CanvasRenderingContext2D): void {
+        const ratio = this.life / this.maxLife;
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius);
+        grad.addColorStop(0, `rgba(255, 255, 255, ${ratio})`);
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fill();

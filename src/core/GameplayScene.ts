@@ -11,7 +11,7 @@ import { ConfigManager } from '../config/MasterConfig';
 import { Projectile, ProjectileType } from '../entities/Projectile';
 import { Enemy } from '../entities/Enemy';
 import { Drop, DropType } from '../entities/Drop';
-import { Particle, MoltenMetalParticle } from '../entities/Particle';
+import { Particle, MoltenMetalParticle, FlashParticle, ShockwaveParticle } from '../entities/Particle';
 import { TurretUpgrade, ShieldUpgrade } from '../entities/upgrades/Upgrade';
 import { HeatMap, MaterialType } from './HeatMap';
 import { WorldClock } from './WorldClock';
@@ -29,7 +29,7 @@ export class GameplayScene implements Scene {
   private enemies: Enemy[] = [];
   private drops: Drop[] = [];
   private projectiles: Projectile[] = [];
-  private particles: Particle[] = [];
+  private particles: Entity[] = [];
   
   private cameraX: number = 0;
   private cameraY: number = 0;
@@ -1553,6 +1553,35 @@ export class GameplayScene implements Scene {
       SoundManager.getInstance().playSoundSpatial('explosion_large', x, y);
       LightManager.getInstance().addTransientLight('explosion', x, y);
       FloorDecalManager.getInstance().addScorchMark(x, y, radius);
+      
+      // --- PREMIUM VISUAL EFFECTS ---
+      // 1. Initial Flash (Brief white burst)
+      this.particles.push(new FlashParticle(x, y, radius * 2.5));
+      
+      // 2. Shockwave (Expanding ring)
+      this.particles.push(new ShockwaveParticle(x, y, radius * 1.8));
+
+      // 3. Fireball (Additive glowing particles)
+      const fireCount = 12 + Math.floor(Math.random() * 6);
+      for (let i = 0; i < fireCount; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 100 + Math.random() * 300;
+          const life = 0.3 + Math.random() * 0.4;
+          const p = new Particle(x, y, '#fffbe6', Math.cos(angle) * speed, Math.sin(angle) * speed, life);
+          p.isFlame = true;
+          this.particles.push(p);
+      }
+
+      // 4. Lingering Smoke
+      const smokeCount = 20 + Math.floor(Math.random() * 10);
+      for (let i = 0; i < smokeCount; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 40 + Math.random() * 80;
+          const life = 1.0 + Math.random() * 1.5;
+          const color = Math.random() < 0.5 ? '#333' : '#555';
+          const p = new Particle(x, y, color, Math.cos(angle) * speed, Math.sin(angle) * speed, life);
+          this.particles.push(p);
+      }
       
       if (this.heatMap) {
           // Explosions add heat to the environment
