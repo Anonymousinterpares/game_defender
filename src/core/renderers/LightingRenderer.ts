@@ -42,6 +42,7 @@ export class LightingRenderer {
     private cloudOffset: { x: number, y: number } = { x: 0, y: 0 };
     private cloudShapes: HTMLCanvasElement[] = [];
     private particles: { x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number }[] = [];
+    private splashes: { x: number, y: number, life: number, type: 'rain' | 'snow' }[] = [];
     private lastParticleUpdate: number = 0;
 
     constructor(private parent: LightingParent) {
@@ -210,7 +211,7 @@ export class LightingRenderer {
 
     private renderParticles(ctx: CanvasRenderingContext2D): void {
         const weather = WeatherManager.getInstance().getWeatherState();
-        if (weather.precipitationIntensity < 0.05) return;
+        if (weather.precipitationIntensity < 0.05 && this.splashes.length === 0) return;
 
         const w = ctx.canvas.width;
         const h = ctx.canvas.height;
@@ -218,39 +219,110 @@ export class LightingRenderer {
         const dt = this.lastParticleUpdate ? (now - this.lastParticleUpdate) / 1000 : 0.016;
         this.lastParticleUpdate = now;
 
+        // Camera movement delta for parallax
+        const camDx = (this.parent.cameraX - (this as any)._lastCamX || 0);
+        const camDy = (this.parent.cameraY - (this as any)._lastCamY || 0);
+        (this as any)._lastCamX = this.parent.cameraX;
+        (this as any)._lastCamY = this.parent.cameraY;
+
         ctx.save();
-        if (weather.type === WeatherType.RAIN) {
-            ctx.strokeStyle = 'rgba(150, 180, 255, 0.4)';
-            ctx.lineWidth = 1;
-            this.particles.forEach(p => {
-                p.vx = weather.windDir.x * weather.windSpeed * 100;
-                p.vy = 800 + Math.random() * 200;
-                p.x += p.vx * dt;
-                p.y += p.vy * dt;
-
-                if (p.x < 0) p.x = w; if (p.x > w) p.x = 0;
-                if (p.y > h) { p.y = 0; p.x = Math.random() * w; }
-
+        
+        // 1. RENDER SPLASHES (On Ground)
+        this.splashes = this.splashes.filter(s => s.life > 0);
+        this.splashes.forEach(s => {
+            s.life -= dt * 4;
+            const sx = s.x - this.parent.cameraX;
+            const sy = s.y - this.parent.cameraY;
+            
+            if (s.type === 'rain') {
+                ctx.strokeStyle = `rgba(180, 200, 255, ${s.life * 0.4})`;
                 ctx.beginPath();
-                ctx.moveTo(p.x, p.y);
-                ctx.lineTo(p.x - p.vx * 0.02, p.y - p.vy * 0.02);
+                ctx.ellipse(sx, sy, (1 - s.life) * 15, (1 - s.life) * 8, 0, 0, Math.PI * 2);
                 ctx.stroke();
-            });
-        } else if (weather.type === WeatherType.SNOW) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-            this.particles.forEach(p => {
-                p.vx = weather.windDir.x * weather.windSpeed * 50 + Math.sin(now * 0.002 + p.life * 10) * 20;
-                p.vy = 100 + Math.random() * 50;
-                p.x += p.vx * dt;
-                p.y += p.vy * dt;
-
-                if (p.x < 0) p.x = w; if (p.x > w) p.x = 0;
-                if (p.y > h) { p.y = 0; p.x = Math.random() * w; }
-
+            } else {
+                ctx.fillStyle = `rgba(255, 255, 255, ${s.life * 0.6})`;
                 ctx.beginPath();
-                ctx.arc(p.x, p.y, 1 + Math.random() * 2, 0, Math.PI * 2);
+                ctx.arc(sx, sy, (1 - s.life) * 4, 0, Math.PI * 2);
                 ctx.fill();
-            });
+            }
+        });
+
+        // 2. RENDER FALLING PARTICLES
+        if (weather.precipitationIntensity > 0.05) {
+            if (weather.type === WeatherType.RAIN) {
+                ctx.strokeStyle = 'rgba(160, 190, 255, 0.4)';
+                ctx.lineWidth = 1;
+                this.particles.forEach(p => {
+                    // Vertical fall + Wind
+                    p.vz = -500; // Falling "down" in Z
+                    p.vx = weather.windDir.x * weather.windSpeed * 50;
+                    p.vy = weather.windDir.y * weather.windSpeed * 50;
+
+                    // Apply motion + Camera Parallax (higher particles move more with camera)
+                    const parallaxMult = p.z / 500;
+                    p.x += (p.vx - camDx * parallaxMult) * dt;
+                    p.y += (p.vy - camDy * parallaxMult) * dt;
+                    p.z += p.vz * dt;
+
+                    // Screen Wrap
+                    const sx = p.x % w;
+                    const sy = p.y % h;
+                    const screenX = sx < 0 ? sx + w : sx;
+                    const screenY = sy < 0 ? sy + h : sy;
+
+                    // Impact ground
+                    if (p.z <= 0) {
+                        if (Math.random() < 0.2) { // Cap splashes for performance
+                            this.splashes.push({ 
+                                x: screenX + this.parent.cameraX, 
+                                y: screenY + this.parent.cameraY, 
+                                life: 1.0, 
+                                type: 'rain' 
+                            });
+                        }
+                        p.z = 400 + Math.random() * 200;
+                    }
+
+                    ctx.beginPath();
+                    ctx.moveTo(screenX, screenY - p.z * 0.2);
+                    ctx.lineTo(screenX + p.vx * 0.01, (screenY - p.z * 0.2) + 10);
+                    ctx.stroke();
+                });
+            } else if (weather.type === WeatherType.SNOW) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                this.particles.forEach(p => {
+                    p.vz = -80 - Math.random() * 40;
+                    const sway = Math.sin(now * 0.002 + p.life * 10) * 30;
+                    p.vx = weather.windDir.x * weather.windSpeed * 30 + sway;
+                    p.vy = weather.windDir.y * weather.windSpeed * 30;
+
+                    const parallaxMult = p.z / 500;
+                    p.x += (p.vx - camDx * parallaxMult) * dt;
+                    p.y += (p.vy - camDy * parallaxMult) * dt;
+                    p.z += p.vz * dt;
+
+                    const sx = p.x % w;
+                    const sy = p.y % h;
+                    const screenX = sx < 0 ? sx + w : sx;
+                    const screenY = sy < 0 ? sy + h : sy;
+
+                    if (p.z <= 0) {
+                        if (Math.random() < 0.1) {
+                            this.splashes.push({ 
+                                x: screenX + this.parent.cameraX, 
+                                y: screenY + this.parent.cameraY, 
+                                life: 1.0, 
+                                type: 'snow' 
+                            });
+                        }
+                        p.z = 400 + Math.random() * 200;
+                    }
+
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY - p.z * 0.2, 1 + Math.random() * 2, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
         }
         ctx.restore();
     }

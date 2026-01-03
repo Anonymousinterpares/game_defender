@@ -164,7 +164,7 @@ export const MasterConfig: GameConfigSchema = {
       openDock: { value: 'KeyP', type: 'string', description: 'Open Dock/Shop' }
   },
   Weather: {
-    initialWeather: { value: 'snow', type: 'string', description: 'Initial weather type (clear, fog, rain, snow, random)' },
+    initialWeather: { value: 'fog', type: 'string', description: 'Initial weather type (clear, fog, rain, snow, random)' },
     transitionSpeed: { value: 0.05, type: 'number', min: 0.01, max: 1.0, step: 0.01, description: 'Speed of weather transitions' },
     windMinSpeed: { value: 0.5, type: 'number', min: 0, max: 10, step: 0.1, description: 'Minimum wind speed' },
     windMaxSpeed: { value: 5.0, type: 'number', min: 0, max: 20, step: 0.1, description: 'Maximum wind speed' }
