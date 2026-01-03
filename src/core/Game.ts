@@ -3,6 +3,7 @@ import { ConfigManager } from '../config/MasterConfig';
 import { SceneManager } from './SceneManager';
 import { InputManager } from './InputManager';
 import { DevConsole } from './DevConsole';
+import { WeatherManager } from './WeatherManager';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -71,6 +72,7 @@ export class Game {
   }
 
   private update(dt: number): void {
+    WeatherManager.getInstance().update(dt);
     this.sceneManager.update(dt);
     this.inputManager.update();
   }

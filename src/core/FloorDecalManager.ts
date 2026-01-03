@@ -1,3 +1,5 @@
+import { WeatherManager, WeatherType } from './WeatherManager';
+
 export interface Decal {
     x: number;
     y: number;
@@ -5,8 +7,9 @@ export interface Decal {
     color: string;
     opacity: number;
     rotation: number;
-    type: 'scorch' | 'metal';
+    type: 'scorch' | 'metal' | 'puddle';
     seed: number; // For procedural consistency
+    ttl?: number; 
 }
 
 export class FloorDecalManager {
@@ -68,6 +71,31 @@ export class FloorDecalManager {
     public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
         const viewW = ctx.canvas.width;
         const viewH = ctx.canvas.height;
+        const weather = WeatherManager.getInstance().getWeatherState();
+
+        // Spawn puddles during rain
+        if (weather.type === WeatherType.RAIN && Math.random() < 0.05) {
+            this.decals.push({
+                x: cameraX + Math.random() * viewW,
+                y: cameraY + Math.random() * viewH,
+                radius: 10 + Math.random() * 30,
+                color: 'rgba(100, 150, 255, 0.2)',
+                opacity: 0.3,
+                rotation: Math.random() * Math.PI * 2,
+                type: 'puddle',
+                seed: Math.random() * 10000,
+                ttl: 10 + Math.random() * 20
+            });
+        }
+
+        // Filter out dead decals
+        this.decals = this.decals.filter(d => {
+            if (d.ttl !== undefined) {
+                d.ttl -= 0.016;
+                return d.ttl > 0;
+            }
+            return true;
+        });
 
         this.decals.forEach(d => {
             // Culling (Note: cameraX/Y translation is already applied to ctx in GameplayScene)
@@ -76,10 +104,42 @@ export class FloorDecalManager {
 
             if (d.type === 'scorch') {
                 this.renderRealisticScorch(ctx, d);
-            } else {
+            } else if (d.type === 'metal') {
                 this.renderMetalDecal(ctx, d);
+            } else if (d.type === 'puddle') {
+                this.renderPuddle(ctx, d);
             }
         });
+    }
+
+    private renderPuddle(ctx: CanvasRenderingContext2D, d: Decal): void {
+        const rand = this.seededRandom(d.seed);
+        ctx.save();
+        ctx.translate(d.x, d.y);
+        ctx.rotate(d.rotation);
+        ctx.globalAlpha = d.opacity * (d.ttl !== undefined ? Math.min(1, d.ttl) : 1);
+
+        ctx.fillStyle = d.color;
+        ctx.beginPath();
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const r = d.radius * (0.8 + rand() * 0.4);
+            const px = Math.cos(angle) * r;
+            const py = Math.sin(angle) * r;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // Shimmer/Reflection
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, d.radius * 0.6, 0, Math.PI, true);
+        ctx.stroke();
+
+        ctx.restore();
     }
 
     private renderRealisticScorch(ctx: CanvasRenderingContext2D, d: Decal): void {

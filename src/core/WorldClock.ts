@@ -1,4 +1,5 @@
 import { ConfigManager } from '../config/MasterConfig';
+import { WeatherManager } from './WeatherManager';
 
 export interface LightState {
     direction: {x: number, y: number};
@@ -87,6 +88,9 @@ export class WorldClock {
         const minute = Math.floor((totalSeconds % 3600) / 60);
         const timeDecimal = hour + (minute / 60);
 
+        const weather = WeatherManager.getInstance().getWeatherState();
+        const ambMult = weather.ambientMultiplier;
+
         // --- SUN LOGIC ---
         const sunRise = 5.5, sunSet = 19.5;
         const isSunUp = timeDecimal >= sunRise && timeDecimal <= sunSet;
@@ -95,8 +99,9 @@ export class WorldClock {
         if (isSunUp) {
             const progress = (timeDecimal - sunRise) / (sunSet - sunRise);
             sunAngle = progress * Math.PI + 0.3; // Path from ~Right-Down to ~Left-Up
-            // Intensity fades at edges
-            sunIntensity = Math.min(1.0, Math.sin(progress * Math.PI) * 1.5);
+            // Intensity fades at edges. Less aggressive weather dimming for direct light.
+            const weatherDim = 0.7 + (ambMult * 0.3); 
+            sunIntensity = Math.min(1.0, Math.sin(progress * Math.PI) * 1.5) * weatherDim;
         }
         const sunColor = this.getSunColor(timeDecimal);
 
@@ -109,9 +114,16 @@ export class WorldClock {
             const range = (24 - moonRise + moonSet);
             const progress = timeDecimal >= moonRise ? (timeDecimal - moonRise) / range : (24 - moonRise + timeDecimal) / range;
             moonAngle = progress * Math.PI + 2.8; // Different path from Sun
-            moonBaseIntensity = Math.min(1.0, Math.sin(progress * Math.PI) * 1.5) * this.moonPhase;
+            const weatherDim = 0.6 + (ambMult * 0.4);
+            moonBaseIntensity = Math.min(1.0, Math.sin(progress * Math.PI) * 1.5) * this.moonPhase * weatherDim;
         }
         const moonColor = ConfigManager.getInstance().get<string>('Lighting', 'moonColor') || '#aaccff';
+
+        // Calculate base ambient with weather dimming
+        const baseAmbientStr = this.getBaseAmbient(timeDecimal);
+        // Extract RGB
+        const rgb = baseAmbientStr.match(/\d+/g)?.map(Number) || [30, 30, 30];
+        const dimmedAmbient = `rgb(${Math.floor(rgb[0] * ambMult)}, ${Math.floor(rgb[1] * ambMult)}, ${Math.floor(rgb[2] * ambMult)})`;
 
         return {
             hour, minute, totalSeconds,
@@ -120,16 +132,16 @@ export class WorldClock {
                 color: sunColor,
                 intensity: sunIntensity,
                 shadowLen: 20 + 150 * (1.0 - Math.pow(sunIntensity, 0.4)),
-                active: isSunUp && sunIntensity > 0.05
+                active: isSunUp && sunIntensity > 0.01 // Lower threshold
             },
             moon: {
                 direction: { x: Math.cos(moonAngle), y: Math.sin(moonAngle) },
                 color: moonColor,
                 intensity: moonBaseIntensity * 0.5, // Brighter but still "pale"
                 shadowLen: this.currentNightShadowLen,
-                active: isMoonUp && moonBaseIntensity > 0.05
+                active: isMoonUp && moonBaseIntensity > 0.01 // Lower threshold
             },
-            baseAmbient: this.getBaseAmbient(timeDecimal),
+            baseAmbient: dimmedAmbient,
             moonPhase: this.moonPhase,
             isDaylight: hour >= 7 && hour < 18
         };

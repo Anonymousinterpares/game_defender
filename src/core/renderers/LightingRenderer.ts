@@ -7,6 +7,7 @@ import { WorldClock } from '../WorldClock';
 import { LightManager } from '../LightManager';
 import { VisibilitySystem, Point } from '../VisibilitySystem';
 import { ConfigManager } from '../../config/MasterConfig';
+import { WeatherManager, WeatherType, CloudType } from '../WeatherManager';
 
 export interface LightingParent {
     world: World | null;
@@ -35,6 +36,14 @@ export class LightingRenderer {
     private lightPolygonCache: Map<string, Point[]> = new Map();
     private meshVersion: number = 0;
 
+    // Weather Visuals
+    private cloudCanvas: HTMLCanvasElement;
+    private cloudCtx: CanvasRenderingContext2D;
+    private cloudOffset: { x: number, y: number } = { x: 0, y: 0 };
+    private cloudShapes: HTMLCanvasElement[] = [];
+    private particles: { x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number }[] = [];
+    private lastParticleUpdate: number = 0;
+
     constructor(private parent: LightingParent) {
         this.lightCanvas = document.createElement('canvas');
         this.lightCtx = this.lightCanvas.getContext('2d', { willReadFrequently: true })!;
@@ -42,6 +51,47 @@ export class LightingRenderer {
         this.maskCtx = this.maskCanvas.getContext('2d', { willReadFrequently: true })!;
         this.sourceCanvas = document.createElement('canvas');
         this.sourceCtx = this.sourceCanvas.getContext('2d', { willReadFrequently: true })!;
+
+        this.cloudCanvas = document.createElement('canvas');
+        this.cloudCtx = this.cloudCanvas.getContext('2d')!;
+        this.generateCloudShapes();
+        this.initParticles();
+    }
+
+    private generateCloudShapes(): void {
+        for (let i = 0; i < 8; i++) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d')!;
+            
+            // Draw a cluster of soft circles
+            ctx.fillStyle = '#000000';
+            for (let j = 0; j < 10; j++) {
+                const x = 256 + (Math.random() - 0.5) * 300;
+                const y = 256 + (Math.random() - 0.5) * 300;
+                const r = 100 + Math.random() * 150;
+                const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+                grad.addColorStop(0, 'rgba(0,0,0,0.8)');
+                grad.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            this.cloudShapes.push(canvas);
+        }
+    }
+
+    private initParticles(): void {
+        for (let i = 0; i < 1000; i++) {
+            this.particles.push({
+                x: Math.random() * 2000,
+                y: Math.random() * 2000,
+                z: Math.random() * 500,
+                vx: 0, vy: 0, vz: 0,
+                life: Math.random()
+            });
+        }
     }
 
     public render(ctx: CanvasRenderingContext2D): void {
@@ -98,12 +148,110 @@ export class LightingRenderer {
             this.renderPointLights(lctx, activeIntensity, worldMeshVersion, w, h);
         }
 
+        // 6. WEATHER EFFECTS (Clouds & Fog)
+        this.renderWeatherOverlays(lctx, w, h);
+
         this.meshVersion = worldMeshVersion;
 
-        // 6. APPLY TO WORLD
+        // 7. APPLY TO WORLD
         ctx.save();
         ctx.globalCompositeOperation = 'multiply';
         ctx.drawImage(this.lightCanvas, 0, 0);
+        ctx.restore();
+
+        // 8. POST-LIGHTING PARTICLES (Rain/Snow)
+        this.renderParticles(ctx);
+    }
+
+    private renderWeatherOverlays(lctx: CanvasRenderingContext2D, w: number, h: number): void {
+        const weather = WeatherManager.getInstance().getWeatherState();
+        
+        // 1. Cloud Shadows
+        if (weather.cloudType !== CloudType.NONE) {
+            this.renderCloudShadows(lctx, weather, w, h);
+        }
+
+        // 2. Fog
+        if (weather.fogDensity > 0.05) {
+            lctx.save();
+            lctx.globalCompositeOperation = 'source-over';
+            const fogColor = weather.type === WeatherType.SNOW ? '200, 210, 230' : '100, 105, 115';
+            lctx.fillStyle = `rgba(${fogColor}, ${weather.fogDensity * 0.4})`;
+            lctx.fillRect(0, 0, w, h);
+            lctx.restore();
+        }
+    }
+
+    private renderCloudShadows(lctx: CanvasRenderingContext2D, weather: any, w: number, h: number): void {
+        // Update cloud offset based on wind
+        const dt = 1/60; 
+        this.cloudOffset.x += weather.windDir.x * weather.windSpeed * 20 * dt;
+        this.cloudOffset.y += weather.windDir.y * weather.windSpeed * 20 * dt;
+
+        lctx.save();
+        lctx.globalCompositeOperation = 'multiply';
+        // Much more subtle shadows. Clouds shouldn't be pitch black.
+        lctx.globalAlpha = 0.15 + (weather.cloudType === CloudType.OVERCAST ? 0.15 : 0);
+
+        const spacing = 1024;
+        const startX = Math.floor((this.parent.cameraX + this.cloudOffset.x) / spacing) * spacing - (this.parent.cameraX + this.cloudOffset.x);
+        const startY = Math.floor((this.parent.cameraY + this.cloudOffset.y) / spacing) * spacing - (this.parent.cameraY + this.cloudOffset.y);
+
+        for (let ox = startX; ox < w + spacing; ox += spacing) {
+            for (let oy = startY; oy < h + spacing; oy += spacing) {
+                const seed = Math.floor((ox + this.parent.cameraX + this.cloudOffset.x) / spacing) + 
+                             Math.floor((oy + this.parent.cameraY + this.cloudOffset.y) / spacing) * 100;
+                const shapeIdx = Math.abs(seed) % this.cloudShapes.length;
+                lctx.drawImage(this.cloudShapes[shapeIdx], ox, oy, spacing, spacing);
+            }
+        }
+        lctx.restore();
+    }
+
+    private renderParticles(ctx: CanvasRenderingContext2D): void {
+        const weather = WeatherManager.getInstance().getWeatherState();
+        if (weather.precipitationIntensity < 0.05) return;
+
+        const w = ctx.canvas.width;
+        const h = ctx.canvas.height;
+        const now = performance.now();
+        const dt = this.lastParticleUpdate ? (now - this.lastParticleUpdate) / 1000 : 0.016;
+        this.lastParticleUpdate = now;
+
+        ctx.save();
+        if (weather.type === WeatherType.RAIN) {
+            ctx.strokeStyle = 'rgba(150, 180, 255, 0.4)';
+            ctx.lineWidth = 1;
+            this.particles.forEach(p => {
+                p.vx = weather.windDir.x * weather.windSpeed * 100;
+                p.vy = 800 + Math.random() * 200;
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+
+                if (p.x < 0) p.x = w; if (p.x > w) p.x = 0;
+                if (p.y > h) { p.y = 0; p.x = Math.random() * w; }
+
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(p.x - p.vx * 0.02, p.y - p.vy * 0.02);
+                ctx.stroke();
+            });
+        } else if (weather.type === WeatherType.SNOW) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            this.particles.forEach(p => {
+                p.vx = weather.windDir.x * weather.windSpeed * 50 + Math.sin(now * 0.002 + p.life * 10) * 20;
+                p.vy = 100 + Math.random() * 50;
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+
+                if (p.x < 0) p.x = w; if (p.x > w) p.x = 0;
+                if (p.y > h) { p.y = 0; p.x = Math.random() * w; }
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 1 + Math.random() * 2, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
         ctx.restore();
     }
 

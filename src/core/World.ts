@@ -1,5 +1,6 @@
 import { ConfigManager } from '../config/MasterConfig';
 import { MaterialType } from './HeatMap';
+import { WeatherManager } from './WeatherManager';
 
 export class World {
   private width: number;
@@ -17,6 +18,7 @@ export class World {
 
   // Render Caching
   private tileCanvasCache: Map<string, HTMLCanvasElement> = new Map();
+  private lastSnowAccumulation: number = 0;
 
   constructor() {
     this.width = ConfigManager.getInstance().get('World', 'width');
@@ -155,6 +157,14 @@ export class World {
           ctx.fillRect(0, h, this.tileSize, this.tileSize);
           ctx.fillStyle = color;
           ctx.fillRect(0, 0, this.tileSize, this.tileSize);
+
+          // Snow on top
+          const snow = WeatherManager.getInstance().getSnowAccumulation();
+          if (snow > 0.1) {
+              ctx.fillStyle = `rgba(240, 245, 255, ${snow})`;
+              ctx.fillRect(0, 0, this.tileSize, 2 + snow * 4);
+          }
+
           ctx.fillStyle = topColor;
           ctx.fillRect(0, 0, this.tileSize, 2);
           ctx.fillRect(0, 0, 2, this.tileSize);
@@ -176,13 +186,30 @@ export class World {
     const viewWidth = ctx.canvas.width;
     const viewHeight = ctx.canvas.height;
     
+    // Check if snow changed enough to invalidate cache
+    const currentSnow = WeatherManager.getInstance().getSnowAccumulation();
+    if (Math.abs(currentSnow - this.lastSnowAccumulation) > 0.05) {
+        this.tileCanvasCache.clear();
+        this.lastSnowAccumulation = currentSnow;
+    }
+
     if (!silhouette) {
         // 1. Render Infinite Charcoal Void & Structural Grid
         ctx.fillStyle = '#111111';
         ctx.fillRect(cameraX, cameraY, viewWidth, viewHeight);
 
         // Render Ground/Floor color
-        ctx.fillStyle = '#1c1c1c'; // Slightly lighter than the void to represent the floor
+        const snow = WeatherManager.getInstance().getSnowAccumulation();
+        let groundColor = '#1c1c1c';
+        if (snow > 0) {
+            // Blend from dark grey to white-ish blue
+            const r = Math.floor(28 + (200 - 28) * snow);
+            const g = Math.floor(28 + (210 - 28) * snow);
+            const b = Math.floor(28 + (230 - 28) * snow);
+            groundColor = `rgb(${r},${g},${b})`;
+        }
+        
+        ctx.fillStyle = groundColor;
         const startX = Math.floor(cameraX / this.tileSize) * this.tileSize;
         const endX = cameraX + viewWidth;
         const startY = Math.floor(cameraY / this.tileSize) * this.tileSize;
@@ -191,7 +218,7 @@ export class World {
         ctx.fillRect(startX, startY, endX - startX, endY - startY);
 
         ctx.beginPath();
-        ctx.strokeStyle = '#222222'; // Darker grid for subtle floor texture
+        ctx.strokeStyle = snow > 0.5 ? 'rgba(255,255,255,0.1)' : '#222222'; 
         ctx.lineWidth = 1;
 
         for (let x = startX; x <= endX; x += this.tileSize) {

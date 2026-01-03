@@ -1,5 +1,6 @@
 import { ConfigManager } from '../config/MasterConfig';
 import { World } from './World';
+import { WeatherManager, WeatherType } from './WeatherManager';
 
 export interface PhysicsBody {
   x: number;
@@ -31,8 +32,16 @@ export class PhysicsEngine {
   }
 
   public update(dt: number): void {
-    const friction = ConfigManager.getInstance().get<number>('Physics', 'friction');
+    let friction = ConfigManager.getInstance().get<number>('Physics', 'friction');
     
+    // Apply weather friction modifiers
+    const weather = WeatherManager.getInstance().getWeatherState();
+    if (weather.type === WeatherType.RAIN) {
+        friction *= 0.95; // Slightly slippery
+    } else if (weather.type === WeatherType.SNOW) {
+        friction *= 0.85; // Very slippery
+    }
+
     for (const body of this.bodies) {
       if (body.isStatic) continue;
 
