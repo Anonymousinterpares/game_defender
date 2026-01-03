@@ -42,11 +42,6 @@ export class LightingRenderer {
 
     public render(ctx: CanvasRenderingContext2D): void {
         this.renderLighting(ctx);
-        
-        const useFog = ConfigManager.getInstance().get<boolean>('Visuals', 'fogOfWar');
-        if (useFog && this.parent.player) {
-            this.renderFogOfWar(ctx);
-        }
     }
 
     private renderLighting(ctx: CanvasRenderingContext2D): void {
@@ -71,8 +66,15 @@ export class LightingRenderer {
 
         const lctx = this.lightCtx;
         lctx.globalCompositeOperation = 'source-over'; 
+        
+        // Step 1: Base Ambient (Always applied)
         lctx.fillStyle = sunColor;
         lctx.fillRect(0, 0, w, h);
+
+        // Step 2: Shadows (Either Sun or Moon)
+        // Shadows are painted with 'multiply' or similar on the light map if we want them to subtract
+        // but currently rebuildShadowChunk draws them directly. We'll stick to direct for now
+        // but we'll ensure moon shadows are lighter.
 
         const startGX = Math.floor(this.parent.cameraX / this.chunkSize);
         const startGY = Math.floor(this.parent.cameraY / this.chunkSize);
@@ -120,7 +122,6 @@ export class LightingRenderer {
                 lctx.restore();
             }
         } else if (moonIntensity > 0.1) {
-            // Moon Entity Shadows
             lctx.save();
             lctx.fillStyle = `rgba(0, 0, 0, ${0.4 * moonIntensity})`;
             const entitiesToShadow = [];
@@ -135,7 +136,25 @@ export class LightingRenderer {
             lctx.restore();
         }
 
-        // Dynamic Lights
+        // Step 2.5: Un-shadow casters (Punch holes in shadows so objects aren't covered by them)
+        lctx.save();
+        lctx.globalCompositeOperation = 'source-over';
+        lctx.translate(-this.parent.cameraX, -this.parent.cameraY);
+        // Using white ensures the vision light correctly screens on top of the objects
+        this.parent.world.renderAsSilhouette(lctx, this.parent.cameraX, this.parent.cameraY, '#ffffff');
+        if (this.parent.player) this.parent.player.renderAsSilhouette(lctx, '#ffffff');
+        this.parent.enemies.forEach(e => e.renderAsSilhouette(lctx, '#ffffff'));
+        lctx.restore();
+
+        // Step 3: Night Vision (Player Vision as a Reveal Light)
+        if (!isDaylight && this.parent.player) {
+            lctx.save();
+            lctx.globalCompositeOperation = 'screen'; // Additive reveal
+            this.renderVisionLight(lctx);
+            lctx.restore();
+        }
+
+        // Step 4: Dynamic Lights
         if (ambientIntensity < 0.95) {
             const lights = LightManager.getInstance().getLights();
             const segments = this.parent.world.getOcclusionSegments(this.parent.cameraX, this.parent.cameraY, w, h);
@@ -201,15 +220,6 @@ export class LightingRenderer {
             }
         }
 
-        // Un-shadow casters
-        lctx.save();
-        lctx.globalCompositeOperation = 'source-over';
-        lctx.translate(-this.parent.cameraX, -this.parent.cameraY);
-        this.parent.world.renderAsSilhouette(lctx, this.parent.cameraX, this.parent.cameraY, '#ffffff');
-        if (this.parent.player) this.parent.player.renderAsSilhouette(lctx, '#ffffff');
-        this.parent.enemies.forEach(e => e.renderAsSilhouette(lctx, '#ffffff'));
-        lctx.restore();
-
         this.meshVersion = worldMeshVersion;
 
         ctx.save();
@@ -250,15 +260,16 @@ export class LightingRenderer {
     private rebuildMoonShadowChunk(chunk: any, gx: number, gy: number, moonDir: {x: number, y: number}, intensity: number, shadowLen: number): void {
         const sctx = chunk.ctx;
         sctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
-        if (intensity <= 0.1 || !this.parent.world) return;
+        // Intensity check lowered to ensure we see shadows at night
+        if (intensity <= 0.05 || !this.parent.world) return;
 
         const worldX = gx * this.chunkSize;
         const worldY = gy * this.chunkSize;
         const segments = this.parent.world.getOcclusionSegments(worldX, worldY, this.chunkSize, this.chunkSize);
         
         sctx.save();
-        // Moon shadow opacity scales with phase
-        sctx.fillStyle = `rgba(0, 0, 0, ${0.6 * intensity})`; 
+        // Moon shadows should be soft but visible
+        sctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; 
         
         sctx.beginPath();
         segments.forEach(seg => {
@@ -303,67 +314,44 @@ export class LightingRenderer {
         ctx.fill();
     }
 
-    private renderFogOfWar(mainCtx: CanvasRenderingContext2D): void {
-        if (!this.fogCanvas || !this.fogCtx || !this.parent.player || !this.parent.world) return;
+    private renderVisionLight(lctx: CanvasRenderingContext2D): void {
+        if (!this.parent.player || !this.parent.world) return;
 
-        const { ambientIntensity } = WorldClock.getInstance().getTimeState();
-        let fogAlpha = (1.0 - (ambientIntensity - 0.05) / 0.75) * 0.85;
-        if (ambientIntensity > 0.8) fogAlpha = 0;
-        if (fogAlpha < 0) fogAlpha = 0;
-        if (fogAlpha === 0) return;
-
-        const w = mainCtx.canvas.width;
-        const h = mainCtx.canvas.height;
-        if (this.fogCanvas.width !== w || this.fogCanvas.height !== h) {
-            this.fogCanvas.width = w; this.fogCanvas.height = h;
-        }
-
-        const fctx = this.fogCtx;
+        const { moonPhase } = WorldClock.getInstance().getTimeState();
         const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-        fctx.globalCompositeOperation = 'source-over';
-        fctx.fillStyle = `rgba(0, 0, 0, ${fogAlpha})`;
-        fctx.fillRect(0, 0, w, h);
-        fctx.globalCompositeOperation = 'destination-out';
         
-        const lights = LightManager.getInstance().getLights();
-        lights.forEach(light => {
-            const screenX = light.x - this.parent.cameraX;
-            const screenY = light.y - this.parent.cameraY;
-            if (screenX < -light.radius || screenX > w + light.radius || screenY < -light.radius || screenY > h + light.radius) return;
-            const grad = fctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, light.radius);
-            const alpha = Math.min(1.0, light.intensity * 0.8);
-            grad.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
-            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-            fctx.fillStyle = grad;
-            fctx.beginPath();
-            fctx.arc(screenX, screenY, light.radius, 0, Math.PI * 2);
-            fctx.fill();
-        });
+        // The "Reveal" color - desaturated pale blue-grey
+        // Intensity of reveal scales slightly with moon phase, but always provides visibility
+        const revealIntensity = 0.5 + (moonPhase * 0.3);
+        const revealColor = `rgba(180, 200, 255, ${revealIntensity})`;
 
         const segRad = ConfigManager.getInstance().get<number>('Visuals', 'segmentVisibilityRadius') * tileSize;
         const coneDist = ConfigManager.getInstance().get<number>('Visuals', 'coneDistance') * tileSize;
         const coneAngleRad = (ConfigManager.getInstance().get<number>('Visuals', 'coneAngle') * Math.PI) / 180;
 
+        // 1. Proximity reveal
         this.parent.player.getAllBodies().forEach(b => {
             const screenX = b.x - this.parent.cameraX;
             const screenY = b.y - this.parent.cameraY;
-            const grad = fctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, segRad);
-            grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-            grad.addColorStop(0.8, 'rgba(255, 255, 255, 0.8)');
-            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-            fctx.fillStyle = grad;
-            fctx.beginPath();
-            fctx.arc(screenX, screenY, segRad, 0, Math.PI * 2);
-            fctx.fill();
+            const grad = lctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, segRad);
+            grad.addColorStop(0, revealColor);
+            grad.addColorStop(0.8, `rgba(100, 120, 180, ${revealIntensity * 0.5})`);
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            lctx.fillStyle = grad;
+            lctx.beginPath();
+            lctx.arc(screenX, screenY, segRad, 0, Math.PI * 2);
+            lctx.fill();
         });
 
+        // 2. Vision Cone reveal
         const playerScreenX = this.parent.player.x - this.parent.cameraX;
         const playerScreenY = this.parent.player.y - this.parent.cameraY;
         const startAngle = this.parent.player.rotation - coneAngleRad / 2;
         const rayCount = 60;
         
-        fctx.beginPath();
-        fctx.moveTo(playerScreenX, playerScreenY);
+        lctx.save();
+        lctx.beginPath();
+        lctx.moveTo(playerScreenX, playerScreenY);
         for (let i = 0; i <= rayCount; i++) {
             const angle = startAngle + (i / rayCount) * coneAngleRad;
             const rayX = Math.cos(angle);
@@ -376,16 +364,17 @@ export class LightingRenderer {
                 if (this.parent.world!.isWall(testX, testY)) break;
                 dist += step;
             }
-            fctx.lineTo(playerScreenX + rayX * dist, playerScreenY + rayY * dist);
+            lctx.lineTo(playerScreenX + rayX * dist, playerScreenY + rayY * dist);
         }
-        fctx.closePath();
-        const coneGrad = fctx.createRadialGradient(playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, coneDist);
-        coneGrad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-        coneGrad.addColorStop(1, 'rgba(255, 255, 255, 0.3)');
-        fctx.fillStyle = coneGrad;
-        fctx.fill();
+        lctx.closePath();
+        lctx.clip();
 
-        mainCtx.drawImage(this.fogCanvas, 0, 0);
+        const coneGrad = lctx.createRadialGradient(playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, coneDist);
+        coneGrad.addColorStop(0, revealColor);
+        coneGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        lctx.fillStyle = coneGrad;
+        lctx.fillRect(playerScreenX - coneDist, playerScreenY - coneDist, coneDist * 2, coneDist * 2);
+        lctx.restore();
     }
 
     public clearCache(): void {
