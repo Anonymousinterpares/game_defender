@@ -508,8 +508,8 @@ export class HeatMap {
                     // --- METAL MELTING (Wall as Source) ---
                     if (material === MaterialType.METAL && nextData[idx] > 0.5 && !isDestroyed) {
                         // Hot wall leaks molten metal into empty/destroyed neighbors
-                        // Increased leak rate x2
-                        const leakAmount = (nextData[idx] - 0.4) * 0.4 * effectiveDT;
+                        // Doubled leak rate (0.8 vs 0.4) to increase area
+                        const leakAmount = (nextData[idx] - 0.4) * 0.8 * effectiveDT;
                         const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1,-1], [1,1], [-1,1], [1,-1]];
                         
                         for (const [nx, ny] of neighbors) {
@@ -577,8 +577,8 @@ export class HeatMap {
                                         this.activeTiles.add(nKey);
                                     }
 
-                                    // Flow rate doubled (1.0 vs 0.5)
-                                    const flowRate = 1.0 * (1 + nextData[idx]); 
+                                    // Flow rate doubled again (2.0 vs 1.0) to increase spread
+                                    const flowRate = 2.0 * (1 + nextData[idx]); 
                                     const spreadAmount = (pressure - 0.05) * flowRate * effectiveDT;
                                     
                                     if (spreadAmount > 0.001) {
@@ -832,79 +832,44 @@ export class HeatMap {
         return data[subY * this.subDiv + subX] || 0;
     }
 
-        public getMaterialAt(worldX: number, worldY: number): MaterialType {
+    public getMoltenAt(worldX: number, worldY: number): number {
+        const tx = Math.floor(worldX / this.tileSize);
+        const ty = Math.floor(worldY / this.tileSize);
+        const data = this.moltenData.get(`${tx},${ty}`);
+        if (!data) return 0;
 
-            const tx = Math.floor(worldX / this.tileSize);
+        const subX = Math.floor((worldX % this.tileSize) / (this.tileSize / this.subDiv));
+        const subY = Math.floor((worldY % this.tileSize) / (this.tileSize / this.subDiv));
+        return data[subY * this.subDiv + subX] || 0;
+    }
 
-            const ty = Math.floor(worldY / this.tileSize);
+    public getMaterialAt(worldX: number, worldY: number): MaterialType {
+        const tx = Math.floor(worldX / this.tileSize);
+        const ty = Math.floor(worldY / this.tileSize);
+        const data = this.materialData.get(`${tx},${ty}`);
+        if (!data) return MaterialType.NONE;
 
-            const data = this.materialData.get(`${tx},${ty}`);
+        const subX = Math.floor((worldX % this.tileSize) / (this.tileSize / this.subDiv));
+        const subY = Math.floor((worldY % this.tileSize) / (this.tileSize / this.subDiv));
+        return data[subY * this.subDiv + subX];
+    }
 
-            if (!data) return MaterialType.NONE;
+    public hasTileData(tx: number, ty: number): boolean {
+        return this.hpData.has(`${tx},${ty}`);
+    }
 
-            const subX = Math.floor((worldX % this.tileSize) / (this.tileSize / this.subDiv));
+    public getTileHP(tx: number, ty: number): Float32Array | null {
+        return this.hpData.get(`${tx},${ty}`) || null;
+    }
 
-            const subY = Math.floor((worldY % this.tileSize) / (this.tileSize / this.subDiv));
+    public getTileHeat(tx: number, ty: number): Float32Array | null {
+        return this.heatData.get(`${tx},${ty}`) || null;
+    }
 
-            return data[subY * this.subDiv + subX];
-
-        }
-
-    
-
-            public hasTileData(tx: number, ty: number): boolean {
-
-    
-
-                return this.hpData.has(`${tx},${ty}`);
-
-    
-
-            }
-
-    
-
-        
-
-    
-
-            public getTileHP(tx: number, ty: number): Float32Array | null {
-
-    
-
-                return this.hpData.get(`${tx},${ty}`) || null;
-
-    
-
-            }
-
-    
-
-            public getTileHeat(tx: number, ty: number): Float32Array | null {
-
-    
-
-                return this.heatData.get(`${tx},${ty}`) || null;
-
-    
-
-            }
-
-    
-
-            public getTileScorch(tx: number, ty: number): Uint8Array | null {
-
-    
-
-                return this.scorchData.get(`${tx},${ty}`) || null;
-
-    
-
-            }
-
-    
-
-        }
+    public getTileScorch(tx: number, ty: number): Uint8Array | null {
+        return this.scorchData.get(`${tx},${ty}`) || null;
+    }
+}
 
     
 

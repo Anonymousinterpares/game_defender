@@ -1564,31 +1564,42 @@ export class GameplayScene implements Scene {
               SoundManager.getInstance().playMaterialHit(MaterialType[centerMat].toLowerCase(), x, y);
           }
 
-          // Scan explosion area for Hot Metal to spawn shrapnel
-          // Grid-based scan for higher reliability. Minimum 32px scan to catch nearby walls for small projectiles.
-          let hotMetalIntensity = 0;
+          // Scan explosion area for Hot Metal OR Molten Metal to spawn shrapnel
+          // We count sub-tiles (approx 4x4 or 8x8 pixels depending on subDiv)
+          let shrapnelCount = 0;
           const scanRadius = Math.max(radius, 32); 
-          const step = 16; // Half a tile
+          const step = 8; // Step size for sub-tile precision (approx 1 sub-tile if subDiv is 4)
+          
           for (let dy = -scanRadius; dy <= scanRadius; dy += step) {
               for (let dx = -scanRadius; dx <= scanRadius; dx += step) {
-                  if (dx*dx + dy*dy <= scanRadius*scanRadius) {
-                      const mat = this.heatMap.getMaterialAt(x + dx, y + dy);
-                      const inst = this.heatMap.getIntensityAt(x + dx, y + dy);
-                      if (mat === MaterialType.METAL && inst > 0.3) {
-                          hotMetalIntensity = Math.max(hotMetalIntensity, inst);
+                  const distSq = dx*dx + dy*dy;
+                  if (distSq <= scanRadius*scanRadius) {
+                      const worldX = x + dx;
+                      const worldY = y + dy;
+                      
+                      const mat = this.heatMap.getMaterialAt(worldX, worldY);
+                      const inst = this.heatMap.getIntensityAt(worldX, worldY);
+                      const moltenVal = this.heatMap.getMoltenAt(worldX, worldY);
+                      
+                      // Requirement 3: Both molten metal AND solid metal hotter than 0.5 (temp limit)
+                      if (moltenVal > 0.1 || (mat === MaterialType.METAL && inst > 0.5)) {
+                          shrapnelCount++;
                       }
                   }
               }
           }
 
-          if (hotMetalIntensity > 0) {
-              const shrapnelCount = 20 + Math.floor(Math.random() * 20);
-              for (let i = 0; i < shrapnelCount; i++) {
+          // Requirement 2: Particle count proportional to destroyed/hot tiles
+          // We limit count to reasonable performance (max 150)
+          const actualParticles = Math.min(150, shrapnelCount);
+          
+          if (actualParticles > 0) {
+              for (let i = 0; i < actualParticles; i++) {
                   const angle = Math.random() * Math.PI * 2;
-                  // Land within 2-3 big tiles (64-128 pixels approx)
-                  const dist = 64 + Math.random() * 64;
-                  // Flight time is approx 1.5s with new gravity (80) and vz (-60)
-                  const speed = dist / 1.5; 
+                  // Land within 2-4 big tiles (64-160 pixels approx)
+                  const dist = 64 + Math.random() * 96;
+                  // Requirement 4: Ejected speed x2 (flight time 0.75s instead of 1.5s)
+                  const speed = (dist / 0.75); 
                   const p = new MoltenMetalParticle(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed);
                   this.particles.push(p);
               }
