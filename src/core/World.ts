@@ -56,6 +56,13 @@ export class World {
       }
   }
 
+  public checkTileDestruction(tx: number, ty: number): void {
+      if (this.heatMapRef && this.heatMapRef.isTileMostlyDestroyed(tx, ty)) {
+          this.tiles[ty][tx] = MaterialType.NONE;
+          this.markMeshDirty();
+      }
+  }
+
   public getMeshVersion(): number {
       return this.meshVersion;
   }

@@ -423,6 +423,7 @@ export class HeatMap {
                 if (this.worldRef) {
                     this.worldRef.markMeshDirty();
                     this.worldRef.invalidateTileCache(tx, ty);
+                    this.worldRef.checkTileDestruction(tx, ty);
                 }
                 // Removed clearing of heat/fire here. 
                 // Heat should persist as 'residue' or turn into molten metal.
@@ -492,6 +493,7 @@ export class HeatMap {
                                 if (this.worldRef) {
                                     this.worldRef.markMeshDirty();
                                     this.worldRef.invalidateTileCache(tx, ty);
+                                    this.worldRef.checkTileDestruction(tx, ty);
                                 }
                                 // If metal vaporizes, it IMMEDIATELY turns into a full molten puddle
                                 if (mat === MaterialType.METAL && nextMolten) {
@@ -855,7 +857,10 @@ export class HeatMap {
     }
 
     public hasTileData(tx: number, ty: number): boolean {
-        return this.hpData.has(`${tx},${ty}`);
+        const key = `${tx},${ty}`;
+        // Only consider it 'damaged' if it has scorch marks or heat - 
+        // this ensures Section 3 of rebuildMesh picks it up.
+        return this.hpData.has(key) && (this.scorchData.has(key) || this.heatData.has(key) || this.fireData.has(key));
     }
 
     public getTileHP(tx: number, ty: number): Float32Array | null {
