@@ -1,0 +1,206 @@
+import { SoundManager } from '../core/SoundManager';
+import { LightManager } from '../core/LightManager';
+import { FloorDecalManager } from '../core/FloorDecalManager';
+import { Particle, MoltenMetalParticle, FlashParticle, ShockwaveParticle } from '../entities/Particle';
+import { MaterialType, HeatMap } from '../core/HeatMap';
+import { Enemy } from '../entities/Enemy';
+import { Player } from '../entities/Player';
+import { Projectile, ProjectileType } from '../entities/Projectile';
+import { World } from '../core/World';
+import { PhysicsEngine } from '../core/PhysicsEngine';
+import { ConfigManager } from '../config/MasterConfig';
+import { Drop, DropType } from '../entities/Drop';
+
+export interface CombatParent {
+    enemies: Enemy[];
+    player: Player | null;
+    heatMap: HeatMap | null;
+    particles: any[];
+    projectiles: Projectile[];
+    drops: Drop[];
+    coinsCollected: number;
+    world: World | null;
+    physics: PhysicsEngine;
+}
+
+export class CombatSystem {
+    constructor(private parent: any) {} // Using any temporarily to avoid strict circular dependency issues during refactor
+
+    public update(dt: number): void {
+        this.resolveProjectileCollisions();
+        this.resolveDropCollection();
+    }
+
+    private resolveDropCollection(): void {
+        const { player, drops, physics } = this.parent;
+        if (!player) return;
+
+        for (const d of drops) {
+            if (physics.checkCollision(player, d)) {
+                d.active = false;
+                SoundManager.getInstance().playSound('collect_coin');
+                if (d.type === DropType.COIN) {
+                    this.parent.coinsCollected += 10;
+                }
+            }
+        }
+    }
+
+    private resolveProjectileCollisions(): void {
+        const { world, projectiles, enemies, physics, player } = this.parent;
+        if (!world || !player) return;
+
+        for (const p of projectiles) {
+            // Projectile vs World
+            const mapW = world.getWidthPixels();
+            const mapH = world.getHeightPixels();
+            const hitWall = world.isWall(p.x, p.y);
+            const hitBorder = p.x < 0 || p.x > mapW || p.y < 0 || p.y > mapH;
+
+            if (hitWall || hitBorder) {
+                if (p.aoeRadius > 0) {
+                    this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
+                } else {
+                    const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
+                    SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
+                    this.createImpactParticles(p.x, p.y, p.color);
+                }
+
+                if (hitWall && this.parent.heatMap) {
+                    const mat = this.parent.heatMap.getMaterialAt(p.x, p.y);
+                    const intensity = this.parent.heatMap.getIntensityAt(p.x, p.y);
+                    
+                    p.onWorldHit(this.parent.heatMap, p.x, p.y);
+                    
+                    if (mat === MaterialType.METAL && intensity > 0.4) {
+                        const count = 5 + Math.floor(Math.random() * 5);
+                        for (let i = 0; i < count; i++) {
+                            const angle = p.rotation + Math.PI + (Math.random() - 0.5);
+                            const speed = 40 + Math.random() * 40;
+                            this.parent.particles.push(new MoltenMetalParticle(p.x, p.y, Math.cos(angle) * speed, Math.sin(angle) * speed));
+                        }
+                    }
+                }
+                
+                p.active = false;
+                continue;
+            }
+
+            // Projectile vs Enemy
+            if (p.active) {
+                for (const e of enemies) {
+                    if (physics.checkCollision(p, e)) {
+                        if (p.type === ProjectileType.MINE && !p.isArmed) continue;
+                        
+                        if (p.aoeRadius > 0) {
+                            this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
+                        } else {
+                            e.takeDamage(p.damage);
+                            const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
+                            SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
+                        }
+                        p.active = false;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    public createExplosion(x: number, y: number, radius: number, damage: number): void {
+        SoundManager.getInstance().playSoundSpatial('explosion_large', x, y);
+        LightManager.getInstance().addTransientLight('explosion', x, y);
+        FloorDecalManager.getInstance().addScorchMark(x, y, radius);
+        
+        // 1. Initial Flash
+        this.parent.particles.push(new FlashParticle(x, y, radius * 2.5));
+        
+        // 2. Shockwave
+        this.parent.particles.push(new ShockwaveParticle(x, y, radius * 1.8));
+
+        // 3. Fireball
+        const fireCount = 12 + Math.floor(Math.random() * 6);
+        for (let i = 0; i < fireCount; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 100 + Math.random() * 300;
+            const life = 0.3 + Math.random() * 0.4;
+            const p = new Particle(x, y, '#fffbe6', Math.cos(angle) * speed, Math.sin(angle) * speed, life);
+            p.isFlame = true;
+            this.parent.particles.push(p);
+        }
+
+        // 4. Lingering Smoke
+        const smokeCount = 20 + Math.floor(Math.random() * 10);
+        for (let i = 0; i < smokeCount; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 40 + Math.random() * 80;
+            const life = 1.0 + Math.random() * 1.5;
+            const color = Math.random() < 0.5 ? '#333' : '#555';
+            const p = new Particle(x, y, color, Math.cos(angle) * speed, Math.sin(angle) * speed, life);
+            this.parent.particles.push(p);
+        }
+        
+        if (this.parent.heatMap) {
+            this.parent.heatMap.addHeat(x, y, 0.8, radius * 1.5);
+
+            const centerMat = this.parent.heatMap.getMaterialAt(x, y);
+            if (centerMat !== MaterialType.NONE) {
+                SoundManager.getInstance().playMaterialHit(MaterialType[centerMat].toLowerCase(), x, y);
+            }
+
+            let shrapnelCount = 0;
+            const scanRadius = Math.max(radius, 32); 
+            const step = 8;
+            
+            for (let dy = -scanRadius; dy <= scanRadius; dy += step) {
+                for (let dx = -scanRadius; dx <= scanRadius; dx += step) {
+                    const distSq = dx*dx + dy*dy;
+                    if (distSq <= scanRadius*scanRadius) {
+                        const worldX = x + dx;
+                        const worldY = y + dy;
+                        const mat = this.parent.heatMap.getMaterialAt(worldX, worldY);
+                        const inst = this.parent.heatMap.getIntensityAt(worldX, worldY);
+                        const moltenVal = this.parent.heatMap.getMoltenAt(worldX, worldY);
+                        
+                        if (moltenVal > 0.1 || (mat === MaterialType.METAL && inst > 0.5)) {
+                            shrapnelCount++;
+                        }
+                    }
+                }
+            }
+
+            const actualParticles = Math.min(150, shrapnelCount);
+            if (actualParticles > 0) {
+                for (let i = 0; i < actualParticles; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = 64 + Math.random() * 96;
+                    const speed = (dist / 0.75); 
+                    const p = new MoltenMetalParticle(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed);
+                    this.parent.particles.push(p);
+                }
+            }
+        }
+
+        this.parent.enemies.forEach((e: Enemy) => {
+            const dx = e.x - x;
+            const dy = e.y - y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < radius) {
+                const falloff = 1 - (dist / radius);
+                e.takeDamage(damage * falloff);
+            }
+        });
+    }
+
+    public createImpactParticles(x: number, y: number, color: string): void {
+        LightManager.getInstance().addTransientLight('impact', x, y);
+        const count = 5 + Math.floor(Math.random() * 5);
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 50 + Math.random() * 150;
+            const vx = Math.cos(angle) * speed;
+            const vy = Math.sin(angle) * speed;
+            this.parent.particles.push(new Particle(x, y, color, vx, vy, 0.3 + Math.random() * 0.4));
+        }
+    }
+}
