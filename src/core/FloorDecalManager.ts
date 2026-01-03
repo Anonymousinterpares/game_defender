@@ -5,12 +5,14 @@ export interface Decal {
     color: string;
     opacity: number;
     rotation: number;
+    type: 'scorch' | 'metal';
+    seed: number; // For procedural consistency
 }
 
 export class FloorDecalManager {
     private static instance: FloorDecalManager;
     private decals: Decal[] = [];
-    private maxDecals: number = 1000;
+    private maxDecals: number = 800;
 
     private constructor() {}
 
@@ -21,14 +23,24 @@ export class FloorDecalManager {
         return FloorDecalManager.instance;
     }
 
+    // A simple seeded PRNG to ensure decals look the same every frame
+    private seededRandom(seed: number): () => number {
+        return function() {
+            seed = (seed * 9301 + 49297) % 233280;
+            return seed / 233280;
+        };
+    }
+
     public addScorchMark(x: number, y: number, radius: number): void {
         this.decals.push({
             x,
             y,
-            radius: radius * (0.8 + Math.random() * 0.4),
+            radius: radius * (1.0 + Math.random() * 0.5),
             color: '#000000',
-            opacity: 0.4 + Math.random() * 0.3,
-            rotation: Math.random() * Math.PI * 2
+            opacity: 0.5 + Math.random() * 0.3,
+            rotation: Math.random() * Math.PI * 2,
+            type: 'scorch',
+            seed: Math.random() * 10000
         });
 
         if (this.decals.length > this.maxDecals) {
@@ -41,9 +53,11 @@ export class FloorDecalManager {
             x,
             y,
             radius: radius * (0.9 + Math.random() * 0.2),
-            color: '#444444', // Dark grey solidified metal
+            color: '#333333', 
             opacity: 0.8,
-            rotation: Math.random() * Math.PI * 2
+            rotation: Math.random() * Math.PI * 2,
+            type: 'metal',
+            seed: Math.random() * 10000
         });
 
         if (this.decals.length > this.maxDecals) {
@@ -56,27 +70,104 @@ export class FloorDecalManager {
         const viewH = ctx.canvas.height;
 
         this.decals.forEach(d => {
-            // Culling
+            // Culling (Note: cameraX/Y translation is already applied to ctx in GameplayScene)
             if (d.x + d.radius < cameraX || d.x - d.radius > cameraX + viewW ||
                 d.y + d.radius < cameraY || d.y - d.radius > cameraY + viewH) return;
 
-            ctx.save();
-            ctx.globalAlpha = d.opacity;
-            ctx.translate(d.x, d.y);
-            ctx.rotate(d.rotation);
+            if (d.type === 'scorch') {
+                this.renderRealisticScorch(ctx, d);
+            } else {
+                this.renderMetalDecal(ctx, d);
+            }
+        });
+    }
 
-            const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, d.radius);
-            grad.addColorStop(0, d.color);
-            grad.addColorStop(0.6, d.color);
+    private renderRealisticScorch(ctx: CanvasRenderingContext2D, d: Decal): void {
+        const rand = this.seededRandom(d.seed);
+        
+        ctx.save();
+        ctx.translate(d.x, d.y);
+        ctx.rotate(d.rotation);
+        ctx.globalAlpha = d.opacity;
+
+        // 1. Irregular Core (Mottled)
+        const iterations = 6;
+        for (let i = 0; i < iterations; i++) {
+            const angle = (i / iterations) * Math.PI * 2 + d.seed;
+            const dist = d.radius * 0.2 * rand();
+            const rx = Math.cos(angle) * dist;
+            const ry = Math.sin(angle) * dist;
+            const r = d.radius * (0.4 + rand() * 0.4);
+            
+            const grad = ctx.createRadialGradient(rx, ry, 0, rx, ry, r);
+            grad.addColorStop(0, 'rgba(0,0,0,1)');
+            grad.addColorStop(0.5, 'rgba(20,15,10,0.8)');
             grad.addColorStop(1, 'rgba(0,0,0,0)');
-
+            
             ctx.fillStyle = grad;
             ctx.beginPath();
-            ctx.arc(0, 0, d.radius, 0, Math.PI * 2);
+            ctx.arc(rx, ry, r, 0, Math.PI * 2);
             ctx.fill();
+        }
 
-            ctx.restore();
-        });
+        // 2. Radial Streaks (Pressure Spokes)
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 1;
+        const streaks = 8 + Math.floor(rand() * 8);
+        for (let i = 0; i < streaks; i++) {
+            const angle = (i / streaks) * Math.PI * 2 + (d.seed * 2);
+            const length = d.radius * (0.6 + rand() * 0.5);
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(angle) * length, Math.sin(angle) * length);
+            ctx.stroke();
+        }
+
+        // 3. Ashy Speckles
+        ctx.fillStyle = 'rgba(40,40,40,0.6)';
+        for (let i = 0; i < 15; i++) {
+            const sa = rand() * Math.PI * 2;
+            const sd = rand() * d.radius;
+            const sx = Math.cos(sa) * sd;
+            const sy = Math.sin(sa) * sd;
+            const sr = 1 + rand() * 2;
+            ctx.beginPath();
+            ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.restore();
+    }
+
+    private renderMetalDecal(ctx: CanvasRenderingContext2D, d: Decal): void {
+        const rand = this.seededRandom(d.seed);
+        
+        ctx.save();
+        ctx.translate(d.x, d.y);
+        ctx.rotate(d.rotation);
+        ctx.globalAlpha = d.opacity;
+
+        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, d.radius);
+        grad.addColorStop(0, '#111');
+        grad.addColorStop(0.3, d.color);
+        grad.addColorStop(0.7, '#555');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        // Slightly irregular shape for metal puddle
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const r = d.radius * (0.8 + rand() * 0.4);
+            const px = Math.cos(angle) * r;
+            const py = Math.sin(angle) * r;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
     }
 
     public clear(): void {
