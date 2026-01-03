@@ -151,6 +151,7 @@ export class LightingRenderer {
             this.lightCanvas.width = w; this.lightCanvas.height = h;
             this.maskCanvas.width = w; this.maskCanvas.height = h;
             this.sourceCanvas.width = w; this.sourceCanvas.height = h;
+            this.fogCanvas.width = w; this.fogCanvas.height = h;
         }
 
         const { sun, moon, baseAmbient, isDaylight } = WorldClock.getInstance().getTimeState();
@@ -212,44 +213,68 @@ export class LightingRenderer {
     }
 
     private renderFogOverlay(ctx: CanvasRenderingContext2D, weather: any, w: number, h: number): void {
-        const { isDaylight } = WorldClock.getInstance().getTimeState();
+        const { sun, moon, isDaylight } = WorldClock.getInstance().getTimeState();
+        const fctx = this.fogCtx;
         
+        fctx.clearRect(0, 0, w, h);
+        
+        // Calculate dynamic fog color based on global light level
+        // During night, fog color scales with moonlight
+        const lightIntensity = isDaylight ? sun.intensity : Math.max(moon.intensity, 0.02);
+        const baseFogRGB = weather.type === WeatherType.SNOW ? [210, 225, 255] : [160, 170, 190];
+        
+        const r = Math.floor(baseFogRGB[0] * lightIntensity);
+        const g = Math.floor(baseFogRGB[1] * lightIntensity);
+        const b = Math.floor(baseFogRGB[2] * lightIntensity);
+        const fogColor = `rgb(${r}, ${g}, ${b})`;
+
         // Update fog offset based on wind
         const dt = 1/60; 
         this.fogOffset.x += weather.windDir.x * weather.windSpeed * 10 * dt;
         this.fogOffset.y += weather.windDir.y * weather.windSpeed * 10 * dt;
 
-        ctx.save();
-        
-        // DAYTIME WASHOUT: Use screen to brighten/haze the world
-        if (isDaylight) {
-            ctx.globalCompositeOperation = 'screen';
-            ctx.globalAlpha = weather.fogDensity * 0.4;
-        } else {
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.globalAlpha = weather.fogDensity * 0.3;
-        }
-
-        const fogColor = weather.type === WeatherType.SNOW ? '220, 230, 255' : '180, 185, 200';
-        
-        // Render noise-based banks
+        // 1. Render noise to fog buffer
         if (this.fogNoise) {
             const spacing = 512;
             const startX = Math.floor((this.parent.cameraX + this.fogOffset.x) / spacing) * spacing - (this.parent.cameraX + this.fogOffset.x);
             const startY = Math.floor((this.parent.cameraY + this.fogOffset.y) / spacing) * spacing - (this.parent.cameraY + this.fogOffset.y);
 
+            fctx.save();
             for (let ox = startX; ox < w + spacing; ox += spacing) {
                 for (let oy = startY; oy < h + spacing; oy += spacing) {
-                    ctx.drawImage(this.fogNoise, ox, oy, spacing, spacing);
+                    fctx.drawImage(this.fogNoise, ox, oy, spacing, spacing);
                 }
             }
+            fctx.restore();
         }
 
-        // Global base fog haze
-        ctx.fillStyle = `rgb(${fogColor})`;
-        ctx.globalAlpha *= 0.6;
-        ctx.fillRect(0, 0, w, h);
-        
+        // 2. Color the noise in the buffer
+        fctx.save();
+        fctx.globalCompositeOperation = 'source-in';
+        fctx.fillStyle = fogColor;
+        fctx.fillRect(0, 0, w, h);
+        fctx.restore();
+
+        // 3. Add base haze layer to the buffer
+        fctx.save();
+        fctx.globalCompositeOperation = 'destination-over';
+        fctx.fillStyle = fogColor;
+        fctx.globalAlpha = 0.5;
+        fctx.fillRect(0, 0, w, h);
+        fctx.restore();
+
+        // 4. Draw fog buffer to main context
+        ctx.save();
+        if (isDaylight) {
+            // Day: Screen adds light to simulate scattering
+            ctx.globalCompositeOperation = 'screen';
+            ctx.globalAlpha = weather.fogDensity * 0.5;
+        } else {
+            // Night: Source-over obscures/darkens the world based on light level
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = weather.fogDensity * 0.7;
+        }
+        ctx.drawImage(this.fogCanvas, 0, 0);
         ctx.restore();
     }
 

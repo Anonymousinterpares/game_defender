@@ -49,6 +49,13 @@ export class World {
       }
   }
 
+  public checkTileDestruction(tx: number, ty: number): void {
+      if (this.heatMapRef && this.heatMapRef.isTileMostlyDestroyed(tx, ty)) {
+          this.tiles[ty][tx] = MaterialType.NONE;
+          this.markMeshDirty();
+      }
+  }
+
   public getMeshVersion(): number {
       return this.meshVersion;
   }
@@ -280,9 +287,12 @@ export class World {
           let botStart: number | null = null;
           
           for (let x = 0; x < this.width; x++) {
-              const active = this.tiles[y][x] !== MaterialType.NONE;
-              const hasTileAbove = y > 0 && this.tiles[y-1][x] !== MaterialType.NONE;
-              const hasTileBelow = y < this.height - 1 && this.tiles[y+1][x] !== MaterialType.NONE;
+              // Only use full-tile logic if tile exists AND has no sub-tile damage data
+              const hasDamageData = this.heatMapRef && this.heatMapRef.hasTileData(x, y);
+              const active = this.tiles[y][x] !== MaterialType.NONE && !hasDamageData;
+              
+              const hasTileAbove = y > 0 && this.tiles[y-1][x] !== MaterialType.NONE && !(this.heatMapRef && this.heatMapRef.hasTileData(x, y-1));
+              const hasTileBelow = y < this.height - 1 && this.tiles[y+1][x] !== MaterialType.NONE && !(this.heatMapRef && this.heatMapRef.hasTileData(x, y+1));
 
               if (active && !hasTileAbove) {
                   if (topStart === null) topStart = x;
@@ -308,9 +318,11 @@ export class World {
           let rightStart: number | null = null;
 
           for (let y = 0; y < this.height; y++) {
-              const active = this.tiles[y][x] !== MaterialType.NONE;
-              const hasTileLeft = x > 0 && this.tiles[y][x-1] !== MaterialType.NONE;
-              const hasTileRight = x < this.width - 1 && this.tiles[y][x+1] !== MaterialType.NONE;
+              const hasDamageData = this.heatMapRef && this.heatMapRef.hasTileData(x, y);
+              const active = this.tiles[y][x] !== MaterialType.NONE && !hasDamageData;
+
+              const hasTileLeft = x > 0 && this.tiles[y][x-1] !== MaterialType.NONE && !(this.heatMapRef && this.heatMapRef.hasTileData(x-1, y));
+              const hasTileRight = x < this.width - 1 && this.tiles[y][x+1] !== MaterialType.NONE && !(this.heatMapRef && this.heatMapRef.hasTileData(x+1, y));
 
               if (active && !hasTileLeft) {
                   if (leftStart === null) leftStart = y;
