@@ -114,6 +114,7 @@ export class Projectile extends Entity {
           case ProjectileType.MISSILE:
               this.speed = cfg.get<number>('Weapons', 'missileSpeed') * cfg.get<number>('World', 'tileSize');
               this.damage = cfg.get<number>('Weapons', 'missileDamage');
+              this.aoeRadius = (cfg.get<number>('Weapons', 'missileAOE') || 1.5) * cfg.get<number>('World', 'tileSize');
               this.turnSpeed = cfg.get<number>('Weapons', 'missileTurnSpeed');
               this.radius = 5;
               this.color = '#00ffff';
