@@ -299,7 +299,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
 
     const timeState = WorldClock.getInstance().getTimeState();
     const useFog = ConfigManager.getInstance().get<boolean>('Visuals', 'fogOfWar');
-    if (timeState.ambientIntensity < 0.8 || useFog) {
+    if (timeState.sun.intensity < 0.8 || useFog) {
         this.updateLightClusters();
         this.updateProjectileLights();
     } else {

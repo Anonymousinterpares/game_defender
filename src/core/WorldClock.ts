@@ -1,17 +1,21 @@
 import { ConfigManager } from '../config/MasterConfig';
 
+export interface LightState {
+    direction: {x: number, y: number};
+    color: string;
+    intensity: number;
+    shadowLen: number;
+    active: boolean;
+}
+
 export interface TimeState {
     hour: number;
     minute: number;
     totalSeconds: number;
-    ambientIntensity: number;
-    sunColor: string;
-    sunAngle: number; // 0 to 2*PI
-    sunDirection: {x: number, y: number};
-    moonDirection: {x: number, y: number};
-    moonIntensity: number;
+    sun: LightState;
+    moon: LightState;
+    baseAmbient: string; 
     moonPhase: number;
-    moonShadowLen: number;
     isDaylight: boolean;
 }
 
@@ -37,7 +41,7 @@ export class WorldClock {
             this.isMoonPhaseIncreasing = Math.random() > 0.5;
         } else {
             this.moonPhase = config.get<number>('TimeSystem', 'moonPhase') ?? 1.0;
-            this.isMoonPhaseIncreasing = this.moonPhase < 0.5; // Arbitrary: if low phase, increase it
+            this.isMoonPhaseIncreasing = this.moonPhase < 0.5;
         }
 
         this.randomizeShadowLen();
@@ -58,26 +62,17 @@ export class WorldClock {
 
     public update(dt: number): void {
         const gameSecondsPassed = dt * (3600 / this.realSecondsPerHour);
-        const oldSeconds = this.gameSeconds;
         this.gameSeconds = (this.gameSeconds + gameSecondsPassed) % (24 * 3600);
 
-        // Update moon phase slowly (e.g. 0.05 per game day)
         const phaseChange = (gameSecondsPassed / (24 * 3600)) * 0.1;
         if (this.isMoonPhaseIncreasing) {
             this.moonPhase += phaseChange;
-            if (this.moonPhase >= 1) {
-                this.moonPhase = 1;
-                this.isMoonPhaseIncreasing = false;
-            }
+            if (this.moonPhase >= 1) { this.moonPhase = 1; this.isMoonPhaseIncreasing = false; }
         } else {
             this.moonPhase -= phaseChange;
-            if (this.moonPhase <= 0) {
-                this.moonPhase = 0;
-                this.isMoonPhaseIncreasing = true;
-            }
+            if (this.moonPhase <= 0) { this.moonPhase = 0; this.isMoonPhaseIncreasing = true; }
         }
 
-        // New night check
         const hour = Math.floor(this.gameSeconds / 3600);
         const isDay = hour >= 6 && hour < 19;
         if (this.lastWasDay && !isDay) {
@@ -90,104 +85,68 @@ export class WorldClock {
         const totalSeconds = this.gameSeconds;
         const hour = Math.floor(totalSeconds / 3600);
         const minute = Math.floor((totalSeconds % 3600) / 60);
+        const timeDecimal = hour + (minute / 60);
 
-        // Sun Angle: Ensure it's never perfectly 90 degrees (vertical)
-        const dayProgress = (totalSeconds / (24 * 3600)); 
-        const sunAngle = (dayProgress * Math.PI * 2) + 0.5; 
-        
-        const sunDirection = {
-            x: Math.cos(sunAngle),
-            y: Math.sin(sunAngle)
-        };
+        // --- SUN LOGIC ---
+        const sunRise = 5.5, sunSet = 19.5;
+        const isSunUp = timeDecimal >= sunRise && timeDecimal <= sunSet;
+        let sunIntensity = 0;
+        let sunAngle = 0;
+        if (isSunUp) {
+            const progress = (timeDecimal - sunRise) / (sunSet - sunRise);
+            sunAngle = progress * Math.PI + 0.3; // Path from ~Right-Down to ~Left-Up
+            // Intensity fades at edges
+            sunIntensity = Math.min(1.0, Math.sin(progress * Math.PI) * 1.5);
+        }
+        const sunColor = this.getSunColor(timeDecimal);
 
-        // Moon Direction: Opposite to sun
-        const moonAngle = sunAngle + Math.PI;
-        const moonDirection = {
-            x: Math.cos(moonAngle),
-            y: Math.sin(moonAngle)
-        };
+        // --- MOON LOGIC ---
+        const moonRise = 18.0, moonSet = 7.5;
+        const isMoonUp = timeDecimal >= moonRise || timeDecimal <= moonSet;
+        let moonAngle = 0;
+        let moonBaseIntensity = 0;
+        if (isMoonUp) {
+            const range = (24 - moonRise + moonSet);
+            const progress = timeDecimal >= moonRise ? (timeDecimal - moonRise) / range : (24 - moonRise + timeDecimal) / range;
+            moonAngle = progress * Math.PI + 2.8; // Different path from Sun
+            moonBaseIntensity = Math.min(1.0, Math.sin(progress * Math.PI) * 1.5) * this.moonPhase;
+        }
+        const moonColor = ConfigManager.getInstance().get<string>('Lighting', 'moonColor') || '#aaccff';
 
-        const ambient = this.calculateAmbient(hour, minute, totalSeconds % 3600);
-        
         return {
-            hour,
-            minute,
-            totalSeconds,
-            ambientIntensity: ambient.intensity,
-            sunColor: ambient.color,
-            sunAngle: sunAngle,
-            sunDirection,
-            moonDirection,
-            moonIntensity: this.moonPhase,
+            hour, minute, totalSeconds,
+            sun: {
+                direction: { x: Math.cos(sunAngle), y: Math.sin(sunAngle) },
+                color: sunColor,
+                intensity: sunIntensity,
+                shadowLen: 20 + 150 * (1.0 - Math.pow(sunIntensity, 0.4)),
+                active: isSunUp && sunIntensity > 0.05
+            },
+            moon: {
+                direction: { x: Math.cos(moonAngle), y: Math.sin(moonAngle) },
+                color: moonColor,
+                intensity: moonBaseIntensity * 0.5, // Brighter but still "pale"
+                shadowLen: this.currentNightShadowLen,
+                active: isMoonUp && moonBaseIntensity > 0.05
+            },
+            baseAmbient: this.getBaseAmbient(timeDecimal),
             moonPhase: this.moonPhase,
-            moonShadowLen: this.currentNightShadowLen,
             isDaylight: hour >= 7 && hour < 18
         };
     }
 
-    private calculateAmbient(h: number, m: number, sInHour: number): { intensity: number, color: string } {
-        const timeDecimal = h + (m / 60) + (sInHour / 3600);
-        
-        const minAmb = ConfigManager.getInstance().get<number>('Lighting', 'ambientMin') || 0.05;
-        const maxAmb = ConfigManager.getInstance().get<number>('Lighting', 'ambientMax') || 1.0;
-        
-        let intensity = minAmb;
-        if (timeDecimal >= 5 && timeDecimal < 7) { 
-            const t = (timeDecimal - 5) / 2;
-            intensity = minAmb + (maxAmb - minAmb) * t;
-        } else if (timeDecimal >= 7 && timeDecimal < 18) { 
-            intensity = maxAmb;
-        } else if (timeDecimal >= 18 && timeDecimal < 20) { 
-            const t = (timeDecimal - 18) / 2;
-            intensity = maxAmb - (maxAmb - minAmb) * t;
-        }
+    private getSunColor(t: number): string {
+        if (t < 5 || t > 20) return 'rgb(0,0,0)';
+        // Simplified sun color ramp
+        if (t >= 5.5 && t < 7) return 'rgb(255, 180, 100)'; // Sunrise
+        if (t >= 7 && t < 17) return 'rgb(255, 255, 255)';  // Day
+        if (t >= 17 && t < 19.5) return 'rgb(255, 120, 50)'; // Sunset
+        return 'rgb(0,0,0)';
+    }
 
-        let r = 255, g = 255, b = 255;
-        
-        if (timeDecimal >= 5 && timeDecimal < 6) { 
-            const t = (timeDecimal - 5);
-            r = Math.floor(20 * (1 - t) + 40 * t);
-            g = Math.floor(30 * (1 - t) + 120 * t);
-            b = Math.floor(100 * (1 - t) + 120 * t);
-        } else if (timeDecimal >= 6 && timeDecimal < 7) { 
-            const t = (timeDecimal - 6);
-            r = Math.floor(40 * (1 - t) + 255 * t);
-            g = Math.floor(120 * (1 - t) + 180 * t);
-            b = Math.floor(120 * (1 - t) + 80 * t);
-        } else if (timeDecimal >= 7 && timeDecimal < 9) { 
-            const t = (timeDecimal - 7) / 2;
-            r = 255; g = Math.floor(180 * (1 - t) + 255 * t); b = Math.floor(80 * (1 - t) + 200 * t);
-        } else if (timeDecimal >= 9 && timeDecimal < 16) { 
-            r = 255; g = 255; b = 255;
-        } else if (timeDecimal >= 16 && timeDecimal < 18) { 
-            const t = (timeDecimal - 16) / 2;
-            r = 255; g = Math.floor(255 * (1 - t) + 220 * t); b = Math.floor(255 * (1 - t) + 150 * t);
-        } else if (timeDecimal >= 18 && timeDecimal < 19) { 
-            const t = (timeDecimal - 18);
-            r = 255; g = Math.floor(220 * (1 - t) + 80 * t); b = Math.floor(150 * (1 - t) + 40 * t);
-        } else if (timeDecimal >= 19 && timeDecimal < 21) { 
-            const t = (timeDecimal - 19) / 2;
-            r = Math.floor(255 * (1 - t) + 15 * t); g = Math.floor(80 * (1 - t) + 15 * t); b = Math.floor(40 * (1 - t) + 60 * t);
-        } else { // Night
-            const moonColorHex = ConfigManager.getInstance().get<string>('Lighting', 'moonColor') || '#aaccff';
-            const mR = parseInt(moonColorHex.slice(1, 3), 16);
-            const mG = parseInt(moonColorHex.slice(3, 5), 16);
-            const mB = parseInt(moonColorHex.slice(5, 7), 16);
-            
-            // Base floor (very dark)
-            const floorR = 2, floorG = 3, floorB = 8;
-            
-            // Moonlight contribution (scales with phase) - Doubled to 0.5
-            const moonContrib = 0.5 * this.moonPhase;
-            
-            r = Math.floor(floorR + (mR - floorR) * moonContrib);
-            g = Math.floor(floorG + (mG - floorG) * moonContrib);
-            b = Math.floor(floorB + (mB - floorB) * moonContrib);
-            
-            // Intensity must be > 0.1 for shadows to render
-            intensity = 0.15 + (0.35 * this.moonPhase);
-        }
-
-        return { intensity, color: `rgb(${r},${g},${b})` };
+    private getBaseAmbient(t: number): string {
+        // Absolute dark floor
+        if (t >= 7 && t < 18) return 'rgb(30, 30, 30)'; // Day floor
+        return 'rgb(5, 8, 15)'; // Night floor
     }
 }

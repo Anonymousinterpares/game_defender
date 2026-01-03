@@ -247,38 +247,63 @@ export class World {
       const segments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
       const ts = this.tileSize;
 
-      // ... [Internal segment generation remains logicially similar but we will index them] ...
-      // 1. Process Healthy Tiles (Greedy horizontal merging)
-      const visitedH = new Set<string>();
+      // 1. Horizontal exposed edges (Top and Bottom of Footprint)
       for (let y = 0; y < this.height; y++) {
+          let topStart: number | null = null;
+          let botStart: number | null = null;
+          
           for (let x = 0; x < this.width; x++) {
-              if (this.tiles[y][x] === MaterialType.NONE || visitedH.has(`${x},${y}`)) continue;
-              if (this.heatMapRef && this.heatMapRef.hasTileData(x, y)) continue; 
+              const active = this.tiles[y][x] !== MaterialType.NONE;
+              const hasTileAbove = y > 0 && this.tiles[y-1][x] !== MaterialType.NONE;
+              const hasTileBelow = y < this.height - 1 && this.tiles[y+1][x] !== MaterialType.NONE;
 
-              let xEnd = x;
-              while (xEnd + 1 < this.width && 
-                     this.tiles[y][xEnd + 1] !== MaterialType.NONE && 
-                     !(this.heatMapRef && this.heatMapRef.hasTileData(xEnd + 1, y))) {
-                  xEnd++;
-                  visitedH.add(`${xEnd},${y}`);
+              if (active && !hasTileAbove) {
+                  if (topStart === null) topStart = x;
+              } else if (topStart !== null) {
+                  segments.push({ a: { x: topStart * ts, y: y * ts }, b: { x: x * ts, y: y * ts } });
+                  topStart = null;
               }
 
-              const x1 = x * ts;
-              const x2 = (xEnd + 1) * ts;
-              const y1 = y * ts;
-              const y2 = (y + 1) * ts;
-
-              if (y === 0 || this.tiles[y-1][x] === MaterialType.NONE)
-                  segments.push({a: {x: x1, y: y1}, b: {x: x2, y: y1}});
-              if (y === this.height - 1 || this.tiles[y+1][x] === MaterialType.NONE)
-                  segments.push({a: {x: x1, y: y2}, b: {x: x2, y: y2}});
-              
-              segments.push({a: {x: x1, y: y1}, b: {x: x1, y: y2}});
-              segments.push({a: {x: x2, y: y1}, b: {x: x2, y: y2}});
+              if (active && !hasTileBelow) {
+                  if (botStart === null) botStart = x;
+              } else if (botStart !== null) {
+                  segments.push({ a: { x: botStart * ts, y: (y + 1) * ts }, b: { x: x * ts, y: (y + 1) * ts } });
+                  botStart = null;
+              }
           }
+          if (topStart !== null) segments.push({ a: { x: topStart * ts, y: y * ts }, b: { x: this.width * ts, y: y * ts } });
+          if (botStart !== null) segments.push({ a: { x: botStart * ts, y: (y + 1) * ts }, b: { x: this.width * ts, y: (y + 1) * ts } });
       }
 
-      // 2. Damaged Tiles
+      // 2. Vertical exposed edges (Left and Right of Footprint)
+      for (let x = 0; x < this.width; x++) {
+          let leftStart: number | null = null;
+          let rightStart: number | null = null;
+
+          for (let y = 0; y < this.height; y++) {
+              const active = this.tiles[y][x] !== MaterialType.NONE;
+              const hasTileLeft = x > 0 && this.tiles[y][x-1] !== MaterialType.NONE;
+              const hasTileRight = x < this.width - 1 && this.tiles[y][x+1] !== MaterialType.NONE;
+
+              if (active && !hasTileLeft) {
+                  if (leftStart === null) leftStart = y;
+              } else if (leftStart !== null) {
+                  segments.push({ a: { x: x * ts, y: leftStart * ts }, b: { x: x * ts, y: y * ts } });
+                  leftStart = null;
+              }
+
+              if (active && !hasTileRight) {
+                  if (rightStart === null) rightStart = y;
+              } else if (rightStart !== null) {
+                  segments.push({ a: { x: (x + 1) * ts, y: rightStart * ts }, b: { x: (x + 1) * ts, y: y * ts } });
+                  rightStart = null;
+              }
+          }
+          if (leftStart !== null) segments.push({ a: { x: x * ts, y: leftStart * ts }, b: { x: x * ts, y: this.height * ts } });
+          if (rightStart !== null) segments.push({ a: { x: (x + 1) * ts, y: rightStart * ts }, b: { x: (x + 1) * ts, y: this.height * ts } });
+      }
+
+      // 3. Damaged Tiles
       for (let y = 0; y < this.height; y++) {
           for (let x = 0; x < this.width; x++) {
               if (this.tiles[y][x] === MaterialType.NONE) continue;
