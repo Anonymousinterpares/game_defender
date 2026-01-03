@@ -3,7 +3,7 @@ import { Entity } from '../core/Entity';
 export class Particle extends Entity {
     public active: boolean = true;
     public isFlame: boolean = false;
-    private life: number = 1.0;
+    public life: number = 1.0;
     private maxLife: number = 1.0;
     private alpha: number = 1.0;
     private startRadius: number = 0;
@@ -115,7 +115,6 @@ export class FlashParticle extends Entity {
     public id: string = Math.random().toString(36).substr(2, 9);
     private life: number = 0.1;
     private maxLife: number = 0.1;
-    private radius: number;
 
     constructor(x: number, y: number, radius: number) {
         super(x, y);
@@ -145,7 +144,7 @@ export class FlashParticle extends Entity {
 export class MoltenMetalParticle extends Particle {
     private gravity: number = 80; // Very low gravity for slow motion feel
     private vz: number = -60 - Math.random() * 40; // Gentle upward burst
-    private z: number = 0;
+    public z: number = 0;
     public damage: number = 5;
 
     constructor(x: number, y: number, vx: number, vy: number) {
