@@ -36,6 +36,8 @@ export class LightingRenderer {
     private resolutionScale: number = 0.5; // Render lights at 50% resolution
     
     private shadowChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, version: string }> = new Map();
+    private rebuildQueue: string[] = [];
+    private MAX_REBUILDS_PER_FRAME: number = 2;
     private silhouetteChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, version: number }> = new Map();
     private chunkSize: number = 512;
     private lightPolygonCache: Map<string, Point[]> = new Map();
