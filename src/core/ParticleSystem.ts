@@ -26,6 +26,8 @@ export class ParticleSystem {
     private colorPalette: string[] = [];
     private nextFreeIdx: number = 0;
     
+    private spriteCache: Map<string, HTMLCanvasElement> = new Map();
+
     private worker: Worker;
     private isWorkerBusy: boolean = false;
     
@@ -87,6 +89,51 @@ export class ParticleSystem {
                 this.pendingHeat.push(...data.heatEvents);
             }
         };
+
+        this.generateSprites();
+    }
+
+    private generateSprites(): void {
+        const createCachedCanvas = (size: number, draw: (ctx: CanvasRenderingContext2D) => void) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            draw(canvas.getContext('2d')!);
+            return canvas;
+        };
+
+        // 1. Generic White Glow (for Flash and Molten core)
+        this.spriteCache.set('glow_white', createCachedCanvas(64, ctx => {
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+            grad.addColorStop(0.3, 'rgba(255, 255, 220, 0.8)');
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+        }));
+
+        // 2. Flame Glows for different colors
+        const flameColors = ['#fffbe6', '#ffcc00', '#ff4400', '#333'];
+        flameColors.forEach(color => {
+            this.spriteCache.set(`flame_${color}`, createCachedCanvas(32, ctx => {
+                const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+                grad.addColorStop(0, color);
+                grad.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, 32, 32);
+            }));
+        });
+
+        // 3. Molten Outer Glow
+        this.spriteCache.set('molten_glow', createCachedCanvas(64, ctx => {
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+            grad.addColorStop(0.2, 'rgba(255, 255, 0, 0.8)');
+            grad.addColorStop(0.5, 'rgba(255, 68, 0, 0.5)');
+            grad.addColorStop(1, 'rgba(255, 68, 0, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+        }));
     }
 
     public static getInstance(): ParticleSystem {
@@ -320,23 +367,24 @@ export class ParticleSystem {
             const iz = this.prevZ[i] + (this.z[i] - this.prevZ[i]) * alpha;
             
             const pType = this.type[i];
-            const color = this.colorPalette[this.colorIdx[i]];
+            const colorStr = this.colorPalette[this.colorIdx[i]];
             const lifeRatio = this.life[i] / this.maxLife[i];
 
-            ctx.save();
             if (pType === ParticleType.STANDARD) {
                 ctx.globalAlpha = Math.max(0, lifeRatio);
-                ctx.fillStyle = color;
                 if (this.flags[i] & FLAG_IS_FLAME) {
                     ctx.globalCompositeOperation = lifeRatio > 0.4 ? 'screen' : 'source-over';
-                    const grad = ctx.createRadialGradient(ix, iy, 0, ix, iy, this.radius[i]);
-                    grad.addColorStop(0, color);
-                    grad.addColorStop(1, 'rgba(0,0,0,0)');
-                    ctx.fillStyle = grad;
+                    const sprite = this.spriteCache.get(`flame_${colorStr}`);
+                    if (sprite) {
+                        const r = this.radius[i];
+                        ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
+                    }
+                } else {
+                    ctx.fillStyle = colorStr;
+                    ctx.beginPath();
+                    ctx.arc(ix, iy, this.radius[i], 0, Math.PI * 2);
+                    ctx.fill();
                 }
-                ctx.beginPath();
-                ctx.arc(ix, iy, this.radius[i], 0, Math.PI * 2);
-                ctx.fill();
             } 
             else if (pType === ParticleType.SHOCKWAVE) {
                 const ratio = 1 - lifeRatio;
@@ -350,38 +398,40 @@ export class ParticleSystem {
             }
             else if (pType === ParticleType.FLASH) {
                 ctx.globalCompositeOperation = 'screen';
-                const grad = ctx.createRadialGradient(ix, iy, 0, ix, iy, this.radius[i]);
-                grad.addColorStop(0, `rgba(255, 255, 255, 1.0)`);
-                grad.addColorStop(0.3, `rgba(255, 255, 200, ${lifeRatio})`);
-                grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-                ctx.fillStyle = grad;
-                ctx.beginPath();
-                ctx.arc(ix, iy, this.radius[i], 0, Math.PI * 2);
-                ctx.fill();
+                const sprite = this.spriteCache.get('glow_white');
+                if (sprite) {
+                    const r = this.radius[i];
+                    ctx.globalAlpha = lifeRatio;
+                    ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
+                }
             }
             else if (pType === ParticleType.MOLTEN) {
                 const ry = iy + iz;
                 ctx.globalCompositeOperation = 'screen';
                 const glowRadius = this.radius[i] * (iz < 0 ? 6 : 4);
-                const grad = ctx.createRadialGradient(ix, ry, 0, ix, ry, glowRadius);
-                const mAlpha = iz < 0 ? 0.9 : (this.life[i] / 7.0) * 0.9;
-                grad.addColorStop(0, '#ffffff');
-                grad.addColorStop(0.2, '#ffff00');
-                grad.addColorStop(0.5, color);
-                grad.addColorStop(1, 'rgba(255, 100, 0, 0)');
-                ctx.fillStyle = grad;
-                ctx.globalAlpha = Math.max(0, mAlpha);
-                ctx.beginPath();
-                ctx.arc(ix, ry, glowRadius, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.fillStyle = '#fff';
+                const sprite = this.spriteCache.get('molten_glow');
+                if (sprite) {
+                    const mAlpha = iz < 0 ? 0.9 : (this.life[i] / 7.0) * 0.9;
+                    ctx.globalAlpha = Math.max(0, mAlpha);
+                    ctx.drawImage(sprite, ix - glowRadius, ry - glowRadius, glowRadius * 2, glowRadius * 2);
+                }
+                
+                // Small solid core
                 ctx.globalAlpha = 1.0;
+                ctx.fillStyle = '#fff';
                 ctx.beginPath();
                 ctx.arc(ix, ry, this.radius[i] * 0.5, 0, Math.PI * 2);
                 ctx.fill();
             }
-            ctx.restore();
+            
+            // Reset state sparingly
+            if (pType !== ParticleType.STANDARD || (this.flags[i] & FLAG_IS_FLAME)) {
+                ctx.globalAlpha = 1.0;
+                ctx.globalCompositeOperation = 'source-over';
+            }
         }
+        ctx.globalAlpha = 1.0;
+        ctx.globalCompositeOperation = 'source-over';
     }
 
     public getParticles(): any[] {
