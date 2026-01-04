@@ -464,6 +464,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     
     // Weather Commands
     if (cleanCmd === 'set_weather_clear') { WeatherManager.getInstance().setWeather(WeatherType.CLEAR); return true; }
+    if (cleanCmd === 'set_weather_cloudy') { WeatherManager.getInstance().setWeather(WeatherType.CLOUDY); return true; }
     if (cleanCmd === 'set_weather_fog') { WeatherManager.getInstance().setWeather(WeatherType.FOG); return true; }
     if (cleanCmd === 'set_weather_rain') { WeatherManager.getInstance().setWeather(WeatherType.RAIN); return true; }
     if (cleanCmd === 'set_weather_snow') { WeatherManager.getInstance().setWeather(WeatherType.SNOW); return true; }

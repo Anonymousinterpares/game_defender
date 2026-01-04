@@ -101,20 +101,24 @@ export class LightingRenderer {
     }
 
     private generateCloudShapes(): void {
-        for (let i = 0; i < 8; i++) {
+        for (let i = 0; i < 12; i++) { // Increased variety
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d')!;
             
-            // Draw a cluster of soft circles, constrained to center to ensure 0 alpha at edges
-            ctx.fillStyle = '#000000';
-            for (let j = 0; j < 10; j++) {
-                const x = 256 + (Math.random() - 0.5) * 200;
-                const y = 256 + (Math.random() - 0.5) * 200;
-                const r = 80 + Math.random() * 120;
+            // Multiple blobs for organic feel
+            const blobs = 3 + Math.floor(Math.random() * 5);
+            for (let j = 0; j < blobs; j++) {
+                const x = 256 + (Math.random() - 0.5) * 180;
+                const y = 256 + (Math.random() - 0.5) * 180;
+                const r = 100 + Math.random() * 100;
+                
                 const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-                grad.addColorStop(0, 'rgba(0,0,0,0.8)');
+                const opacity = 0.6 + Math.random() * 0.4;
+                grad.addColorStop(0, `rgba(0,0,0,${opacity})`);
+                grad.addColorStop(0.5, `rgba(0,0,0,${opacity * 0.5})`);
                 grad.addColorStop(1, 'rgba(0,0,0,0)');
+                
                 ctx.fillStyle = grad;
                 ctx.beginPath();
                 ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -279,26 +283,65 @@ export class LightingRenderer {
     }
 
     private renderCloudShadows(lctx: CanvasRenderingContext2D, weather: any, w: number, h: number): void {
-        // Update cloud offset based on wind
+        // Update cloud offset based on independent cloud wind
         const dt = 1/60; 
-        this.cloudOffset.x += weather.windDir.x * weather.windSpeed * 20 * dt;
-        this.cloudOffset.y += weather.windDir.y * weather.windSpeed * 20 * dt;
+        this.cloudOffset.x += weather.cloudWindDir.x * weather.cloudWindSpeed * 15 * dt;
+        this.cloudOffset.y += weather.cloudWindDir.y * weather.cloudWindSpeed * 15 * dt;
 
         lctx.save();
         lctx.globalCompositeOperation = 'multiply';
-        // Much more subtle shadows. Clouds shouldn't be pitch black.
-        lctx.globalAlpha = 0.15 + (weather.cloudType === CloudType.OVERCAST ? 0.15 : 0);
 
-        const spacing = 1024;
+        // 1. If OVERCAST (100% coverage), just apply a global dimming to the lightmap
+        if (weather.cloudType === CloudType.OVERCAST) {
+            lctx.fillStyle = 'rgba(120, 130, 150, 0.5)'; // Cool grey tint
+            lctx.fillRect(0, 0, w, h);
+            lctx.restore();
+            return;
+        }
+
+        // 2. If SCATTERED/BROKEN, render individual distinct cloud shadows
+        // More dramatic shadows for visibility
+        lctx.globalAlpha = 0.4; 
+
+        const spacing = 400; 
         const startX = Math.floor((this.parent.cameraX + this.cloudOffset.x) / spacing) * spacing - (this.parent.cameraX + this.cloudOffset.x);
         const startY = Math.floor((this.parent.cameraY + this.cloudOffset.y) / spacing) * spacing - (this.parent.cameraY + this.cloudOffset.y);
 
         for (let ox = startX; ox < w + spacing; ox += spacing) {
             for (let oy = startY; oy < h + spacing; oy += spacing) {
-                const seed = Math.floor((ox + this.parent.cameraX + this.cloudOffset.x) / spacing) + 
-                             Math.floor((oy + this.parent.cameraY + this.cloudOffset.y) / spacing) * 100;
-                const shapeIdx = Math.abs(seed) % this.cloudShapes.length;
-                lctx.drawImage(this.cloudShapes[shapeIdx], ox, oy, spacing, spacing);
+                // Determine the absolute world tile index for this cloud
+                const worldX = ox + this.parent.cameraX + this.cloudOffset.x;
+                const worldY = oy + this.parent.cameraY + this.cloudOffset.y;
+                const gx = Math.round(worldX / spacing);
+                const gy = Math.round(worldY / spacing);
+                
+                // Deterministic noise based on stable grid coordinates
+                const noise = Math.abs(Math.sin(gx * 12.9898 + gy * 78.233) * 43758.5453) % 1;
+                
+                let threshold = 0.25; 
+                if (weather.cloudType === CloudType.BROKEN) threshold = 0.6;
+
+                if (noise < threshold) {
+                    const shapeIdx = Math.floor(noise * 100) % this.cloudShapes.length;
+                    
+                    // Use noise to derive deterministic random properties
+                    const rotation = noise * Math.PI * 2;
+                    const scale = 0.8 + (noise * 10 % 1) * 0.7;
+                    const jitterX = ((noise * 20 % 1) - 0.5) * (spacing * 0.4);
+                    const jitterY = ((noise * 30 % 1) - 0.5) * (spacing * 0.4);
+
+                    const individualAlpha = 0.3 + (noise / threshold) * 0.2;
+                    lctx.globalAlpha = individualAlpha;
+
+                    lctx.save();
+                    // Translate to center of shadow placement
+                    lctx.translate(ox + spacing/2 + jitterX, oy + spacing/2 + jitterY);
+                    lctx.rotate(rotation);
+                    lctx.scale(scale, scale);
+                    // Draw centered
+                    lctx.drawImage(this.cloudShapes[shapeIdx], -spacing/2, -spacing/2, spacing, spacing);
+                    lctx.restore();
+                }
             }
         }
         lctx.restore();

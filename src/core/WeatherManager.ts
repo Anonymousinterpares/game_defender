@@ -2,6 +2,7 @@ import { ConfigManager } from '../config/MasterConfig';
 
 export enum WeatherType {
     CLEAR = 'clear',
+    CLOUDY = 'cloudy',
     FOG = 'fog',
     RAIN = 'rain',
     SNOW = 'snow'
@@ -23,6 +24,8 @@ export interface WeatherState {
     ambientMultiplier: number; // 1.0 = normal, 0.5 = dark
     windDir: { x: number, y: number };
     windSpeed: number;
+    cloudWindDir: { x: number, y: number }; // Separate movement for clouds
+    cloudWindSpeed: number;
 }
 
 export class WeatherManager {
@@ -42,11 +45,16 @@ export class WeatherManager {
     private windSpeed: number = 1.0;
     private windTimer: number = 0;
 
+    private cloudWindAngle: number = 0;
+    private cloudWindSpeed: number = 1.5;
+
     private targetFogDensity: number = 0;
     private targetCloudCoverage: number = 0;
     private targetRainIntensity: number = 0;
     private targetSnowIntensity: number = 0;
     private targetWindSpeed: number = 1.0;
+    private targetCloudWindSpeed: number = 1.5;
+    private targetCloudWindAngle: number = 0;
 
     private constructor() {
         this.initializeFromConfig();
@@ -64,15 +72,21 @@ export class WeatherManager {
         let type = initial as WeatherType;
 
         if (initial === 'random') {
-            const types = [WeatherType.CLEAR, WeatherType.FOG, WeatherType.RAIN, WeatherType.SNOW];
+            const types = [WeatherType.CLEAR, WeatherType.CLOUDY, WeatherType.FOG, WeatherType.RAIN, WeatherType.SNOW];
             type = types[Math.floor(Math.random() * types.length)];
         }
 
         this.setWeather(type, true);
         
-        // Initial wind
+        // Initial ground wind
         this.windAngle = Math.random() * Math.PI * 2;
         this.windSpeed = 1.0 + Math.random() * 2.0;
+
+        // Cloud wind is more stable and often different from ground wind
+        this.cloudWindAngle = this.windAngle + (Math.random() - 0.5) * 1.5;
+        this.targetCloudWindAngle = this.cloudWindAngle;
+        this.cloudWindSpeed = 1.0 + Math.random() * 3.0;
+        this.targetCloudWindSpeed = this.cloudWindSpeed;
     }
 
     public setWeather(type: WeatherType, immediate: boolean = false): void {
@@ -81,31 +95,43 @@ export class WeatherManager {
         switch (type) {
             case WeatherType.CLEAR:
                 this.targetFogDensity = 0;
-                this.targetCloudCoverage = Math.random() * 0.3;
+                this.targetCloudCoverage = Math.random() * 0.15; // Rare clouds
+                this.targetRainIntensity = 0;
+                this.targetSnowIntensity = 0;
+                this.targetWindSpeed = 0.5 + Math.random() * 1.5;
+                this.targetCloudWindSpeed = 0.8 + Math.random() * 2.0;
+                break;
+            case WeatherType.CLOUDY:
+                this.targetFogDensity = 0;
+                this.targetCloudCoverage = 0.4 + Math.random() * 0.5; // Distinctly cloudy
                 this.targetRainIntensity = 0;
                 this.targetSnowIntensity = 0;
                 this.targetWindSpeed = 1.0 + Math.random() * 2.0;
+                this.targetCloudWindSpeed = 2.0 + Math.random() * 4.0;
                 break;
             case WeatherType.FOG:
                 this.targetFogDensity = 0.6 + Math.random() * 0.4;
                 this.targetCloudCoverage = 0.4 + Math.random() * 0.4;
                 this.targetRainIntensity = 0;
                 this.targetSnowIntensity = 0;
-                this.targetWindSpeed = 0.05 + Math.random() * 0.1; // Minimal wind for fog
+                this.targetWindSpeed = 0.05 + Math.random() * 0.1;
+                this.targetCloudWindSpeed = 0.5 + Math.random() * 1.0;
                 break;
             case WeatherType.RAIN:
                 this.targetFogDensity = 0.2 + Math.random() * 0.3;
-                this.targetCloudCoverage = 0.7 + Math.random() * 0.3;
+                this.targetCloudCoverage = 1.0; 
                 this.targetRainIntensity = 0.5 + Math.random() * 0.5;
                 this.targetSnowIntensity = 0;
-                this.targetWindSpeed = 2.0 + Math.random() * 3.0; // Wind picks up for rain
+                this.targetWindSpeed = 2.0 + Math.random() * 3.0; 
+                this.targetCloudWindSpeed = 3.0 + Math.random() * 5.0;
                 break;
             case WeatherType.SNOW:
                 this.targetFogDensity = 0.3 + Math.random() * 0.4;
-                this.targetCloudCoverage = 0.8 + Math.random() * 0.2;
+                this.targetCloudCoverage = 1.0; 
                 this.targetRainIntensity = 0;
                 this.targetSnowIntensity = 0.5 + Math.random() * 0.5;
                 this.targetWindSpeed = 1.0 + Math.random() * 2.0;
+                this.targetCloudWindSpeed = 1.5 + Math.random() * 3.0;
                 break;
         }
 
@@ -115,6 +141,7 @@ export class WeatherManager {
             this.rainIntensity = this.targetRainIntensity;
             this.snowIntensity = this.targetSnowIntensity;
             this.windSpeed = this.targetWindSpeed;
+            this.cloudWindSpeed = this.targetCloudWindSpeed;
         }
     }
 
@@ -152,17 +179,29 @@ export class WeatherManager {
         
         // Base wind speed transitions
         this.windSpeed += (this.targetWindSpeed - this.windSpeed) * lerpSpeed;
+        this.cloudWindSpeed += (this.targetCloudWindSpeed - this.cloudWindSpeed) * lerpSpeed;
         
         this.windAngle += Math.sin(this.windTimer * 0.1) * 0.01; // Slow direction drift
+        
+        // Clouds move in a very stable direction. 
+        // We lerp the angle extremely slowly.
+        let angleDiff = this.targetCloudWindAngle - this.cloudWindAngle;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        this.cloudWindAngle += angleDiff * (lerpSpeed * 0.05);
+
+        // Very rarely change the cloud wind target direction
+        if (Math.random() < 0.0001 * dt) {
+            this.targetCloudWindAngle += (Math.random() - 0.5) * 0.5;
+        }
     }
 
     public getWeatherState(): WeatherState {
         // Ambient light is dimmed by clouds and fog
-        // Max dimming: 0.5 from clouds, 0.2 from fog. 
-        // We want a floor that isn't pitch black.
-        let ambientMult = 1.0 - (this.cloudCoverage * 0.4);
-        ambientMult -= (this.fogDensity * 0.2);
-        ambientMult = Math.max(0.35, ambientMult); // Floor at 35% brightness
+        // Max dimming: 0.6 from clouds (Overcast), 0.2 from fog. 
+        let ambientMult = 1.0 - (this.cloudCoverage * 0.5);
+        ambientMult -= (this.fogDensity * 0.25);
+        ambientMult = Math.max(0.3, ambientMult); // Floor at 30% brightness
 
         // Add wind fluctuation to the state
         const windVariation = Math.sin(this.windTimer * 0.2) * 0.5 + Math.sin(this.windTimer * 0.5) * 0.2;
@@ -176,7 +215,9 @@ export class WeatherManager {
             snowAccumulation: this.snowAccumulation,
             ambientMultiplier: ambientMult,
             windDir: { x: Math.cos(this.windAngle), y: Math.sin(this.windAngle) },
-            windSpeed: currentWindSpeed
+            windSpeed: currentWindSpeed,
+            cloudWindDir: { x: Math.cos(this.cloudWindAngle), y: Math.sin(this.cloudWindAngle) },
+            cloudWindSpeed: this.cloudWindSpeed
         };
     }
     
