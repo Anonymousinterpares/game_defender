@@ -9,6 +9,7 @@ import { VisibilitySystem, Point } from '../VisibilitySystem';
 import { ConfigManager } from '../../config/MasterConfig';
 import { WeatherManager, WeatherType, CloudType } from '../WeatherManager';
 import { ParticleSystem } from '../ParticleSystem';
+import { PerfMonitor } from '../../utils/PerfMonitor';
 
 export interface LightingParent {
     world: World | null;
@@ -32,6 +33,7 @@ export class LightingRenderer {
     private sourceCtx: CanvasRenderingContext2D;
     private tempCanvas: HTMLCanvasElement;
     private tempCtx: CanvasRenderingContext2D;
+    private resolutionScale: number = 0.5; // Render lights at 50% resolution
     
     private shadowChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, version: string }> = new Map();
     private silhouetteChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, version: number }> = new Map();
@@ -58,6 +60,7 @@ export class LightingRenderer {
     private lastParticleUpdate: number = 0;
 
     constructor(private parent: LightingParent) {
+        this.resolutionScale = ConfigManager.getInstance().get<number>('Benchmark', 'resolutionScale') || 0.5;
         this.lightCanvas = document.createElement('canvas');
         this.lightCtx = this.lightCanvas.getContext('2d', { willReadFrequently: true })!;
         this.maskCanvas = document.createElement('canvas');
@@ -223,15 +226,18 @@ export class LightingRenderer {
         const lightingEnabled = ConfigManager.getInstance().get<boolean>('Lighting', 'enabled');
         if (!lightingEnabled || !this.parent.world) return;
 
-        const w = ctx.canvas.width;
-        const h = ctx.canvas.height;
+        PerfMonitor.getInstance().begin('lighting_setup');
+        const fullW = ctx.canvas.width;
+        const fullH = ctx.canvas.height;
+        const w = Math.floor(fullW * this.resolutionScale);
+        const h = Math.floor(fullH * this.resolutionScale);
         
         if (this.lightCanvas.width !== w || this.lightCanvas.height !== h) {
             this.lightCanvas.width = w; this.lightCanvas.height = h;
             this.maskCanvas.width = w; this.maskCanvas.height = h;
             this.sourceCanvas.width = w; this.sourceCanvas.height = h;
-            this.tempCanvas.width = w; this.tempCanvas.height = h;
-            this.fogCanvas.width = w; this.fogCanvas.height = h;
+            this.tempCanvas.width = fullW; this.tempCanvas.height = fullH;
+            this.fogCanvas.width = fullW; this.fogCanvas.height = fullH;
         }
 
         const { sun, moon, baseAmbient, isDaylight } = WorldClock.getInstance().getTimeState();
@@ -239,21 +245,27 @@ export class LightingRenderer {
         const lctx = this.lightCtx;
         const weather = WeatherManager.getInstance().getWeatherState();
 
+        // Scale for internal lighting coordinates
+        lctx.save();
+        lctx.scale(this.resolutionScale, this.resolutionScale);
+
         // 1. BASE FLOOR
         lctx.globalCompositeOperation = 'source-over'; 
         lctx.fillStyle = baseAmbient;
-        lctx.fillRect(0, 0, w, h);
+        lctx.fillRect(0, 0, fullW, fullH);
+        PerfMonitor.getInstance().end('lighting_setup');
 
         // 2. SUN/MOON (Additive)
-        if (sun.active) this.renderDirectionalLight(lctx, sun, 'sun', worldMeshVersion, w, h);
-        if (moon.active) this.renderDirectionalLight(lctx, moon, 'moon', worldMeshVersion, w, h);
+        PerfMonitor.getInstance().begin('lighting_directional');
+        if (sun.active) this.renderDirectionalLight(lctx, sun, 'sun', worldMeshVersion, fullW, fullH);
+        if (moon.active) this.renderDirectionalLight(lctx, moon, 'moon', worldMeshVersion, fullW, fullH);
+        PerfMonitor.getInstance().end('lighting_directional');
 
         // 3. ENTITY AMBIENT REVEAL
         lctx.save();
         lctx.globalCompositeOperation = 'screen'; 
-        // Slightly warmer silhouette during day
         const silColor = isDaylight ? 'rgb(70, 65, 60)' : 'rgb(30, 35, 50)';
-        this.drawWorldSilhouette(lctx, silColor, worldMeshVersion, w, h);
+        this.drawWorldSilhouette(lctx, silColor, worldMeshVersion, fullW, fullH);
         
         lctx.translate(-this.parent.cameraX, -this.parent.cameraY);
         if (this.parent.player) this.parent.player.renderAsSilhouette(lctx, silColor);
@@ -269,28 +281,33 @@ export class LightingRenderer {
         }
 
         // 5. POINT LIGHTS
+        PerfMonitor.getInstance().begin('lighting_point');
         const activeIntensity = isDaylight ? sun.intensity : moon.intensity;
-        // Always render point lights, but they are naturally washed out by high sun intensity
-        this.renderPointLights(lctx, activeIntensity, worldMeshVersion, w, h);
+        this.renderPointLights(lctx, activeIntensity, worldMeshVersion, fullW, fullH);
+        PerfMonitor.getInstance().end('lighting_point');
 
-        // 6. CLOUD SHADOWS (Still in lightmap)
+        // 6. CLOUD SHADOWS
         if (weather.cloudType !== CloudType.NONE) {
-            this.renderCloudShadows(lctx, weather, w, h);
+            this.renderCloudShadows(lctx, weather, fullW, fullH);
         }
+        lctx.restore(); // End of resolution scaling
 
         this.meshVersion = worldMeshVersion;
 
         // 7. APPLY LIGHTMAP TO WORLD
         ctx.save();
         ctx.globalCompositeOperation = 'multiply';
-        ctx.drawImage(this.lightCanvas, 0, 0);
+        // Draw low-res lightmap scaled up
+        ctx.drawImage(this.lightCanvas, 0, 0, fullW, fullH);
         ctx.restore();
 
-        // 8. POST-LIGHTING OVERLAYS (Fog & Particles)
+        // 8. POST-LIGHTING OVERLAYS
+        PerfMonitor.getInstance().begin('lighting_overlays');
         if (weather.fogDensity > 0.05) {
-            this.renderFogOverlay(ctx, weather, w, h);
+            this.renderFogOverlay(ctx, weather, fullW, fullH);
         }
         this.renderParticles(ctx);
+        PerfMonitor.getInstance().end('lighting_overlays');
     }
 
     private renderFogOverlay(ctx: CanvasRenderingContext2D, weather: any, w: number, h: number): void {

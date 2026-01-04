@@ -64,6 +64,7 @@ export class MainMenuScene implements Scene {
     this.container.innerHTML = `
       <h1 style="color: #00ff00; text-align: center; font-size: 2em; margin-bottom: 30px;">NEON ROGUE</h1>
       <button id="btn-start">Start Game</button>
+      <button id="btn-benchmark">Run Benchmark</button>
       <button id="btn-settings">Settings</button>
     `;
 
@@ -72,6 +73,11 @@ export class MainMenuScene implements Scene {
     document.getElementById('btn-start')?.addEventListener('click', () => {
       SoundManager.getInstance().playSound('ui_click');
       this.sceneManager.switchScene('gameplay');
+    });
+
+    document.getElementById('btn-benchmark')?.addEventListener('click', () => {
+      SoundManager.getInstance().playSound('ui_click');
+      this.sceneManager.switchScene('benchmark');
     });
 
     document.getElementById('btn-settings')?.addEventListener('click', () => {

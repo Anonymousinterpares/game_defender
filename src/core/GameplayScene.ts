@@ -22,16 +22,20 @@ import { CombatSystem, CombatParent } from '../systems/CombatSystem';
 import { LightingRenderer, LightingParent } from './renderers/LightingRenderer';
 import { WeatherManager, WeatherType } from './WeatherManager';
 import { ParticleSystem } from './ParticleSystem';
+import { PerfMonitor } from '../utils/PerfMonitor';
+import { BenchmarkSystem } from '../utils/BenchmarkSystem';
 
 export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatParent, LightingParent {
   public world: World | null = null;
   public player: Player | null = null;
   public physics: PhysicsEngine;
-  private radar: Radar | null = null;
-  private hud: GameplayHUD;
-  private weaponSystem: WeaponSystem;
-  private combatSystem: CombatSystem;
-  private lightingRenderer: LightingRenderer;
+  protected radar: Radar | null = null;
+  protected hud: GameplayHUD;
+  protected weaponSystem: WeaponSystem;
+  protected combatSystem: CombatSystem;
+  protected lightingRenderer: LightingRenderer;
+  protected benchmark: BenchmarkSystem;
+  protected inputManager: InputManager;
   
   public entities: Entity[] = [];
   public enemies: Enemy[] = [];
@@ -74,12 +78,14 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
   public heatMap: HeatMap | null = null;
   private lightUpdateCounter: number = 0;
 
-  constructor(public sceneManager: SceneManager, private inputManager: InputManager) {
+  constructor(public sceneManager: SceneManager, inputManager: InputManager) {
+    this.inputManager = inputManager;
     this.physics = new PhysicsEngine();
     this.hud = new GameplayHUD(this);
     this.weaponSystem = new WeaponSystem(this);
     this.combatSystem = new CombatSystem(this);
     this.lightingRenderer = new LightingRenderer(this);
+    this.benchmark = new BenchmarkSystem(this);
   }
 
   public setLastShotTime(time: number): void {
@@ -178,11 +184,13 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
   }
 
   update(dt: number): void {
+    PerfMonitor.getInstance().begin('update_total');
     if (this.inputManager.isKeyJustPressed('Escape')) {
       this.sceneManager.switchScene('menu');
       return;
     }
 
+    this.benchmark.update(dt);
     WorldClock.getInstance().update(dt);
     LightManager.getInstance().update(dt);
     this.lightUpdateCounter++;
@@ -296,6 +304,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
         LightManager.getInstance().clearType('fire');
     }
     this.heatMap?.update(dt);
+    PerfMonitor.getInstance().end('update_total');
   }
 
   private updateProjectileLights(): void {
@@ -351,6 +360,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
 
   render(ctx: CanvasRenderingContext2D): void {
     if (!this.world || !this.player) return;
+    PerfMonitor.getInstance().begin('render_world');
     ctx.save();
     ctx.translate(-this.cameraX, -this.cameraY);
     this.world.render(ctx, this.cameraX, this.cameraY);
@@ -363,7 +373,11 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
         if (Math.abs(e.x - this.player!.x) < renderDist && Math.abs(e.y - this.player!.y) < renderDist) e.render(ctx);
     });
     this.projectiles.forEach(p => p.render(ctx));
+    
+    PerfMonitor.getInstance().begin('render_particles');
     ParticleSystem.getInstance().render(ctx);
+    PerfMonitor.getInstance().end('render_particles');
+
     if (this.isFiringBeam && this.player) {
         const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
         ctx.beginPath(); ctx.moveTo(this.player.x, this.player.y); ctx.lineTo(this.beamEndPos.x, this.beamEndPos.y);
@@ -371,9 +385,18 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
         else { ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)'; ctx.lineWidth = 15 + Math.random() * 5; ctx.stroke(); }
     }
     ctx.restore();
+    PerfMonitor.getInstance().end('render_world');
+
+    PerfMonitor.getInstance().begin('render_lighting');
     this.lightingRenderer.render(ctx);
+    PerfMonitor.getInstance().end('render_lighting');
+
     if (this.radar) this.radar.render(this.player, [this.player, ...this.enemies, ...this.projectiles]);
     this.hud.render(ctx);
+    
+    if (ConfigManager.getInstance().get<boolean>('Benchmark', 'showPerfMetrics')) {
+        PerfMonitor.getInstance().render(ctx);
+    }
   }
 
   private spawnDrop(): void {
@@ -449,6 +472,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     }
     if (cleanCmd === 'spawn_on') { this.spawnEnemies = true; ConfigManager.getInstance().set('Debug', 'enableEnemySpawning', true); return true; }
     if (cleanCmd === 'spawn_off') { this.spawnEnemies = false; ConfigManager.getInstance().set('Debug', 'enableEnemySpawning', false); return true; }
+    if (cleanCmd === 'perf_benchmark') { this.benchmark.start(); return true; }
     
     // Weather Commands
     if (cleanCmd === 'set_weather_clear') { WeatherManager.getInstance().setWeather(WeatherType.CLEAR); return true; }
