@@ -477,16 +477,24 @@ export class ParticleSystem {
         
         batches.forEach((list, color) => {
             ctx.fillStyle = color;
-            // Further optimization: group by alpha to reduce state changes
-            // For simplicity and since alpha is life-based (high variance), 
-            // we'll just draw them and accept the alpha state changes for now, 
-            // OR use a fixed alpha if close.
+            
+            // Sort by alpha to minimize state changes
+            // We group particles into coarse alpha buckets (0.2, 0.4, 0.6, 0.8, 1.0)
+            const alphaBuckets: Map<number, { x: number, y: number, r: number }[]> = new Map();
             list.forEach(p => {
-                if (Math.abs(currentAlpha - p.a) > 0.1) {
-                    ctx.globalAlpha = currentAlpha = p.a;
-                }
+                const bucket = Math.ceil(p.a * 5) / 5;
+                if (!alphaBuckets.has(bucket)) alphaBuckets.set(bucket, []);
+                alphaBuckets.get(bucket)!.push(p);
+            });
+
+            alphaBuckets.forEach((pList, a) => {
+                ctx.globalAlpha = a;
                 ctx.beginPath();
-                ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                pList.forEach(p => {
+                    // Move to start of arc to avoid connecting lines
+                    ctx.moveTo(p.x + p.r, p.y);
+                    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                });
                 ctx.fill();
             });
         });

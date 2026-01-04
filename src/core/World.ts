@@ -19,6 +19,8 @@ export class World {
   // Render Caching
   private tileCanvasCache: Map<string, HTMLCanvasElement> = new Map();
   private backgroundCanvas: HTMLCanvasElement | null = null;
+  private wallChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, dirty: boolean }> = new Map();
+  private chunkSize: number = 512;
   private lastSnowAccumulation: number = 0;
   private sharedTiles: Uint8Array | null = null;
 
