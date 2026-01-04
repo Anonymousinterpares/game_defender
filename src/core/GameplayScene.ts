@@ -208,8 +208,10 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.combatSystem.update(dt);
 
     this.physics.update(dt);
+    Entity.setInterpolationAlpha(this.physics.alpha);
+
     if (this.player) {
-        SoundManager.getInstance().updateListener(this.player.x, this.player.y);
+        SoundManager.getInstance().updateListener(this.player.interpolatedX, this.player.interpolatedY);
     }
 
     this.nextDropSpawn -= dt;
@@ -292,8 +294,8 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
           });
       });
 
-      this.cameraX = this.player.x - window.innerWidth / 2;
-      this.cameraY = this.player.y - window.innerHeight / 2;
+      this.cameraX = this.player.interpolatedX - window.innerWidth / 2;
+      this.cameraY = this.player.interpolatedY - window.innerHeight / 2;
     }
 
     if (this.radar && this.player) this.radar.update(dt);

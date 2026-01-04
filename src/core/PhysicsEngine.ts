@@ -7,6 +7,8 @@ export interface PhysicsBody {
   y: number;
   vx: number;
   vy: number;
+  prevX: number;
+  prevY: number;
   radius: number; // For circle collision
   width?: number; // For AABB
   height?: number; // For AABB
@@ -21,6 +23,11 @@ export class PhysicsEngine {
   private spatialGrid: Map<string, PhysicsBody[]> = new Map();
   private gridSize: number = 128; // Size of each grid cell in pixels
 
+  // Fixed Timestep Logic
+  private accumulator: number = 0;
+  private readonly fixedTimeStep: number = 1 / 60;
+  public alpha: number = 0;
+
   constructor() {}
 
   public setWorld(world: World): void {
@@ -28,6 +35,8 @@ export class PhysicsEngine {
   }
 
   public addBody(body: PhysicsBody): void {
+    body.prevX = body.x;
+    body.prevY = body.y;
     this.bodies.push(body);
   }
 
@@ -50,6 +59,20 @@ export class PhysicsEngine {
   }
 
   public update(dt: number): void {
+    // Prevent "Spiral of Death" if a frame takes too long
+    if (dt > 0.25) dt = 0.25;
+
+    this.accumulator += dt;
+
+    while (this.accumulator >= this.fixedTimeStep) {
+        this.step(this.fixedTimeStep);
+        this.accumulator -= this.fixedTimeStep;
+    }
+
+    this.alpha = this.accumulator / this.fixedTimeStep;
+  }
+
+  private step(dt: number): void {
     let friction = ConfigManager.getInstance().get<number>('Physics', 'friction');
     
     // 1. Update Spatial Grid first for accurate queries
@@ -64,6 +87,10 @@ export class PhysicsEngine {
     }
 
     for (const body of this.bodies) {
+      // Store state for interpolation
+      body.prevX = body.x;
+      body.prevY = body.y;
+
       if (body.isStatic) continue;
 
       // 1. Apply Friction

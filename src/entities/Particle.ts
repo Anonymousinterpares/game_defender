@@ -20,6 +20,9 @@ export class Particle extends Entity {
     }
 
     update(dt: number, world?: any): void {
+        this.prevX = this.x;
+        this.prevY = this.y;
+
         const nextX = this.x + this.vx * dt;
         const nextY = this.y + this.vy * dt;
 
@@ -57,6 +60,9 @@ export class Particle extends Entity {
     }
 
     render(ctx: CanvasRenderingContext2D): void {
+        const ix = this.interpolatedX;
+        const iy = this.interpolatedY;
+
         ctx.save();
         ctx.globalAlpha = Math.max(0, this.alpha);
         ctx.fillStyle = this.color;
@@ -64,14 +70,14 @@ export class Particle extends Entity {
         if (this.isFlame) {
             ctx.globalCompositeOperation = this.alpha > 0.4 ? 'screen' : 'source-over';
             // Soft glow for flame
-            const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius);
+            const grad = ctx.createRadialGradient(ix, iy, 0, ix, iy, this.radius);
             grad.addColorStop(0, this.color);
             grad.addColorStop(1, 'rgba(0,0,0,0)');
             ctx.fillStyle = grad;
         }
 
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.arc(ix, iy, this.radius, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
     }
@@ -90,6 +96,8 @@ export class ShockwaveParticle extends Entity {
     }
 
     update(dt: number): void {
+        this.prevX = this.x;
+        this.prevY = this.y;
         this.life -= dt;
         if (this.life <= 0) this.active = false;
     }
@@ -104,7 +112,7 @@ export class ShockwaveParticle extends Entity {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 4; // Thicker ring for more impact
         ctx.beginPath();
-        ctx.arc(this.x, this.y, currentRadius, 0, Math.PI * 2);
+        ctx.arc(this.interpolatedX, this.interpolatedY, currentRadius, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
     }
@@ -122,22 +130,27 @@ export class FlashParticle extends Entity {
     }
 
     update(dt: number): void {
+        this.prevX = this.x;
+        this.prevY = this.y;
         this.life -= dt;
         if (this.life <= 0) this.active = false;
     }
 
     render(ctx: CanvasRenderingContext2D): void {
         const ratio = this.life / this.maxLife;
+        const ix = this.interpolatedX;
+        const iy = this.interpolatedY;
+        
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
         // More intense white-hot core
-        const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius);
+        const grad = ctx.createRadialGradient(ix, iy, 0, ix, iy, this.radius);
         grad.addColorStop(0, `rgba(255, 255, 255, 1.0)`);
         grad.addColorStop(0.3, `rgba(255, 255, 200, ${ratio})`);
         grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
         ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.arc(ix, iy, this.radius, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
     }
@@ -147,6 +160,7 @@ export class MoltenMetalParticle extends Particle {
     private gravity: number = 80; // Very low gravity for slow motion feel
     private vz: number = -60 - Math.random() * 40; // Gentle upward burst
     public z: number = 0;
+    private prevZ: number = 0;
     public damage: number = 5;
 
     constructor(x: number, y: number, vx: number, vy: number) {
@@ -155,7 +169,15 @@ export class MoltenMetalParticle extends Particle {
         this.radius = 4 + Math.random() * 2;
     }
 
+    public get interpolatedZ(): number {
+        return this.prevZ + (this.z - this.prevZ) * (Entity as any).interpolationAlpha;
+    }
+
     update(dt: number, world?: any): void {
+        this.prevX = this.x;
+        this.prevY = this.y;
+        this.prevZ = this.z;
+
         const nextX = this.x + this.vx * dt;
         const nextY = this.y + this.vy * dt;
 
@@ -207,16 +229,18 @@ export class MoltenMetalParticle extends Particle {
     }
 
     render(ctx: CanvasRenderingContext2D): void {
-        const rx = this.x;
-        const ry = this.y + this.z; // Apply Z offset
+        const ix = this.interpolatedX;
+        const iz = this.interpolatedZ;
+        const rx = ix;
+        const ry = this.interpolatedY + iz; // Apply Z offset
 
         ctx.save();
         ctx.globalCompositeOperation = 'screen'; // additive-like glow
         
         // Larger, more intense white-heat glow for visibility
-        const glowRadius = this.radius * (this.z < 0 ? 6 : 4);
+        const glowRadius = this.radius * (iz < 0 ? 6 : 4);
         const grad = ctx.createRadialGradient(rx, ry, 0, rx, ry, glowRadius);
-        const alpha = this.z < 0 ? 0.9 : (this.life / 7.0) * 0.9;
+        const alpha = iz < 0 ? 0.9 : (this.life / 7.0) * 0.9;
         
         grad.addColorStop(0, '#ffffff'); // Pure white center
         grad.addColorStop(0.2, '#ffff00'); // Yellow transition

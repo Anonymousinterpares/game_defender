@@ -7,10 +7,25 @@ export abstract class Entity implements PhysicsBody {
   public y: number = 0;
   public vx: number = 0;
   public vy: number = 0;
+  public prevX: number = 0;
+  public prevY: number = 0;
   public radius: number = 10;
   public isStatic: boolean = false;
   public color: string = '#fff';
   public rotation: number = 0;
+
+  private static interpolationAlpha: number = 0;
+
+  public get interpolatedX(): number {
+    return this.prevX + (this.x - this.prevX) * Entity.interpolationAlpha;
+  }
+  public get interpolatedY(): number {
+    return this.prevY + (this.y - this.prevY) * Entity.interpolationAlpha;
+  }
+  
+  public static setInterpolationAlpha(alpha: number): void {
+      Entity.interpolationAlpha = alpha;
+  }
   
   // Health and Fire State
   public health: number = 100;
@@ -83,6 +98,9 @@ export abstract class Entity implements PhysicsBody {
   public renderFire(ctx: CanvasRenderingContext2D): void {
       if (!this.isOnFire || !Entity.fireAsset) return;
 
+      const ix = this.interpolatedX;
+      const iy = this.interpolatedY;
+
       const time = performance.now() * 0.001;
       const frameCount = 8;
       const frame = Math.floor((time * 15 + parseInt(this.id, 36)) % frameCount);
@@ -96,8 +114,8 @@ export abstract class Entity implements PhysicsBody {
       ctx.drawImage(
           Entity.fireAsset, 
           fx, 0, fw, fh, 
-          this.x - displaySize / 2, 
-          this.y - displaySize * 0.8, 
+          ix - displaySize / 2, 
+          iy - displaySize * 0.8, 
           displaySize, 
           displaySize
       );
@@ -105,7 +123,7 @@ export abstract class Entity implements PhysicsBody {
       // Simple procedural sparks
       if (Math.random() < 0.2) {
           ctx.fillStyle = '#fff';
-          ctx.fillRect(this.x + (Math.random() - 0.5) * this.radius * 2, this.y - Math.random() * this.radius * 2, 2, 2);
+          ctx.fillRect(ix + (Math.random() - 0.5) * this.radius * 2, iy - Math.random() * this.radius * 2, 2, 2);
       }
   }
 

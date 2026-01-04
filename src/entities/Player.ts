@@ -202,23 +202,25 @@ export class Player extends Entity {
     for (let i = this.segments.length - 1; i >= 0; i--) {
       const s = this.segments[i];
       const size = this.radius; 
+      const ix = s.interpolatedX;
+      const iy = s.interpolatedY;
       
       ctx.save();
       // Apply visual scale bump for segments
       if (!silhouette && s.visualScale !== 1.0) {
-          ctx.translate(s.x, s.y);
+          ctx.translate(ix, iy);
           ctx.scale(s.visualScale, s.visualScale);
-          ctx.translate(-s.x, -s.y);
+          ctx.translate(-ix, -iy);
       }
 
       ctx.beginPath();
-      ctx.arc(s.x, s.y, size, 0, Math.PI * 2);
+      ctx.arc(ix, iy, size, 0, Math.PI * 2);
       
       if (silhouette) {
           ctx.fillStyle = silColor || '#fff';
       } else {
           // Brass Gradient
-          const grad = ctx.createRadialGradient(s.x - 5, s.y - 5, 2, s.x, s.y, size);
+          const grad = ctx.createRadialGradient(ix - 5, iy - 5, 2, ix, iy, size);
           grad.addColorStop(0, '#ebd5b3'); 
           grad.addColorStop(0.5, '#b58d4a'); 
           grad.addColorStop(1, '#594326'); 
@@ -247,21 +249,24 @@ export class Player extends Entity {
     }
 
     // Draw Head
+    const hix = this.interpolatedX;
+    const hiy = this.interpolatedY;
+
     ctx.save();
     // Apply visual scale bump for head
     if (!silhouette && this.visualScale !== 1.0) {
-        ctx.translate(this.x, this.y);
+        ctx.translate(hix, hiy);
         ctx.scale(this.visualScale, this.visualScale);
-        ctx.translate(-this.x, -this.y);
+        ctx.translate(-hix, -hiy);
     }
 
     ctx.beginPath();
-    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.arc(hix, hiy, this.radius, 0, Math.PI * 2);
     
     if (silhouette) {
         ctx.fillStyle = silColor || '#fff';
     } else {
-        const headGrad = ctx.createRadialGradient(this.x - 5, this.y - 5, 2, this.x, this.y, this.radius);
+        const headGrad = ctx.createRadialGradient(hix - 5, hiy - 5, 2, hix, hiy, this.radius);
         headGrad.addColorStop(0, '#ffdf80');
         headGrad.addColorStop(0.5, '#cfaa6e');
         headGrad.addColorStop(1, '#8c6a36');
@@ -290,7 +295,7 @@ export class Player extends Entity {
         // Cannon
         const cannonLen = 25;
         ctx.save();
-        ctx.translate(this.x, this.y);
+        ctx.translate(hix, hiy);
         ctx.rotate(this.rotation);
         
         ctx.beginPath();

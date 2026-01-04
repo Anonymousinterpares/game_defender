@@ -43,23 +43,26 @@ export class Enemy extends Entity {
   private renderInternal(ctx: CanvasRenderingContext2D, silhouette: boolean, silColor?: string): void {
     if (!this.active) return;
     
+    const ix = this.interpolatedX;
+    const iy = this.interpolatedY;
+    
     ctx.save();
     
     // Apply visual scale bump
     if (!silhouette && this.visualScale !== 1.0) {
-        ctx.translate(this.x, this.y);
+        ctx.translate(ix, iy);
         ctx.scale(this.visualScale, this.visualScale);
-        ctx.translate(-this.x, -this.y);
+        ctx.translate(-ix, -iy);
     }
 
     // Body (Iron/Rust)
     ctx.beginPath();
-    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.arc(ix, iy, this.radius, 0, Math.PI * 2);
     
     if (silhouette) {
         ctx.fillStyle = silColor || '#fff';
     } else {
-        const grad = ctx.createRadialGradient(this.x - 3, this.y - 3, 1, this.x, this.y, this.radius);
+        const grad = ctx.createRadialGradient(ix - 3, iy - 3, 1, ix, iy, this.radius);
         grad.addColorStop(0, '#757575');
         grad.addColorStop(0.6, '#434b4d'); // Iron
         grad.addColorStop(1, '#2a2a2a');
@@ -73,8 +76,8 @@ export class Enemy extends Entity {
         ctx.stroke();
 
         // Eye (Glowing Ember)
-        const eyeX = this.x + Math.cos(this.rotation) * 6;
-        const eyeY = this.y + Math.sin(this.rotation) * 6;
+        const eyeX = ix + Math.cos(this.rotation) * 6;
+        const eyeY = iy + Math.sin(this.rotation) * 6;
         
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#ff4500';
@@ -90,7 +93,7 @@ export class Enemy extends Entity {
         if (this.damageFlash > 0) {
             ctx.save();
             ctx.beginPath();
-            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.arc(ix, iy, this.radius, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
             ctx.fill();
             ctx.restore();

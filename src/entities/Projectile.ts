@@ -138,6 +138,9 @@ export class Projectile extends Entity {
   }
 
   update(dt: number): void {
+    this.prevX = this.x;
+    this.prevY = this.y;
+
     if (this.type === ProjectileType.MISSILE && this.target && this.target.active) {
         const dx = this.target.x - this.x;
         const dy = this.target.y - this.y;
@@ -163,8 +166,11 @@ export class Projectile extends Entity {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+    const ix = this.interpolatedX;
+    const iy = this.interpolatedY;
+
     ctx.save();
-    ctx.translate(this.x, this.y);
+    ctx.translate(ix, iy);
     ctx.rotate(this.rotation);
 
     if (this.type === ProjectileType.MINE) {
@@ -198,7 +204,7 @@ export class Projectile extends Entity {
     if (this.speed > 0) {
         ctx.fillStyle = this.color + '44'; // Alpha
         ctx.beginPath();
-        ctx.arc(this.x - this.vx * 0.02, this.y - this.vy * 0.02, this.radius * 0.7, 0, Math.PI * 2);
+        ctx.arc(ix - this.vx * 0.02, iy - this.vy * 0.02, this.radius * 0.7, 0, Math.PI * 2);
         ctx.fill();
     }
   }
