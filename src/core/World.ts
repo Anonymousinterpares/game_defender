@@ -124,6 +124,13 @@ export class World {
 
   public invalidateTileCache(tx: number, ty: number): void {
       this.tileCanvasCache.delete(`${tx},${ty}`);
+      
+      const gx = Math.floor((tx * this.tileSize) / this.chunkSize);
+      const gy = Math.floor((ty * this.tileSize) / this.chunkSize);
+      const chunk = this.wallChunks.get(`${gx},${gy}`);
+      if (chunk) {
+          chunk.dirty = true;
+      }
   }
 
   private generate(): void {

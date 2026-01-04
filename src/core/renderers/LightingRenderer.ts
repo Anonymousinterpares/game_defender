@@ -591,6 +591,8 @@ export class LightingRenderer {
         const endGY = Math.floor((this.parent.cameraY + (h / this.resolutionScale)) / this.chunkSize);
 
         mctx.fillStyle = '#000000';
+        let rebuildsThisFrame = 0;
+
         for (let gy = startGY; gy <= endGY; gy++) {
             for (let gx = startGX; gx <= endGX; gx++) {
                 const key = `${gx},${gy}_${type}`;
@@ -602,9 +604,18 @@ export class LightingRenderer {
                     chunk = { canvas, ctx: canvas.getContext('2d')!, version: '' };
                     this.shadowChunks.set(key, chunk);
                 }
+                
                 if (chunk.version !== bakeVersion) {
-                    this.rebuildShadowChunk(chunk, gx, gy, source);
-                    chunk.version = bakeVersion;
+                    if (rebuildsThisFrame < this.MAX_REBUILDS_PER_FRAME) {
+                        this.rebuildShadowChunk(chunk, gx, gy, source);
+                        chunk.version = bakeVersion;
+                        rebuildsThisFrame++;
+                    } else {
+                        // Mark as needing rebuild later if not already in queue
+                        if (!this.rebuildQueue.includes(key)) {
+                            this.rebuildQueue.push(key);
+                        }
+                    }
                 }
                 mctx.drawImage(chunk.canvas, gx * this.chunkSize, gy * this.chunkSize);
             }
