@@ -39,6 +39,11 @@ export class LightingRenderer {
     private lightPolygonCache: Map<string, Point[]> = new Map();
     private meshVersion: number = 0;
 
+    // Worker Pool for Lighting
+    private workers: Worker[] = [];
+    private workerIndex: number = 0;
+    private pendingRequests: Map<string, boolean> = new Map();
+
     // Weather Visuals
     private cloudCanvas: HTMLCanvasElement;
     private cloudCtx: CanvasRenderingContext2D;
@@ -70,6 +75,22 @@ export class LightingRenderer {
         this.generateCloudShapes();
         this.generateFogNoise();
         this.initParticles();
+        this.initWorkers();
+    }
+
+    private initWorkers(): void {
+        const workerCount = Math.min(navigator.hardwareConcurrency || 4, 4);
+        for (let i = 0; i < workerCount; i++) {
+            const worker = new Worker(new URL('../../workers/lighting.worker.ts', import.meta.url), { type: 'module' });
+            worker.onmessage = (e) => {
+                const { type, data } = e.data;
+                if (type === 'visibilityResult') {
+                    this.lightPolygonCache.set(data.id, data.polygon);
+                    this.pendingRequests.delete(data.id);
+                }
+            };
+            this.workers.push(worker);
+        }
     }
 
     private generateFogNoise(): void {
@@ -660,7 +681,6 @@ export class LightingRenderer {
 
     private renderPointLights(lctx: CanvasRenderingContext2D, ambientIntensity: number, meshVersion: number, w: number, h: number): void {
         const lights = LightManager.getInstance().getLights();
-        // Base segments for all lights in view
         const globalSegments = this.parent.world!.getOcclusionSegments(this.parent.cameraX, this.parent.cameraY, w, h);
         
         lctx.save();
@@ -669,33 +689,41 @@ export class LightingRenderer {
         lights.forEach(light => {
             const screenX = light.x - this.parent.cameraX;
             const screenY = light.y - this.parent.cameraY;
-            
-            // Culling
             if (screenX < -light.radius || screenX > w + light.radius || screenY < -light.radius || screenY > h + light.radius) return;
 
             lctx.save();
             lctx.globalAlpha = light.intensity * (1.0 - ambientIntensity * 0.5);
 
             if (light.castsShadows) {
-                let polygon = this.lightPolygonCache.get(light.id);
+                const polygon = this.lightPolygonCache.get(light.id);
                 const lastPos = (light as any)._lastShadowPos || {x: 0, y: 0};
-                const hasMoved = Math.abs(light.x - lastPos.x) > 1 || Math.abs(light.y - lastPos.y) > 1;
+                const hasMoved = Math.abs(light.x - lastPos.x) > 2 || Math.abs(light.y - lastPos.y) > 2;
 
-                // Only recalculate if world changed or light moved
-                if (!polygon || meshVersion !== this.meshVersion || hasMoved) {
-                    let localSegments = globalSegments;
-                    if (light.radius < 800) { 
-                        localSegments = this.parent.world!.getOcclusionSegments(
-                            light.x - light.radius, 
-                            light.y - light.radius, 
-                            light.radius * 2, 
-                            light.radius * 2
-                        );
+                if (meshVersion !== this.meshVersion || hasMoved) {
+                    if (!this.pendingRequests.has(light.id)) {
+                        this.pendingRequests.set(light.id, true);
+                        const worker = this.workers[this.workerIndex];
+                        this.workerIndex = (this.workerIndex + 1) % this.workers.length;
+                        
+                        let localSegments = globalSegments;
+                        if (light.radius < 800) { 
+                            localSegments = this.parent.world!.getOcclusionSegments(
+                                light.x - light.radius, light.y - light.radius, 
+                                light.radius * 2, light.radius * 2
+                            );
+                        }
+
+                        worker.postMessage({
+                            type: 'calculateVisibility',
+                            data: {
+                                id: light.id,
+                                origin: { x: light.x, y: light.y },
+                                segments: localSegments,
+                                radius: light.radius
+                            }
+                        });
+                        (light as any)._lastShadowPos = { x: light.x, y: light.y };
                     }
-
-                    polygon = VisibilitySystem.calculateVisibility({x: light.x, y: light.y}, localSegments, light.radius);
-                    this.lightPolygonCache.set(light.id, polygon);
-                    (light as any)._lastShadowPos = {x: light.x, y: light.y};
                 }
 
                 if (polygon && polygon.length > 0) {
@@ -708,15 +736,15 @@ export class LightingRenderer {
                     lctx.clip();
                 }
             }
-
+            
             const grad = lctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, light.radius);
             grad.addColorStop(0, light.color);
             grad.addColorStop(1, 'rgba(0,0,0,0)');
             lctx.fillStyle = grad;
             lctx.fillRect(screenX - light.radius, screenY - light.radius, light.radius * 2, light.radius * 2);
             lctx.restore();
-
-            // FOG SCATTER HALO (Larger, soft glow around lights in fog)
+            
+            // Halo logic...
             const weather = WeatherManager.getInstance().getWeatherState();
             if (weather.fogDensity > 0.1) {
                 lctx.save();
@@ -747,6 +775,7 @@ export class LightingRenderer {
         const coneDist = ConfigManager.getInstance().get<number>('Visuals', 'coneDistance') * tileSize;
         const coneAngleRad = (ConfigManager.getInstance().get<number>('Visuals', 'coneAngle') * Math.PI) / 180;
 
+        // Core reveal (instant)
         this.parent.player.getAllBodies().forEach(b => {
             const screenX = b.x - this.parent.cameraX;
             const screenY = b.y - this.parent.cameraY;
@@ -764,29 +793,48 @@ export class LightingRenderer {
         const startAngle = this.parent.player.rotation - coneAngleRad / 2;
         const endAngle = this.parent.player.rotation + coneAngleRad / 2;
 
-        const segments = this.parent.world!.getOcclusionSegments(
-            this.parent.player.x - coneDist, 
-            this.parent.player.y - coneDist, 
-            coneDist * 2, 
-            coneDist * 2
-        );
+        const visionId = 'player_vision';
+        const lastVisionPos = (this.parent.player as any)._lastVisionPos || {x: 0, y: 0, rot: 0};
+        const hasMoved = Math.abs(this.parent.player.x - lastVisionPos.x) > 1 || 
+                        Math.abs(this.parent.player.y - lastVisionPos.y) > 1 ||
+                        Math.abs(this.parent.player.rotation - lastVisionPos.rot) > 0.05;
 
-        const polygon = VisibilitySystem.calculateVisibility(
-            { x: this.parent.player.x, y: this.parent.player.y },
-            segments,
-            coneDist,
-            startAngle,
-            endAngle
-        );
-        
+        if (this.parent.world.getMeshVersion() !== this.meshVersion || hasMoved) {
+            if (!this.pendingRequests.has(visionId)) {
+                this.pendingRequests.set(visionId, true);
+                const segments = this.parent.world!.getOcclusionSegments(
+                    this.parent.player.x - coneDist, 
+                    this.parent.player.y - coneDist, 
+                    coneDist * 2, 
+                    coneDist * 2
+                );
+
+                const worker = this.workers[this.workerIndex];
+                this.workerIndex = (this.workerIndex + 1) % this.workers.length;
+                worker.postMessage({
+                    type: 'calculateVisibility',
+                    data: {
+                        id: visionId,
+                        origin: { x: this.parent.player.x, y: this.parent.player.y },
+                        segments,
+                        radius: coneDist,
+                        startAngle,
+                        endAngle
+                    }
+                });
+                (this.parent.player as any)._lastVisionPos = { x: this.parent.player.x, y: this.parent.player.y, rot: this.parent.player.rotation };
+            }
+        }
+
+        const polygon = this.lightPolygonCache.get(visionId);
         lctx.save();
-        if (polygon.length > 0) {
+        if (polygon && polygon.length > 0) {
             lctx.beginPath();
             lctx.moveTo(polygon[0].x - this.parent.cameraX, polygon[0].y - this.parent.cameraY);
             for (let i = 1; i < polygon.length; i++) {
                 lctx.lineTo(polygon[i].x - this.parent.cameraX, polygon[i].y - this.parent.cameraY);
             }
-            lctx.lineTo(playerScreenX, playerScreenY); // Return to player center
+            lctx.lineTo(playerScreenX, playerScreenY);
             lctx.closePath();
             lctx.clip();
         }
