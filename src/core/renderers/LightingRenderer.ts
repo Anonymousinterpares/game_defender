@@ -30,8 +30,11 @@ export class LightingRenderer {
     private maskCtx: CanvasRenderingContext2D;
     private sourceCanvas: HTMLCanvasElement;
     private sourceCtx: CanvasRenderingContext2D;
+    private tempCanvas: HTMLCanvasElement;
+    private tempCtx: CanvasRenderingContext2D;
     
     private shadowChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, version: string }> = new Map();
+    private silhouetteChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, version: number }> = new Map();
     private chunkSize: number = 512;
     private lightPolygonCache: Map<string, Point[]> = new Map();
     private meshVersion: number = 0;
@@ -56,6 +59,8 @@ export class LightingRenderer {
         this.maskCtx = this.maskCanvas.getContext('2d', { willReadFrequently: true })!;
         this.sourceCanvas = document.createElement('canvas');
         this.sourceCtx = this.sourceCanvas.getContext('2d', { willReadFrequently: true })!;
+        this.tempCanvas = document.createElement('canvas');
+        this.tempCtx = this.tempCanvas.getContext('2d')!;
 
         this.cloudCanvas = document.createElement('canvas');
         this.cloudCtx = this.cloudCanvas.getContext('2d')!;
@@ -144,6 +149,55 @@ export class LightingRenderer {
         this.renderLighting(ctx);
     }
 
+    private drawWorldSilhouette(targetCtx: CanvasRenderingContext2D, color: string | null, meshVersion: number, w: number, h: number): void {
+        const tctx = this.tempCtx;
+        tctx.clearRect(0, 0, w, h);
+        
+        const startGX = Math.floor(this.parent.cameraX / this.chunkSize);
+        const startGY = Math.floor(this.parent.cameraY / this.chunkSize);
+        const endGX = Math.floor((this.parent.cameraX + w) / this.chunkSize);
+        const endGY = Math.floor((this.parent.cameraY + h) / this.chunkSize);
+
+        for (let gy = startGY; gy <= endGY; gy++) {
+            for (let gx = startGX; gx <= endGX; gx++) {
+                const key = `${gx},${gy}`;
+                let chunk = this.silhouetteChunks.get(key);
+                if (!chunk) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = this.chunkSize;
+                    canvas.height = this.chunkSize;
+                    chunk = { canvas, ctx: canvas.getContext('2d')!, version: -1 };
+                    this.silhouetteChunks.set(key, chunk);
+                }
+                if (chunk.version !== meshVersion) {
+                    this.rebuildSilhouetteChunk(chunk, gx, gy);
+                    chunk.version = meshVersion;
+                }
+                tctx.drawImage(chunk.canvas, gx * this.chunkSize - this.parent.cameraX, gy * this.chunkSize - this.parent.cameraY);
+            }
+        }
+
+        if (color) {
+            tctx.globalCompositeOperation = 'source-in';
+            tctx.fillStyle = color;
+            tctx.fillRect(0, 0, w, h);
+            tctx.globalCompositeOperation = 'source-over';
+        }
+        
+        targetCtx.drawImage(this.tempCanvas, 0, 0);
+    }
+
+    private rebuildSilhouetteChunk(chunk: any, gx: number, gy: number): void {
+        const ctx = chunk.ctx;
+        ctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
+        const worldX = gx * this.chunkSize;
+        const worldY = gy * this.chunkSize;
+        
+        if (this.parent.world) {
+            this.parent.world.renderAsSilhouette(ctx, worldX, worldY, '#ffffff');
+        }
+    }
+
     private renderLighting(ctx: CanvasRenderingContext2D): void {
         const lightingEnabled = ConfigManager.getInstance().get<boolean>('Lighting', 'enabled');
         if (!lightingEnabled || !this.parent.world) return;
@@ -155,6 +209,7 @@ export class LightingRenderer {
             this.lightCanvas.width = w; this.lightCanvas.height = h;
             this.maskCanvas.width = w; this.maskCanvas.height = h;
             this.sourceCanvas.width = w; this.sourceCanvas.height = h;
+            this.tempCanvas.width = w; this.tempCanvas.height = h;
             this.fogCanvas.width = w; this.fogCanvas.height = h;
         }
 
@@ -175,10 +230,11 @@ export class LightingRenderer {
         // 3. ENTITY AMBIENT REVEAL
         lctx.save();
         lctx.globalCompositeOperation = 'screen'; 
-        lctx.translate(-this.parent.cameraX, -this.parent.cameraY);
         // Slightly warmer silhouette during day
         const silColor = isDaylight ? 'rgb(70, 65, 60)' : 'rgb(30, 35, 50)';
-        this.parent.world.renderAsSilhouette(lctx, this.parent.cameraX, this.parent.cameraY, silColor);
+        this.drawWorldSilhouette(lctx, silColor, worldMeshVersion, w, h);
+        
+        lctx.translate(-this.parent.cameraX, -this.parent.cameraY);
         if (this.parent.player) this.parent.player.renderAsSilhouette(lctx, silColor);
         this.parent.enemies.forEach(e => e.renderAsSilhouette(lctx, silColor));
         lctx.restore();
@@ -519,9 +575,9 @@ export class LightingRenderer {
         // We erase the footprint of the walls from the shadow mask
         mctx.save();
         mctx.globalCompositeOperation = 'destination-out';
+        this.drawWorldSilhouette(mctx, '#ffffff', worldVersion, w, h);
+        
         mctx.translate(-this.parent.cameraX, -this.parent.cameraY);
-        // Silhouette representing full 3D object height
-        this.parent.world!.renderAsSilhouette(mctx, this.parent.cameraX, this.parent.cameraY, '#ffffff');
         if (this.parent.player) this.parent.player.renderAsSilhouette(mctx, '#ffffff');
         this.parent.enemies.forEach(e => e.renderAsSilhouette(mctx, '#ffffff'));
         mctx.restore();
@@ -771,6 +827,7 @@ export class LightingRenderer {
 
     public clearCache(): void {
         this.shadowChunks.clear();
+        this.silhouetteChunks.clear();
         this.lightPolygonCache.clear();
     }
 }

@@ -252,6 +252,11 @@ export class World {
     const startRow = Math.floor(cameraY / this.tileSize);
     const endRow = startRow + Math.ceil(viewHeight / this.tileSize) + 1;
 
+    if (silhouette) {
+        ctx.save();
+        ctx.translate(-cameraX, -cameraY);
+    }
+
     for (let y = startRow; y <= endRow; y++) {
       if (y < 0 || y >= this.height) continue;
       for (let x = startCol; x <= endCol; x++) {
@@ -272,6 +277,10 @@ export class World {
             ctx.drawImage(cached, x * this.tileSize, y * this.tileSize - 8);
         }
       }
+    }
+
+    if (silhouette) {
+        ctx.restore();
     }
   }
 
