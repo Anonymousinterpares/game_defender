@@ -10,12 +10,12 @@ import { World } from '../core/World';
 import { PhysicsEngine } from '../core/PhysicsEngine';
 import { ConfigManager } from '../config/MasterConfig';
 import { Drop, DropType } from '../entities/Drop';
+import { ParticleSystem } from '../core/ParticleSystem';
 
 export interface CombatParent {
     enemies: Enemy[];
     player: Player | null;
     heatMap: HeatMap | null;
-    particles: any[];
     projectiles: Projectile[];
     drops: Drop[];
     coinsCollected: number;
@@ -77,7 +77,7 @@ export class CombatSystem {
                         for (let i = 0; i < count; i++) {
                             const angle = p.rotation + Math.PI + (Math.random() - 0.5);
                             const speed = 40 + Math.random() * 40;
-                            this.parent.particles.push(new MoltenMetalParticle(p.x, p.y, Math.cos(angle) * speed, Math.sin(angle) * speed));
+                            ParticleSystem.getInstance().spawnMoltenMetal(p.x, p.y, Math.cos(angle) * speed, Math.sin(angle) * speed);
                         }
                     }
                 }
@@ -113,10 +113,10 @@ export class CombatSystem {
         FloorDecalManager.getInstance().addScorchMark(x, y, radius);
         
         // 1. Initial Flash
-        this.parent.particles.push(new FlashParticle(x, y, radius * 2.5));
+        ParticleSystem.getInstance().spawnFlash(x, y, radius * 2.5);
         
         // 2. Shockwave
-        this.parent.particles.push(new ShockwaveParticle(x, y, radius * 1.8));
+        ParticleSystem.getInstance().spawnShockwave(x, y, radius * 1.8);
 
         // 3. Fireball
         const fireCount = 12 + Math.floor(Math.random() * 6);
@@ -124,9 +124,8 @@ export class CombatSystem {
             const angle = Math.random() * Math.PI * 2;
             const speed = 100 + Math.random() * 300;
             const life = 0.3 + Math.random() * 0.4;
-            const p = new Particle(x, y, '#fffbe6', Math.cos(angle) * speed, Math.sin(angle) * speed, life);
+            const p = ParticleSystem.getInstance().spawnParticle(x, y, '#fffbe6', Math.cos(angle) * speed, Math.sin(angle) * speed, life);
             p.isFlame = true;
-            this.parent.particles.push(p);
         }
 
         // 4. Lingering Smoke
@@ -136,8 +135,7 @@ export class CombatSystem {
             const speed = 40 + Math.random() * 80;
             const life = 1.0 + Math.random() * 1.5;
             const color = Math.random() < 0.5 ? '#333' : '#555';
-            const p = new Particle(x, y, color, Math.cos(angle) * speed, Math.sin(angle) * speed, life);
-            this.parent.particles.push(p);
+            ParticleSystem.getInstance().spawnParticle(x, y, color, Math.cos(angle) * speed, Math.sin(angle) * speed, life);
         }
         
         if (this.parent.heatMap) {
@@ -175,8 +173,7 @@ export class CombatSystem {
                     const angle = Math.random() * Math.PI * 2;
                     const dist = 64 + Math.random() * 96;
                     const speed = (dist / 0.75); 
-                    const p = new MoltenMetalParticle(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed);
-                    this.parent.particles.push(p);
+                    ParticleSystem.getInstance().spawnMoltenMetal(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed);
                 }
             }
         }
@@ -200,7 +197,7 @@ export class CombatSystem {
             const speed = 50 + Math.random() * 150;
             const vx = Math.cos(angle) * speed;
             const vy = Math.sin(angle) * speed;
-            this.parent.particles.push(new Particle(x, y, color, vx, vy, 0.3 + Math.random() * 0.4));
+            ParticleSystem.getInstance().spawnParticle(x, y, color, vx, vy, 0.3 + Math.random() * 0.4);
         }
     }
 }

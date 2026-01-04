@@ -154,7 +154,7 @@ export const MasterConfig: GameConfigSchema = {
   },
   TimeSystem: {
     realSecondsPerHour: { value: 120, type: 'number', description: 'Duration of one game hour (seconds)' },
-    startHour: { value: 22, type: 'number', description: 'Starting game hour (0-23)' },
+    startHour: { value: 6, type: 'number', description: 'Starting game hour (0-23)' },
     sunriseHour: { value: 6, type: 'number', description: 'Hour when sun starts rising' },
     sunsetHour: { value: 19, type: 'number', description: 'Hour when sun starts setting' },
     moonPhase: { value: 1.0, type: 'number', min: 0, max: 1, step: 0.01, description: 'Starting Moon Phase (0=Null, 1=Full)' },
@@ -164,7 +164,7 @@ export const MasterConfig: GameConfigSchema = {
       openDock: { value: 'KeyP', type: 'string', description: 'Open Dock/Shop' }
   },
   Weather: {
-    initialWeather: { value: 'cloudy', type: 'string', description: 'Initial weather type (clear, fog, rain, snow, cloudy, random)' },
+    initialWeather: { value: 'clear', type: 'string', description: 'Initial weather type (clear, fog, rain, snow, cloudy, random)' },
     transitionSpeed: { value: 0.05, type: 'number', min: 0.01, max: 1.0, step: 0.01, description: 'Speed of weather transitions' },
     windMinSpeed: { value: 0.5, type: 'number', min: 0, max: 10, step: 0.1, description: 'Minimum wind speed' },
     windMaxSpeed: { value: 5.0, type: 'number', min: 0, max: 20, step: 0.1, description: 'Maximum wind speed' }

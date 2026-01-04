@@ -8,13 +8,13 @@ import { LightManager } from '../LightManager';
 import { VisibilitySystem, Point } from '../VisibilitySystem';
 import { ConfigManager } from '../../config/MasterConfig';
 import { WeatherManager, WeatherType, CloudType } from '../WeatherManager';
+import { ParticleSystem } from '../ParticleSystem';
 
 export interface LightingParent {
     world: World | null;
     player: Player | null;
     enemies: Enemy[];
     projectiles: Projectile[];
-    particles: Entity[];
     cameraX: number;
     cameraY: number;
     isFiringBeam: boolean;

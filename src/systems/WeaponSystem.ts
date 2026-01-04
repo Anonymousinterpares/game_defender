@@ -6,7 +6,7 @@ import { Entity } from '../core/Entity';
 import { SoundManager } from '../core/SoundManager';
 import { World } from '../core/World';
 import { HeatMap, MaterialType } from '../core/HeatMap';
-import { Particle } from '../entities/Particle';
+import { ParticleSystem } from '../core/ParticleSystem';
 
 export interface WeaponParent {
     player: Player | null;
@@ -14,7 +14,6 @@ export interface WeaponParent {
     heatMap: HeatMap | null;
     enemies: Enemy[];
     projectiles: Projectile[];
-    particles: any[];
     weaponAmmo: Map<string, number>;
     unlockedWeapons: Set<string>;
     weaponReloading: Map<string, boolean>;
@@ -276,7 +275,7 @@ export class WeaponSystem {
             const vx = Math.cos(pAngle) * speed + player.vx * 0.5;
             const vy = Math.sin(pAngle) * speed + player.vy * 0.5;
             
-            const p = new Particle(
+            const p = ParticleSystem.getInstance().spawnParticle(
                 player.x + Math.cos(player.rotation) * 15,
                 player.y + Math.sin(player.rotation) * 15,
                 Math.random() < 0.3 ? '#ffcc00' : '#ff4400',
@@ -284,7 +283,6 @@ export class WeaponSystem {
                 0.4 + Math.random() * 0.2
             );
             p.isFlame = true;
-            this.parent.particles.push(p);
         }
     }
 

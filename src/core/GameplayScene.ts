@@ -21,6 +21,7 @@ import { WeaponSystem, WeaponParent } from '../systems/WeaponSystem';
 import { CombatSystem, CombatParent } from '../systems/CombatSystem';
 import { LightingRenderer, LightingParent } from './renderers/LightingRenderer';
 import { WeatherManager, WeatherType } from './WeatherManager';
+import { ParticleSystem } from './ParticleSystem';
 
 export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatParent, LightingParent {
   public world: World | null = null;
@@ -36,7 +37,6 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
   public enemies: Enemy[] = [];
   public drops: Drop[] = [];
   public projectiles: Projectile[] = [];
-  public particles: Entity[] = [];
   
   public cameraX: number = 0;
   public cameraY: number = 0;
@@ -240,24 +240,9 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.drops.forEach(d => d.update(dt));
     
     this.projectiles = this.projectiles.filter(p => { p.update(dt); return p.active; });
-    this.particles = this.particles.filter(p => { 
-        p.update(dt, this.world); 
-        if (p.active && p instanceof MoltenMetalParticle && (p as any).z < -2) {
-            const targets = [this.player, ...this.enemies];
-            for (const t of targets) {
-                if (t && t.active) {
-                    const dx = t.x - p.x;
-                    const dy = t.y - p.y;
-                    if (dx*dx + dy*dy < (t.radius + p.radius)**2) {
-                        t.takeDamage((p as any).damage);
-                        p.active = false;
-                        break;
-                    }
-                }
-            }
-        }
-        return p.active; 
-    });
+    
+    ParticleSystem.getInstance().update(dt, this.world, this.player, this.enemies);
+
     this.enemies = this.enemies.filter(e => { if(!e.active) this.physics.removeBody(e); return e.active; });
     this.drops = this.drops.filter(d => d.active);
 
@@ -315,7 +300,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
   private updateProjectileLights(): void {
       const lm = LightManager.getInstance();
       lm.clearConstantLights();
-      this.particles.forEach((p) => {
+      ParticleSystem.getInstance().getParticles().forEach((p) => {
           if (p instanceof MoltenMetalParticle && p.active) {
               const intensity = (p as any).z < 0 ? 0.8 : 0.6 * (p.life / 7.0);
               if (intensity > 0.1) {
@@ -377,7 +362,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
         if (Math.abs(e.x - this.player!.x) < renderDist && Math.abs(e.y - this.player!.y) < renderDist) e.render(ctx);
     });
     this.projectiles.forEach(p => p.render(ctx));
-    this.particles.forEach(p => p.render(ctx));
+    ParticleSystem.getInstance().render(ctx);
     if (this.isFiringBeam && this.player) {
         const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
         ctx.beginPath(); ctx.moveTo(this.player.x, this.player.y); ctx.lineTo(this.beamEndPos.x, this.beamEndPos.y);

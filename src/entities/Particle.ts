@@ -10,6 +10,14 @@ export class Particle extends Entity {
 
     constructor(x: number, y: number, color: string, vx: number, vy: number, life: number = 0.5) {
         super(x, y);
+        this.reset(x, y, color, vx, vy, life);
+    }
+
+    public reset(x: number, y: number, color: string, vx: number, vy: number, life: number = 0.5): void {
+        this.x = x;
+        this.y = y;
+        this.prevX = x;
+        this.prevY = y;
         this.vx = vx;
         this.vy = vy;
         this.color = color;
@@ -17,6 +25,9 @@ export class Particle extends Entity {
         this.maxLife = life;
         this.radius = 1 + Math.random() * 2;
         this.startRadius = this.radius;
+        this.active = true;
+        this.alpha = 1.0;
+        this.isFlame = false;
     }
 
     update(dt: number, world?: any): void {
@@ -88,11 +99,22 @@ export class ShockwaveParticle extends Entity {
     public id: string = Math.random().toString(36).substr(2, 9);
     private life: number = 0.4;
     private maxLife: number = 0.4;
-    private maxRadius: number;
+    private maxRadius: number = 0;
 
     constructor(x: number, y: number, radius: number) {
         super(x, y);
+        this.reset(x, y, radius);
+    }
+
+    public reset(x: number, y: number, radius: number): void {
+        this.x = x;
+        this.y = y;
+        this.prevX = x;
+        this.prevY = y;
         this.maxRadius = radius;
+        this.life = 0.4;
+        this.maxLife = 0.4;
+        this.active = true;
     }
 
     update(dt: number): void {
@@ -126,7 +148,18 @@ export class FlashParticle extends Entity {
 
     constructor(x: number, y: number, radius: number) {
         super(x, y);
+        this.reset(x, y, radius);
+    }
+
+    public reset(x: number, y: number, radius: number): void {
+        this.x = x;
+        this.y = y;
+        this.prevX = x;
+        this.prevY = y;
         this.radius = radius;
+        this.life = 0.15;
+        this.maxLife = 0.15;
+        this.active = true;
     }
 
     update(dt: number): void {
@@ -166,7 +199,21 @@ export class MoltenMetalParticle extends Particle {
     constructor(x: number, y: number, vx: number, vy: number) {
         // High life to ensure they stay on ground for a bit
         super(x, y, '#ffff00', vx, vy, 5.0 + Math.random() * 2.0);
-        this.radius = 4 + Math.random() * 2;
+    }
+
+    public reset(x: number, y: number, colorOrVx: string | number, vxOrVy: number, vyOrLife?: number, life?: number): void {
+        if (typeof colorOrVx === 'string') {
+            // Called with base Particle signature (not expected but for type safety)
+            super.reset(x, y, colorOrVx, vxOrVy, vyOrLife || 0, life);
+        } else {
+            // Called with MoltenMetal signature: x, y, vx, vy
+            const actualLife = 5.0 + Math.random() * 2.0;
+            super.reset(x, y, '#ffff00', colorOrVx, vxOrVy, actualLife);
+            this.radius = 4 + Math.random() * 2;
+            this.vz = -60 - Math.random() * 40;
+            this.z = 0;
+            this.prevZ = 0;
+        }
     }
 
     public get interpolatedZ(): number {
