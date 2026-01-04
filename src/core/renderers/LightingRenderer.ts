@@ -703,6 +703,9 @@ export class LightingRenderer {
         lctx.save();
         lctx.globalCompositeOperation = 'screen';
         
+        let shadowLightsCount = 0;
+        const MAX_SHADOW_LIGHTS = 8; // Primary bottleneck fix: don't calculate shadows for too many lights
+
         lights.forEach(light => {
             const screenX = light.x - this.parent.cameraX;
             const screenY = light.y - this.parent.cameraY;
@@ -711,7 +714,8 @@ export class LightingRenderer {
             lctx.save();
             lctx.globalAlpha = light.intensity * (1.0 - ambientIntensity * 0.5);
 
-            if (light.castsShadows) {
+            if (light.castsShadows && shadowLightsCount < MAX_SHADOW_LIGHTS) {
+                shadowLightsCount++;
                 const polygon = this.lightPolygonCache.get(light.id);
                 const lastPos = (light as any)._lastShadowPos || {x: 0, y: 0};
                 const hasMoved = Math.abs(light.x - lastPos.x) > 2 || Math.abs(light.y - lastPos.y) > 2;
@@ -722,8 +726,11 @@ export class LightingRenderer {
                         const worker = this.workers[this.workerIndex];
                         this.workerIndex = (this.workerIndex + 1) % this.workers.length;
                         
+                        // OPTIMIZATION: Reuse global segments if light is large, otherwise get local.
+                        // Large lights querying world segments is the biggest CPU hitter here.
                         let localSegments = globalSegments;
-                        if (light.radius < 800) { 
+                        if (light.radius < 600) { 
+                            // Only query world for small lights to reduce collision checks
                             localSegments = this.parent.world!.getOcclusionSegments(
                                 light.x - light.radius, light.y - light.radius, 
                                 light.radius * 2, light.radius * 2
@@ -752,6 +759,9 @@ export class LightingRenderer {
                     lctx.closePath();
                     lctx.clip();
                 }
+            } else if (light.castsShadows) {
+                // If we hit the limit, downgrade the light to a non-shadow caster 
+                // rather than not rendering it at all.
             }
             
             const grad = lctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, light.radius);

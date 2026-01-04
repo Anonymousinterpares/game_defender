@@ -109,6 +109,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
     this.world.setHeatMap(this.heatMap);
     this.physics.setWorld(this.world);
+    ParticleSystem.getInstance().clear();
     ParticleSystem.getInstance().initWorker(this.world);
     
     const sm = SoundManager.getInstance();
@@ -375,7 +376,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.projectiles.forEach(p => p.render(ctx));
     
     PerfMonitor.getInstance().begin('render_particles');
-    ParticleSystem.getInstance().render(ctx);
+    ParticleSystem.getInstance().render(ctx, this.cameraX, this.cameraY);
     PerfMonitor.getInstance().end('render_particles');
 
     if (this.isFiringBeam && this.player) {
