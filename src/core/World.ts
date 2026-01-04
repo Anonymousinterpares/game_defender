@@ -259,7 +259,8 @@ export class World {
     const currentSnow = WeatherManager.getInstance().getSnowAccumulation();
     if (Math.abs(currentSnow - this.lastSnowAccumulation) > 0.05) {
         this.tileCanvasCache.clear();
-        this.backgroundCanvas = null; // Force rebuild
+        this.backgroundCanvas = null; 
+        this.wallChunks.forEach(c => c.dirty = true);
         this.lastSnowAccumulation = currentSnow;
     }
 
@@ -267,46 +268,95 @@ export class World {
         if (!this.backgroundCanvas) {
             this.initBackground();
         }
-        // Draw pre-rendered background
-        ctx.drawImage(this.backgroundCanvas!, 0, 0);
+        
+        ctx.drawImage(
+            this.backgroundCanvas!, 
+            cameraX, cameraY, viewWidth, viewHeight,
+            cameraX, cameraY, viewWidth, viewHeight 
+        );
     }
 
-    // 2. Render Walls
-    const startCol = Math.floor(cameraX / this.tileSize);
-    const endCol = startCol + Math.ceil(viewWidth / this.tileSize) + 1;
-    const startRow = Math.floor(cameraY / this.tileSize);
-    const endRow = startRow + Math.ceil(viewHeight / this.tileSize) + 1;
+    // 2. Render Walls via Chunks
+    const startGX = Math.floor(cameraX / this.chunkSize);
+    const endGX = Math.floor((cameraX + viewWidth) / this.chunkSize);
+    const startGY = Math.floor(cameraY / this.chunkSize);
+    const endGY = Math.floor((cameraY + viewHeight) / this.chunkSize);
 
-    if (silhouette) {
-        ctx.save();
-        ctx.translate(-cameraX, -cameraY);
-    }
+    for (let gy = startGY; gy <= endGY; gy++) {
+        for (let gx = startGX; gx <= endGX; gx++) {
+            if (gx < 0 || gx >= Math.ceil(this.getWidthPixels() / this.chunkSize) ||
+                gy < 0 || gy >= Math.ceil(this.getHeightPixels() / this.chunkSize)) continue;
 
-    for (let y = startRow; y <= endRow; y++) {
-      if (y < 0 || y >= this.height) continue;
-      for (let x = startCol; x <= endCol; x++) {
-        if (x < 0 || x >= this.width) continue;
-
-        const tileType = this.tiles[y][x];
-        if (tileType === MaterialType.NONE) continue;
-
-        if (silhouette) {
-            ctx.fillStyle = silColor || '#fff';
-            ctx.fillRect(x * this.tileSize, y * this.tileSize - 8, this.tileSize, this.tileSize + 8);
-        } else {
-            const cacheKey = `${x},${y}`;
-            let cached = this.tileCanvasCache.get(cacheKey);
-            if (!cached) {
-                cached = this.renderTileToCache(x, y, tileType);
+            const key = `${gx},${gy}`;
+            let chunk = this.wallChunks.get(key);
+            
+            if (!chunk) {
+                const canvas = document.createElement('canvas');
+                canvas.width = this.chunkSize;
+                canvas.height = this.chunkSize + 32;
+                chunk = { canvas, ctx: canvas.getContext('2d')!, dirty: true };
+                this.wallChunks.set(key, chunk);
             }
-            ctx.drawImage(cached, x * this.tileSize, y * this.tileSize - 8);
-        }
-      }
-    }
 
-    if (silhouette) {
-        ctx.restore();
+            if (chunk.dirty) {
+                this.rebuildWallChunk(chunk, gx, gy);
+                chunk.dirty = false;
+            }
+
+            if (silhouette) {
+                // When rendering silhouette for shadows, we must draw at absolute world coords
+                // to match the shadow volume coordinate space.
+                ctx.save();
+                if (silColor) {
+                    // Create a temporary solid mask if needed, but for shadows 
+                    // we usually just need the alpha of the chunk.
+                    ctx.fillStyle = silColor;
+                    // We draw the chunk but only use its alpha
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = chunk.canvas.width;
+                    tempCanvas.height = chunk.canvas.height;
+                    const tctx = tempCanvas.getContext('2d')!;
+                    tctx.drawImage(chunk.canvas, 0, 0);
+                    tctx.globalCompositeOperation = 'source-in';
+                    tctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                    ctx.drawImage(tempCanvas, gx * this.chunkSize, gy * this.chunkSize - 8);
+                } else {
+                    ctx.drawImage(chunk.canvas, gx * this.chunkSize, gy * this.chunkSize - 8);
+                }
+                ctx.restore();
+            } else {
+                ctx.drawImage(chunk.canvas, gx * this.chunkSize, gy * this.chunkSize - 8);
+            }
+        }
     }
+  }
+
+  private rebuildWallChunk(chunk: any, gx: number, gy: number): void {
+      const ctx = chunk.ctx;
+      ctx.clearRect(0, 0, this.chunkSize, this.chunkSize + 32);
+      
+      const startCol = Math.floor((gx * this.chunkSize) / this.tileSize);
+      const endCol = Math.ceil(((gx + 1) * this.chunkSize) / this.tileSize);
+      const startRow = Math.floor((gy * this.chunkSize) / this.tileSize);
+      const endRow = Math.ceil(((gy + 1) * this.chunkSize) / this.tileSize);
+
+      for (let y = startRow; y < endRow; y++) {
+          if (y < 0 || y >= this.height) continue;
+          for (let x = startCol; x < endCol; x++) {
+              if (x < 0 || x >= this.width) continue;
+
+              const tileType = this.tiles[y][x];
+              if (tileType === MaterialType.NONE) continue;
+
+              const cacheKey = `${x},${y}`;
+              let cached = this.tileCanvasCache.get(cacheKey);
+              if (!cached) {
+                  cached = this.renderTileToCache(x, y, tileType);
+              }
+              // Draw relative to chunk origin
+              ctx.drawImage(cached, (x * this.tileSize) - (gx * this.chunkSize), (y * this.tileSize) - (gy * this.chunkSize));
+          }
+      }
   }
 
   public isWall(x: number, y: number): boolean {

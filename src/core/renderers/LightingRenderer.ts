@@ -561,24 +561,34 @@ export class LightingRenderer {
 
     private renderDirectionalLight(targetCtx: CanvasRenderingContext2D, source: any, type: string, worldVersion: number, w: number, h: number): void {
         const sctx = this.sourceCtx;
+        const mctx = this.maskCtx;
+
+        sctx.clearRect(0, 0, w, h);
+        mctx.clearRect(0, 0, w, h);
+        
+        sctx.save();
+        mctx.save();
+        
+        // Match lctx scale (low-res lightmap)
+        sctx.scale(this.resolutionScale, this.resolutionScale);
+        mctx.scale(this.resolutionScale, this.resolutionScale);
+        
+        // Align to World Space
+        sctx.translate(-this.parent.cameraX, -this.parent.cameraY);
+        mctx.translate(-this.parent.cameraX, -this.parent.cameraY);
+
         sctx.globalCompositeOperation = 'source-over';
         sctx.fillStyle = source.color;
-        sctx.fillRect(0, 0, w, h);
-
-        const mctx = this.maskCtx;
-        mctx.globalCompositeOperation = 'source-over';
-        mctx.clearRect(0, 0, w, h);
-        mctx.fillStyle = '#000000'; // Solid mask for unification
+        sctx.fillRect(this.parent.cameraX, this.parent.cameraY, w / this.resolutionScale, h / this.resolutionScale);
 
         const angle = Math.atan2(source.direction.y, source.direction.x);
         const bakeVersion = `${worldVersion}_${Math.round(angle * 100)}_${type}`;
-
         const startGX = Math.floor(this.parent.cameraX / this.chunkSize);
+        const endGX = Math.floor((this.parent.cameraX + (w / this.resolutionScale)) / this.chunkSize);
         const startGY = Math.floor(this.parent.cameraY / this.chunkSize);
-        const endGX = Math.floor((this.parent.cameraX + w) / this.chunkSize);
-        const endGY = Math.floor((this.parent.cameraY + h) / this.chunkSize);
+        const endGY = Math.floor((this.parent.cameraY + (h / this.resolutionScale)) / this.chunkSize);
 
-        // Draw solid shadows into mask
+        mctx.fillStyle = '#000000';
         for (let gy = startGY; gy <= endGY; gy++) {
             for (let gx = startGX; gx <= endGX; gx++) {
                 const key = `${gx},${gy}_${type}`;
@@ -594,41 +604,33 @@ export class LightingRenderer {
                     this.rebuildShadowChunk(chunk, gx, gy, source);
                     chunk.version = bakeVersion;
                 }
-                mctx.drawImage(chunk.canvas, gx * this.chunkSize - this.parent.cameraX, gy * this.chunkSize - this.parent.cameraY);
+                mctx.drawImage(chunk.canvas, gx * this.chunkSize, gy * this.chunkSize);
             }
         }
 
-        // Entities
-        const entities = [];
-        if (this.parent.player) {
-            entities.push(this.parent.player);
-            entities.push(...this.parent.player.segments);
-        }
+        const entities: Entity[] = [];
+        if (this.parent.player) { entities.push(this.parent.player); entities.push(...this.parent.player.segments); }
         entities.push(...this.parent.enemies);
-        entities.forEach(e => {
-            if (e.active) this.renderEntityShadow(mctx, e, source.direction, source.shadowLen);
-        });
+        entities.forEach(e => { if (e.active) this.renderEntityShadow(mctx, e, source.direction, source.shadowLen); });
 
-        // REVEAL OBJECTS (The critical fix for "Shadows on top")
-        // We erase the footprint of the walls from the shadow mask
-        mctx.save();
+        // Erase object footprints from shadow mask
         mctx.globalCompositeOperation = 'destination-out';
-        this.drawWorldSilhouette(mctx, '#ffffff', worldVersion, w, h);
-        
-        mctx.translate(-this.parent.cameraX, -this.parent.cameraY);
+        if (this.parent.world) this.parent.world.renderAsSilhouette(mctx, this.parent.cameraX, this.parent.cameraY, '#ffffff');
         if (this.parent.player) this.parent.player.renderAsSilhouette(mctx, '#ffffff');
         this.parent.enemies.forEach(e => e.renderAsSilhouette(mctx, '#ffffff'));
-        mctx.restore();
 
-        // Apply mask to light source
+        mctx.restore();
+        sctx.restore();
+
+        sctx.save();
         sctx.globalCompositeOperation = 'destination-out';
         sctx.drawImage(this.maskCanvas, 0, 0);
+        sctx.restore();
 
-        // Add to main map
         targetCtx.save();
         targetCtx.globalCompositeOperation = 'screen';
         targetCtx.globalAlpha = source.intensity;
-        targetCtx.drawImage(this.sourceCanvas, 0, 0);
+        targetCtx.drawImage(this.sourceCanvas, 0, 0, w / this.resolutionScale, h / this.resolutionScale);
         targetCtx.restore();
     }
 
@@ -668,12 +670,11 @@ export class LightingRenderer {
     }
 
     private renderEntityShadow(ctx: CanvasRenderingContext2D, e: Entity, dir: {x: number, y: number}, len: number): void {
-        const ex = e.x - this.parent.cameraX;
-        const ey = e.y - this.parent.cameraY;
+        const ex = e.x;
+        const ey = e.y;
         const r = e.radius;
         const angle = Math.atan2(dir.y, dir.x);
         
-        // Entity shadow anchored to center
         const t1x = ex + Math.cos(angle - Math.PI/2) * r;
         const t1y = ey + Math.sin(angle - Math.PI/2) * r;
         const t2x = ex + Math.cos(angle + Math.PI/2) * r;
