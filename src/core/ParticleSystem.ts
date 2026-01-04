@@ -360,20 +360,22 @@ export class ParticleSystem {
         const alpha = (Entity as any).interpolationAlpha || 0;
         const w = ctx.canvas.width;
         const h = ctx.canvas.height;
-        const margin = 100; // Render slightly outside screen for safety
+        const margin = 100;
 
         let currentAlpha = 1.0;
         let currentGCO = 'source-over';
         ctx.globalAlpha = 1.0;
         ctx.globalCompositeOperation = 'source-over';
         
+        // Batch for standard particles
+        const batches: Map<string, { x: number, y: number, r: number, a: number }[]> = new Map();
+
         for (let i = 0; i < MAX_PARTICLES; i++) {
             if (!(this.flags[i] & FLAG_ACTIVE)) continue;
 
             const ix = this.prevX[i] + (this.x[i] - this.prevX[i]) * alpha;
             const iy = this.prevY[i] + (this.y[i] - this.prevY[i]) * alpha;
             
-            // 1. Frustum Culling: Skip particles outside camera view
             const screenX = ix - camX;
             const screenY = iy - camY;
             if (screenX < -margin || screenX > w + margin || screenY < -margin || screenY > h + margin) {
@@ -386,12 +388,11 @@ export class ParticleSystem {
             const lifeRatio = this.life[i] / this.maxLife[i];
 
             if (pType === ParticleType.STANDARD) {
-                const targetAlpha = Math.max(0, lifeRatio);
-                if (Math.abs(currentAlpha - targetAlpha) > 0.01) {
-                    ctx.globalAlpha = currentAlpha = targetAlpha;
-                }
-
                 if (this.flags[i] & FLAG_IS_FLAME) {
+                    const targetAlpha = Math.max(0, lifeRatio);
+                    if (Math.abs(currentAlpha - targetAlpha) > 0.01) {
+                        ctx.globalAlpha = currentAlpha = targetAlpha;
+                    }
                     const targetGCO = lifeRatio > 0.4 ? 'screen' : 'source-over';
                     if (currentGCO !== targetGCO) {
                         ctx.globalCompositeOperation = currentGCO = targetGCO;
@@ -400,23 +401,22 @@ export class ParticleSystem {
                     const sprite = this.spriteCache.get(`flame_${colorStr}`);
                     if (sprite) {
                         const r = this.radius[i];
-                        // Draw at absolute ix, iy because context is already translated
                         ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
                     }
                 } else {
-                    if (currentGCO !== 'source-over') {
-                        ctx.globalCompositeOperation = currentGCO = 'source-over';
+                    // Standard solid particles - add to batch
+                    const targetAlpha = Math.max(0, lifeRatio);
+                    let list = batches.get(colorStr);
+                    if (!list) {
+                        list = [];
+                        batches.set(colorStr, list);
                     }
-                    ctx.fillStyle = colorStr;
-                    ctx.beginPath();
-                    ctx.arc(ix, iy, this.radius[i], 0, Math.PI * 2);
-                    ctx.fill();
+                    list.push({ x: ix, y: iy, r: this.radius[i], a: targetAlpha });
                 }
             } 
             else if (pType === ParticleType.SHOCKWAVE) {
                 const ratio = 1 - lifeRatio;
                 const currentRadius = this.radius[i] * Math.pow(ratio, 0.5);
-                
                 const targetAlpha = Math.max(0, 1 - ratio);
                 if (Math.abs(currentAlpha - targetAlpha) > 0.01) {
                     ctx.globalAlpha = currentAlpha = targetAlpha;
@@ -445,7 +445,7 @@ export class ParticleSystem {
                 }
             }
             else if (pType === ParticleType.MOLTEN) {
-                const ry = iy + iz; // Use absolute iy
+                const ry = iy + iz;
                 if (currentGCO !== 'screen') {
                     ctx.globalCompositeOperation = currentGCO = 'screen';
                 }
@@ -460,7 +460,6 @@ export class ParticleSystem {
                     ctx.drawImage(sprite, ix - glowRadius, ry - glowRadius, glowRadius * 2, glowRadius * 2);
                 }
                 
-                // Small solid core
                 if (currentAlpha !== 1.0) {
                     ctx.globalAlpha = currentAlpha = 1.0;
                 }
@@ -470,6 +469,28 @@ export class ParticleSystem {
                 ctx.fill();
             }
         }
+
+        // Draw Batches
+        if (currentGCO !== 'source-over') {
+            ctx.globalCompositeOperation = 'source-over';
+        }
+        
+        batches.forEach((list, color) => {
+            ctx.fillStyle = color;
+            // Further optimization: group by alpha to reduce state changes
+            // For simplicity and since alpha is life-based (high variance), 
+            // we'll just draw them and accept the alpha state changes for now, 
+            // OR use a fixed alpha if close.
+            list.forEach(p => {
+                if (Math.abs(currentAlpha - p.a) > 0.1) {
+                    ctx.globalAlpha = currentAlpha = p.a;
+                }
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        });
+
         ctx.globalAlpha = 1.0;
         ctx.globalCompositeOperation = 'source-over';
     }

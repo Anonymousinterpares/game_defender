@@ -726,15 +726,18 @@ export class LightingRenderer {
                         const worker = this.workers[this.workerIndex];
                         this.workerIndex = (this.workerIndex + 1) % this.workers.length;
                         
-                        // OPTIMIZATION: Reuse global segments if light is large, otherwise get local.
-                        // Large lights querying world segments is the biggest CPU hitter here.
-                        let localSegments = globalSegments;
-                        if (light.radius < 600) { 
-                            // Only query world for small lights to reduce collision checks
-                            localSegments = this.parent.world!.getOcclusionSegments(
-                                light.x - light.radius, light.y - light.radius, 
-                                light.radius * 2, light.radius * 2
-                            );
+                        // Cache and reuse segments for this light
+                        let cachedSegs = (light as any)._cachedSegments;
+                        if (meshVersion !== this.meshVersion || !cachedSegs || hasMoved) {
+                            if (light.radius < 600) { 
+                                cachedSegs = this.parent.world!.getOcclusionSegments(
+                                    light.x - light.radius, light.y - light.radius, 
+                                    light.radius * 2, light.radius * 2
+                                );
+                            } else {
+                                cachedSegs = globalSegments;
+                            }
+                            (light as any)._cachedSegments = cachedSegs;
                         }
 
                         worker.postMessage({
@@ -742,7 +745,7 @@ export class LightingRenderer {
                             data: {
                                 id: light.id,
                                 origin: { x: light.x, y: light.y },
-                                segments: localSegments,
+                                segments: cachedSegs,
                                 radius: light.radius
                             }
                         });

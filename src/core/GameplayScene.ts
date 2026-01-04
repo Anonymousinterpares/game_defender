@@ -24,6 +24,7 @@ import { WeatherManager, WeatherType } from './WeatherManager';
 import { ParticleSystem } from './ParticleSystem';
 import { PerfMonitor } from '../utils/PerfMonitor';
 import { BenchmarkSystem } from '../utils/BenchmarkSystem';
+import { Quadtree, Rect } from '../utils/Quadtree';
 
 export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatParent, LightingParent {
   public world: World | null = null;
@@ -36,6 +37,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
   protected lightingRenderer: LightingRenderer;
   protected benchmark: BenchmarkSystem;
   protected inputManager: InputManager;
+  protected spatialGrid: Quadtree<Entity>;
   
   public entities: Entity[] = [];
   public enemies: Enemy[] = [];
@@ -86,6 +88,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.combatSystem = new CombatSystem(this);
     this.lightingRenderer = new LightingRenderer(this);
     this.benchmark = new BenchmarkSystem(this);
+    this.spatialGrid = new Quadtree<Entity>({ x: 0, y: 0, w: 2000, h: 2000 });
   }
 
   public setLastShotTime(time: number): void {
@@ -106,6 +109,12 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
 
   onEnter(): void {
     this.world = new World();
+    this.spatialGrid = new Quadtree<Entity>({ 
+        x: 0, 
+        y: 0, 
+        w: this.world.getWidthPixels(), 
+        h: this.world.getHeightPixels() 
+    });
     this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
     this.world.setHeatMap(this.heatMap);
     this.physics.setWorld(this.world);
@@ -194,6 +203,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.benchmark.update(dt);
     WorldClock.getInstance().update(dt);
     LightManager.getInstance().update(dt);
+    FloorDecalManager.getInstance().update(dt);
     this.lightUpdateCounter++;
     
     this.hud.update(dt);
@@ -295,6 +305,12 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
 
     if (this.radar && this.player) this.radar.update(dt);
 
+    // Update Spatial Grid for Rendering
+    this.spatialGrid.clear();
+    if (this.player) this.spatialGrid.insert(this.player);
+    this.enemies.forEach(e => this.spatialGrid.insert(e));
+    this.projectiles.forEach(p => this.spatialGrid.insert(p));
+
     const timeState = WorldClock.getInstance().getTimeState();
     const useFog = ConfigManager.getInstance().get<boolean>('Visuals', 'fogOfWar');
     if (timeState.sun.intensity < 0.8 || useFog) {
@@ -365,15 +381,18 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     ctx.save();
     ctx.translate(-this.cameraX, -this.cameraY);
     this.world.render(ctx, this.cameraX, this.cameraY);
-    FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY);
+    FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY, this.world!.getWidthPixels(), this.world!.getHeightPixels());
     if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY);
     this.drops.forEach(d => d.render(ctx));
-    this.player.render(ctx);
-    const renderDist = ConfigManager.getInstance().get<number>('World', 'renderDistance') * ConfigManager.getInstance().get<number>('World', 'tileSize');
-    this.enemies.forEach(e => {
-        if (Math.abs(e.x - this.player!.x) < renderDist && Math.abs(e.y - this.player!.y) < renderDist) e.render(ctx);
+    
+    // Efficiently render visible entities using Spatial Grid
+    const viewport: Rect = { x: this.cameraX, y: this.cameraY, w: window.innerWidth, h: window.innerHeight };
+    const visibleEntities = this.spatialGrid.retrieve(viewport);
+    
+    visibleEntities.forEach(e => {
+        // We still check for Player specifically if needed, but here we just render all visible
+        e.render(ctx);
     });
-    this.projectiles.forEach(p => p.render(ctx));
     
     PerfMonitor.getInstance().begin('render_particles');
     ParticleSystem.getInstance().render(ctx, this.cameraX, this.cameraY);

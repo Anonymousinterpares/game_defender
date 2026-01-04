@@ -16,6 +16,10 @@ export class FloorDecalManager {
     private static instance: FloorDecalManager;
     private decals: Decal[] = [];
     private maxDecals: number = 800;
+    private bufferCanvas: HTMLCanvasElement | null = null;
+    private bufferCtx: CanvasRenderingContext2D | null = null;
+    private needsRedraw: boolean = true;
+    private lastWorldSize: { w: number, h: number } = { w: 0, h: 0 };
 
     private constructor() {}
 
@@ -24,6 +28,15 @@ export class FloorDecalManager {
             FloorDecalManager.instance = new FloorDecalManager();
         }
         return FloorDecalManager.instance;
+    }
+
+    private initBuffer(w: number, h: number): void {
+        this.bufferCanvas = document.createElement('canvas');
+        this.bufferCanvas.width = w;
+        this.bufferCanvas.height = h;
+        this.bufferCtx = this.bufferCanvas.getContext('2d');
+        this.lastWorldSize = { w, h };
+        this.needsRedraw = true;
     }
 
     // A simple seeded PRNG to ensure decals look the same every frame
@@ -49,6 +62,7 @@ export class FloorDecalManager {
         if (this.decals.length > this.maxDecals) {
             this.decals.shift();
         }
+        this.needsRedraw = true;
     }
 
     public addCooledMetalMark(x: number, y: number, radius: number): void {
@@ -66,9 +80,22 @@ export class FloorDecalManager {
         if (this.decals.length > this.maxDecals) {
             this.decals.shift();
         }
+        this.needsRedraw = true;
     }
 
-    public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
+    public update(dt: number): void {
+        const prevCount = this.decals.length;
+        this.decals = this.decals.filter(d => {
+            if (d.ttl !== undefined) {
+                d.ttl -= dt;
+                return d.ttl > 0;
+            }
+            return true;
+        });
+        if (this.decals.length !== prevCount) this.needsRedraw = true;
+    }
+
+    public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, worldW: number, worldH: number): void {
         const viewW = ctx.canvas.width;
         const viewH = ctx.canvas.height;
         const weather = WeatherManager.getInstance().getWeatherState();
@@ -86,30 +113,30 @@ export class FloorDecalManager {
                 seed: Math.random() * 10000,
                 ttl: 10 + Math.random() * 20
             });
+            this.needsRedraw = true;
         }
 
-        // Filter out dead decals
-        this.decals = this.decals.filter(d => {
-            if (d.ttl !== undefined) {
-                d.ttl -= 0.016;
-                return d.ttl > 0;
-            }
-            return true;
-        });
+        // Buffering Logic
+        if (!this.bufferCanvas || worldW !== this.lastWorldSize.w || worldH !== this.lastWorldSize.h) {
+            this.initBuffer(worldW, worldH);
+        }
 
-        this.decals.forEach(d => {
-            // Culling (Note: cameraX/Y translation is already applied to ctx in GameplayScene)
-            if (d.x + d.radius < cameraX || d.x - d.radius > cameraX + viewW ||
-                d.y + d.radius < cameraY || d.y - d.radius > cameraY + viewH) return;
+        if (this.needsRedraw && this.bufferCtx) {
+            this.bufferCtx.clearRect(0, 0, worldW, worldH);
+            this.decals.forEach(d => {
+                if (d.type === 'scorch') {
+                    this.renderRealisticScorch(this.bufferCtx!, d);
+                } else if (d.type === 'metal') {
+                    this.renderMetalDecal(this.bufferCtx!, d);
+                } else if (d.type === 'puddle') {
+                    this.renderPuddle(this.bufferCtx!, d);
+                }
+            });
+            this.needsRedraw = false;
+        }
 
-            if (d.type === 'scorch') {
-                this.renderRealisticScorch(ctx, d);
-            } else if (d.type === 'metal') {
-                this.renderMetalDecal(ctx, d);
-            } else if (d.type === 'puddle') {
-                this.renderPuddle(ctx, d);
-            }
-        });
+        // Draw the cached buffer
+        ctx.drawImage(this.bufferCanvas!, 0, 0);
     }
 
     private renderPuddle(ctx: CanvasRenderingContext2D, d: Decal): void {
