@@ -124,8 +124,8 @@ export class CombatSystem {
             const angle = Math.random() * Math.PI * 2;
             const speed = 100 + Math.random() * 300;
             const life = 0.3 + Math.random() * 0.4;
-            const p = ParticleSystem.getInstance().spawnParticle(x, y, '#fffbe6', Math.cos(angle) * speed, Math.sin(angle) * speed, life);
-            p.isFlame = true;
+            const idx = ParticleSystem.getInstance().spawnParticle(x, y, '#fffbe6', Math.cos(angle) * speed, Math.sin(angle) * speed, life);
+            ParticleSystem.getInstance().setFlame(idx, true);
         }
 
         // 4. Lingering Smoke

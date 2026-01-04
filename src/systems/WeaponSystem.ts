@@ -275,14 +275,14 @@ export class WeaponSystem {
             const vx = Math.cos(pAngle) * speed + player.vx * 0.5;
             const vy = Math.sin(pAngle) * speed + player.vy * 0.5;
             
-            const p = ParticleSystem.getInstance().spawnParticle(
+            const idx = ParticleSystem.getInstance().spawnParticle(
                 player.x + Math.cos(player.rotation) * 15,
                 player.y + Math.sin(player.rotation) * 15,
                 Math.random() < 0.3 ? '#ffcc00' : '#ff4400',
                 vx, vy,
                 0.4 + Math.random() * 0.2
             );
-            p.isFlame = true;
+            ParticleSystem.getInstance().setFlame(idx, true);
         }
     }
 
