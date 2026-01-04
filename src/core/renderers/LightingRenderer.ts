@@ -627,10 +627,8 @@ export class LightingRenderer {
 
                 // Only recalculate if world changed or light moved
                 if (!polygon || meshVersion !== this.meshVersion || hasMoved) {
-                    // OPTIMIZATION: Use local segments for small lights (explosions)
-                    // If the light is small, we don't need to check segments on the other side of the screen
                     let localSegments = globalSegments;
-                    if (light.radius < 600) {
+                    if (light.radius < 800) { 
                         localSegments = this.parent.world!.getOcclusionSegments(
                             light.x - light.radius, 
                             light.y - light.radius, 
@@ -639,7 +637,7 @@ export class LightingRenderer {
                         );
                     }
 
-                    polygon = VisibilitySystem.calculateVisibility({x: light.x, y: light.y}, localSegments);
+                    polygon = VisibilitySystem.calculateVisibility({x: light.x, y: light.y}, localSegments, light.radius);
                     this.lightPolygonCache.set(light.id, polygon);
                     (light as any)._lastShadowPos = {x: light.x, y: light.y};
                 }
@@ -708,23 +706,34 @@ export class LightingRenderer {
         const playerScreenX = this.parent.player.x - this.parent.cameraX;
         const playerScreenY = this.parent.player.y - this.parent.cameraY;
         const startAngle = this.parent.player.rotation - coneAngleRad / 2;
+        const endAngle = this.parent.player.rotation + coneAngleRad / 2;
+
+        const segments = this.parent.world!.getOcclusionSegments(
+            this.parent.player.x - coneDist, 
+            this.parent.player.y - coneDist, 
+            coneDist * 2, 
+            coneDist * 2
+        );
+
+        const polygon = VisibilitySystem.calculateVisibility(
+            { x: this.parent.player.x, y: this.parent.player.y },
+            segments,
+            coneDist,
+            startAngle,
+            endAngle
+        );
         
         lctx.save();
-        lctx.beginPath();
-        lctx.moveTo(playerScreenX, playerScreenY);
-        for (let i = 0; i <= 60; i++) {
-            const angle = startAngle + (i / 60) * coneAngleRad;
-            const rayX = Math.cos(angle);
-            const rayY = Math.sin(angle);
-            let dist = 0;
-            while (dist < coneDist) {
-                if (this.parent.world!.isWall(this.parent.player!.x + rayX * dist, this.parent.player!.y + rayY * dist)) break;
-                dist += 16;
+        if (polygon.length > 0) {
+            lctx.beginPath();
+            lctx.moveTo(polygon[0].x - this.parent.cameraX, polygon[0].y - this.parent.cameraY);
+            for (let i = 1; i < polygon.length; i++) {
+                lctx.lineTo(polygon[i].x - this.parent.cameraX, polygon[i].y - this.parent.cameraY);
             }
-            lctx.lineTo(playerScreenX + rayX * dist, playerScreenY + rayY * dist);
+            lctx.lineTo(playerScreenX, playerScreenY); // Return to player center
+            lctx.closePath();
+            lctx.clip();
         }
-        lctx.closePath();
-        lctx.clip();
 
         const coneGrad = lctx.createRadialGradient(playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, coneDist);
         coneGrad.addColorStop(0, revealColor);
