@@ -103,6 +103,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
     this.world.setHeatMap(this.heatMap);
     this.physics.setWorld(this.world);
+    ParticleSystem.getInstance().initWorker(this.world);
     
     const sm = SoundManager.getInstance();
     sm.init();

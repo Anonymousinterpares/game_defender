@@ -19,6 +19,7 @@ export class World {
   // Render Caching
   private tileCanvasCache: Map<string, HTMLCanvasElement> = new Map();
   private lastSnowAccumulation: number = 0;
+  private sharedTiles: Uint8Array | null = null;
 
   constructor() {
     this.width = ConfigManager.getInstance().get('World', 'width');
@@ -46,6 +47,7 @@ export class World {
       if (!this.isMeshDirty) {
           this.isMeshDirty = true;
           this.meshVersion++;
+          this.synchronizeSharedBuffer();
       }
   }
 
@@ -58,6 +60,30 @@ export class World {
 
   public getMeshVersion(): number {
       return this.meshVersion;
+  }
+
+  public getTilesSharedBuffer(): SharedArrayBuffer {
+      if (!this.sharedTiles) {
+          const size = this.width * this.height;
+          let buffer: any;
+          try {
+              buffer = new (window.SharedArrayBuffer || ArrayBuffer)(size);
+          } catch (e) {
+              buffer = new ArrayBuffer(size);
+          }
+          this.sharedTiles = new Uint8Array(buffer);
+          this.synchronizeSharedBuffer();
+      }
+      return this.sharedTiles.buffer as SharedArrayBuffer;
+  }
+
+  public synchronizeSharedBuffer(): void {
+      if (!this.sharedTiles) return;
+      for (let y = 0; y < this.height; y++) {
+          for (let x = 0; x < this.width; x++) {
+              this.sharedTiles[y * this.width + x] = this.tiles[y][x];
+          }
+      }
   }
 
   public invalidateTileCache(tx: number, ty: number): void {
