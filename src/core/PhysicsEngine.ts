@@ -17,6 +17,10 @@ export class PhysicsEngine {
   private bodies: PhysicsBody[] = [];
   private world: World | null = null;
 
+  // Spatial Partitioning
+  private spatialGrid: Map<string, PhysicsBody[]> = new Map();
+  private gridSize: number = 128; // Size of each grid cell in pixels
+
   constructor() {}
 
   public setWorld(world: World): void {
@@ -31,15 +35,32 @@ export class PhysicsEngine {
     this.bodies = this.bodies.filter(b => b !== body);
   }
 
+  private updateGrid(): void {
+    this.spatialGrid.clear();
+    for (const body of this.bodies) {
+      const gx = Math.floor(body.x / this.gridSize);
+      const gy = Math.floor(body.y / this.gridSize);
+      const key = `${gx},${gy}`;
+      
+      if (!this.spatialGrid.has(key)) {
+        this.spatialGrid.set(key, []);
+      }
+      this.spatialGrid.get(key)!.push(body);
+    }
+  }
+
   public update(dt: number): void {
     let friction = ConfigManager.getInstance().get<number>('Physics', 'friction');
     
+    // 1. Update Spatial Grid first for accurate queries
+    this.updateGrid();
+
     // Apply weather friction modifiers
     const weather = WeatherManager.getInstance().getWeatherState();
     if (weather.type === WeatherType.RAIN) {
-        friction *= 0.95; // Slightly slippery
+        friction *= 0.95;
     } else if (weather.type === WeatherType.SNOW) {
-        friction *= 0.85; // Very slippery
+        friction *= 0.85;
     }
 
     for (const body of this.bodies) {
@@ -58,43 +79,22 @@ export class PhysicsEngine {
         const mapW = this.world.getWidthPixels();
         const mapH = this.world.getHeightPixels();
 
-        // Check X axis
         if (this.world.isWall(nextX, body.y)) {
            body.vx = 0; 
-           // If we are already inside, we need to push out?
-           // Simple 'stop' isn't enough if we were dragged in.
-           // Check if current x is valid.
-           if (this.world.isWall(body.x, body.y)) {
-               // We are stuck. Push towards center? or opposite of velocity?
-               // Since vx is 0, we don't know direction.
-               // Try resetting to valid previous if available, or just don't move nextX.
-               nextX = body.x; 
-               // This doesn't solve overlap.
-           } else {
-               nextX = body.x; // Hit wall, stop.
-           }
+           nextX = body.x; 
         }
         
-        // This logic is flawed for dragged segments.
-        // We need a separate "ResolveOverlaps" pass.
-        
-        // Let's implement a rudimentary "Push Out of Wall"
-        // We check 4 directions?
         if (this.world.isWall(nextX, nextY)) {
-             // Basic: Undo move
              nextX = body.x;
              nextY = body.y;
              
-             // If still in wall (dragged in), brute force push to nearest tile center?
-             // Or just simple bounce?
              if (this.world.isWall(nextX, nextY)) {
-                 // Emergency Eject: Move towards map center
                  const cx = mapW/2;
                  const cy = mapH/2;
                  const dx = cx - nextX;
                  const dy = cy - nextY;
                  const len = Math.sqrt(dx*dx+dy*dy) || 1;
-                 nextX += (dx/len) * 1.0; // Slow push out
+                 nextX += (dx/len) * 1.0; 
                  nextY += (dy/len) * 1.0;
              }
         }
@@ -105,39 +105,68 @@ export class PhysicsEngine {
         if (nextY > mapH - body.radius) { nextY = mapH - body.radius; body.vy = 0; }
       }
 
-      // 4. Body vs Body Collision (Simple Push)
-      // Iterate other bodies
-      for (const other of this.bodies) {
-          if (body === other) continue;
-          if (other.isStatic) continue; // Static bodies don't push? Or do they?
-          
-          const dx = nextX - other.x;
-          const dy = nextY - other.y;
-          const distSq = dx*dx + dy*dy;
-          const radSum = body.radius + other.radius;
-          
-          if (distSq < radSum * radSum && distSq > 0) {
-              const dist = Math.sqrt(distSq);
-              const overlap = radSum - dist;
-              
-              // Push apart
-              const nx = dx / dist;
-              const ny = dy / dist;
-              
-              // Apply push to current body (and maybe other body next frame)
-              // Ideally solve both, but sequential is fine for arcade.
-              nextX += nx * overlap * 0.5;
-              nextY += ny * overlap * 0.5;
-              
-              // We don't push 'other' here to avoid double counting or mess up loop.
-              // Just self-correction.
+      // 4. Optimized Body vs Body Collision (Spatial Partitioning)
+      const gx = Math.floor(nextX / this.gridSize);
+      const gy = Math.floor(nextY / this.gridSize);
+
+      // Check 3x3 grid around the body
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oy = -1; oy <= 1; oy++) {
+          const key = `${gx + ox},${gy + oy}`;
+          const cell = this.spatialGrid.get(key);
+          if (!cell) continue;
+
+          for (const other of cell) {
+            if (body === other || other.isStatic) continue;
+            
+            const dx = nextX - other.x;
+            const dy = nextY - other.y;
+            const distSq = dx*dx + dy*dy;
+            const radSum = body.radius + other.radius;
+            
+            if (distSq < radSum * radSum && distSq > 0) {
+                const dist = Math.sqrt(distSq);
+                const overlap = radSum - dist;
+                const nx = dx / dist;
+                const ny = dy / dist;
+                
+                nextX += nx * overlap * 0.5;
+                nextY += ny * overlap * 0.5;
+            }
           }
+        }
       }
 
       // 5. Commit Move
       body.x = nextX;
       body.y = nextY;
     }
+  }
+
+  /**
+   * Returns bodies within a specific area, optimized via spatial grid.
+   */
+  public getNearbyBodies(x: number, y: number, radius: number): PhysicsBody[] {
+    const result: PhysicsBody[] = [];
+    const gx = Math.floor(x / this.gridSize);
+    const gy = Math.floor(y / this.gridSize);
+    const gridRadius = Math.ceil(radius / this.gridSize);
+
+    for (let ox = -gridRadius; ox <= gridRadius; ox++) {
+      for (let oy = -gridRadius; oy <= gridRadius; oy++) {
+        const cell = this.spatialGrid.get(`${gx + ox},${gy + oy}`);
+        if (cell) {
+          for (const body of cell) {
+            const dx = x - body.x;
+            const dy = y - body.y;
+            if (dx * dx + dy * dy < (radius + body.radius) * (radius + body.radius)) {
+              result.push(body);
+            }
+          }
+        }
+      }
+    }
+    return result;
   }
 
   // Basic Circle-Circle Collision
