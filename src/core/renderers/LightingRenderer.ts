@@ -604,13 +604,17 @@ export class LightingRenderer {
 
     private renderPointLights(lctx: CanvasRenderingContext2D, ambientIntensity: number, meshVersion: number, w: number, h: number): void {
         const lights = LightManager.getInstance().getLights();
-        const segments = this.parent.world!.getOcclusionSegments(this.parent.cameraX, this.parent.cameraY, w, h);
+        // Base segments for all lights in view
+        const globalSegments = this.parent.world!.getOcclusionSegments(this.parent.cameraX, this.parent.cameraY, w, h);
+        
         lctx.save();
         lctx.globalCompositeOperation = 'screen';
         
         lights.forEach(light => {
             const screenX = light.x - this.parent.cameraX;
             const screenY = light.y - this.parent.cameraY;
+            
+            // Culling
             if (screenX < -light.radius || screenX > w + light.radius || screenY < -light.radius || screenY > h + light.radius) return;
 
             lctx.save();
@@ -619,15 +623,33 @@ export class LightingRenderer {
             if (light.castsShadows) {
                 let polygon = this.lightPolygonCache.get(light.id);
                 const lastPos = (light as any)._lastShadowPos || {x: 0, y: 0};
-                if (!polygon || meshVersion !== this.meshVersion || Math.abs(light.x - lastPos.x) > 2 || Math.abs(light.y - lastPos.y) > 2) {
-                    polygon = VisibilitySystem.calculateVisibility({x: light.x, y: light.y}, segments);
+                const hasMoved = Math.abs(light.x - lastPos.x) > 1 || Math.abs(light.y - lastPos.y) > 1;
+
+                // Only recalculate if world changed or light moved
+                if (!polygon || meshVersion !== this.meshVersion || hasMoved) {
+                    // OPTIMIZATION: Use local segments for small lights (explosions)
+                    // If the light is small, we don't need to check segments on the other side of the screen
+                    let localSegments = globalSegments;
+                    if (light.radius < 600) {
+                        localSegments = this.parent.world!.getOcclusionSegments(
+                            light.x - light.radius, 
+                            light.y - light.radius, 
+                            light.radius * 2, 
+                            light.radius * 2
+                        );
+                    }
+
+                    polygon = VisibilitySystem.calculateVisibility({x: light.x, y: light.y}, localSegments);
                     this.lightPolygonCache.set(light.id, polygon);
                     (light as any)._lastShadowPos = {x: light.x, y: light.y};
                 }
-                if (polygon.length > 0) {
+
+                if (polygon && polygon.length > 0) {
                     lctx.beginPath();
                     lctx.moveTo(polygon[0].x - this.parent.cameraX, polygon[0].y - this.parent.cameraY);
-                    for (let i = 1; i < polygon.length; i++) lctx.lineTo(polygon[i].x - this.parent.cameraX, polygon[i].y - this.parent.cameraY);
+                    for (let i = 1; i < polygon.length; i++) {
+                        lctx.lineTo(polygon[i].x - this.parent.cameraX, polygon[i].y - this.parent.cameraY);
+                    }
                     lctx.closePath();
                     lctx.clip();
                 }

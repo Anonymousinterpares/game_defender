@@ -66,7 +66,7 @@ export class LightManager {
             type: 'transient',
             ttl: settings.ttl,
             decay: true,
-            castsShadows: false,
+            castsShadows: type === 'explosion', // Only explosions cast shadows for performance
             active: true
         });
     }
