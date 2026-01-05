@@ -24,12 +24,17 @@ export class MultiplayerMenuScene implements Scene {
   update(dt: number): void {
     const mm = MultiplayerManager.getInstance();
     if (this.statusEl && mm.getConnectedPeersCount() > 0) {
-        this.statusEl.innerHTML = `Connected Peers: ${mm.getConnectedPeersCount()}<br><button id="btn-start-multi">START GAME</button>`;
-        document.getElementById('btn-start-multi')?.addEventListener('click', () => {
-            // Placeholder: Switch to multiplayer gameplay
-            // this.sceneManager.switchScene('multiplayer_gameplay');
-            console.log('Starting multiplayer session...');
-        });
+        // Only show start button if it's not already there
+        if (!document.getElementById('btn-start-multi')) {
+            this.statusEl.innerHTML += `<br><br><button id="btn-start-multi" style="background: #00ff00; color: #000; font-weight: bold;">START MISSION</button>`;
+            document.getElementById('btn-start-multi')?.addEventListener('click', () => {
+                SoundManager.getInstance().playSound('ui_click');
+                // Notify others to start? For 1:1, we can just switch. 
+                // Better approach: Host broadcasts START message.
+                mm.broadcast(NetworkMessageType.CHAT, { system: 'START_GAME' });
+                this.sceneManager.switchScene('multiplayer_gameplay');
+            });
+        }
     }
   }
 
@@ -111,6 +116,11 @@ export class MultiplayerMenuScene implements Scene {
       const mm = MultiplayerManager.getInstance();
       try {
         await mm.init(); // Init my own peer first
+        mm.onMessage((msg) => {
+            if (msg.t === NetworkMessageType.CHAT && msg.d.system === 'START_GAME') {
+                this.sceneManager.switchScene('multiplayer_gameplay');
+            }
+        });
         mm.join(id);
         if (this.statusEl) this.statusEl.innerText = 'Connecting to ' + id + '...';
       } catch (err) {
