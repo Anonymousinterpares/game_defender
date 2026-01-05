@@ -124,24 +124,29 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     
     const sm = SoundManager.getInstance();
     sm.init();
-    const base = import.meta.env.BASE_URL;
-    sm.loadSound('ping', `${base}assets/sounds/ping.wav`);
-    sm.loadSound('shoot_cannon', `${base}assets/sounds/shoot_cannon.wav`);
-    sm.loadSound('shoot_laser', `${base}assets/sounds/shoot_laser.wav`);
-    sm.loadSound('shoot_ray', `${base}assets/sounds/shoot_ray.wav`);
-    sm.loadSound('shoot_rocket', `${base}assets/sounds/shoot_rocket.wav`);
-    sm.loadSound('shoot_missile', `${base}assets/sounds/shoot_missile.wav`);
-    sm.loadSound('place_mine', `${base}assets/sounds/place_mine.wav`);
-    sm.loadSound('shoot_flamethrower', `${base}assets/sounds/shoot_flamethrower.wav`);
-    sm.loadSound('weapon_reload', `${base}assets/sounds/weapon_reload.wav`);
-    sm.loadSound('hit_cannon', `${base}assets/sounds/hit_cannon.wav`);
-    sm.loadSound('hit_missile', `${base}assets/sounds/hit_missile.wav`);
-    sm.loadSound('hit_laser', `${base}assets/sounds/hit_laser.wav`);
-    sm.loadSound('hit_ray', `${base}assets/sounds/hit_ray.wav`);
-    sm.loadSound('explosion_large', `${base}assets/sounds/explosion_large.wav`);
-    sm.loadSound('collect_coin', `${base}assets/sounds/collect_coin.wav`);
-    sm.loadSound('ui_click', `${base}assets/sounds/ui_click.wav`);
-    sm.loadSound('fire', `${base}assets/sounds/fire.wav`);
+    
+    // Ensure base ends with slash and doesn't cause double slash issues
+    let base = import.meta.env.BASE_URL;
+    if (!base.endsWith('/')) base += '/';
+    const getPath = (file: string) => `${base}assets/sounds/${file}`;
+
+    sm.loadSound('ping', getPath('ping.wav'));
+    sm.loadSound('shoot_cannon', getPath('shoot_cannon.wav'));
+    sm.loadSound('shoot_laser', getPath('shoot_laser.wav'));
+    sm.loadSound('shoot_ray', getPath('shoot_ray.wav'));
+    sm.loadSound('shoot_rocket', getPath('shoot_rocket.wav'));
+    sm.loadSound('shoot_missile', getPath('shoot_missile.wav'));
+    sm.loadSound('place_mine', getPath('place_mine.wav'));
+    sm.loadSound('shoot_flamethrower', getPath('shoot_flamethrower.wav'));
+    sm.loadSound('weapon_reload', getPath('weapon_reload.wav'));
+    sm.loadSound('hit_cannon', getPath('hit_cannon.wav'));
+    sm.loadSound('hit_missile', getPath('hit_missile.wav'));
+    sm.loadSound('hit_laser', getPath('hit_laser.wav'));
+    sm.loadSound('hit_ray', getPath('hit_ray.wav'));
+    sm.loadSound('explosion_large', getPath('explosion_large.wav'));
+    sm.loadSound('collect_coin', getPath('collect_coin.wav'));
+    sm.loadSound('ui_click', getPath('ui_click.wav'));
+    sm.loadSound('fire', getPath('fire.wav'));
 
     sm.discoverMaterialVariants(['wood', 'brick', 'stone', 'metal', 'indestructible']);
 

@@ -437,28 +437,44 @@ export class SoundManager {
 
   public async loadSound(name: string, url: string): Promise<boolean> {
     if (!this.audioCtx) this.init();
+    
+    const tryLoad = async (u: string): Promise<AudioBuffer> => {
+        const response = await fetch(u);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (response.headers.get('content-type')?.includes('text/html')) throw new Error('Received HTML instead of Audio');
+        const arrayBuffer = await response.arrayBuffer();
+        return await this.audioCtx!.decodeAudioData(arrayBuffer);
+    };
+
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = await this.audioCtx!.decodeAudioData(arrayBuffer);
-      this.sounds.set(name, audioBuffer);
+      const buffer = await tryLoad(url);
+      this.sounds.set(name, buffer);
       
-      // Track material variants automatically
+      // Track material variants
       if (name.includes('_hit_')) {
           const category = name.split('_hit_')[0];
-          if (!this.materialVariants.has(category)) {
-              this.materialVariants.set(category, []);
-          }
-          if (!this.materialVariants.get(category)!.includes(name)) {
-            this.materialVariants.get(category)!.push(name);
-          }
+          if (!this.materialVariants.has(category)) this.materialVariants.set(category, []);
+          if (!this.materialVariants.get(category)!.includes(name)) this.materialVariants.get(category)!.push(name);
       }
       return true;
     } catch (e) {
-      // Do not log warning for material hit probing
+      // Retry with simple relative path if we used a base-prefixed one
+      // This catches cases where BASE_URL might be interfering with local dev resolving
+      if (url.startsWith('/') || url.startsWith('http')) {
+         try {
+             const relativeUrl = 'assets/sounds/' + url.split('assets/sounds/')[1];
+             console.log(`Retrying ${name} with relative path: ${relativeUrl}`);
+             const buffer = await tryLoad(relativeUrl);
+             this.sounds.set(name, buffer);
+             return true;
+         } catch (e2) {
+             // Second attempt failed
+         }
+      }
+
+      // Do not log warning for material hit probing (expected to fail eventually)
       if (!name.includes('_hit_')) {
-          console.warn(`Failed to load sound ${name} from ${url}. Using fallback.`);
+          console.error(`Failed to load sound ${name} from ${url}. Error:`, e);
       }
       return false;
     }
