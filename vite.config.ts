@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: './', // This ensures links work regardless of the URL subfolder
+  base: '/game_defender/',
   build: {
     outDir: 'dist',
   },
