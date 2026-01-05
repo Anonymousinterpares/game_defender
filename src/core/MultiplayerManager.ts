@@ -22,6 +22,7 @@ export class MultiplayerManager {
   
   public isHost: boolean = false;
   public myId: string = '';
+  public myName: string = 'Player';
 
   private constructor() {}
 

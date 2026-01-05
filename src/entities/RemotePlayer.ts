@@ -4,11 +4,21 @@ export class RemotePlayer extends Entity {
   public targetX: number = 0;
   public targetY: number = 0;
   public targetRotation: number = 0;
+  public name: string = '';
 
   constructor(id: string, x: number, y: number) {
     super(x, y);
     this.id = id;
-    this.color = '#00ffff'; // Different color for remote players
+    this.name = id.split('-')[1] || id; // Default to ID part
+    
+    // Generate unique color from ID
+    let hash = 0;
+    for (let i = 0; i < this.id.length; i++) {
+        hash = this.id.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+    this.color = '#' + '00000'.substring(0, 6 - c.length) + c;
+    
     this.radius = 15;
     this.prevX = x;
     this.prevY = x;
@@ -16,7 +26,7 @@ export class RemotePlayer extends Entity {
     this.targetY = y;
   }
 
-  public updateFromNetwork(x: number, y: number, rotation: number): void {
+  public updateFromNetwork(x: number, y: number, rotation: number, name?: string): void {
     // Set previous to current for interpolation
     this.prevX = this.x;
     this.prevY = this.y;
@@ -25,6 +35,7 @@ export class RemotePlayer extends Entity {
     this.targetX = x;
     this.targetY = y;
     this.targetRotation = rotation;
+    if (name) this.name = name;
     
     // We don't snap this.x/y yet, we let update() slide them
   }
@@ -53,14 +64,15 @@ export class RemotePlayer extends Entity {
     ctx.arc(ix, iy, this.radius, 0, Math.PI * 2);
     
     const headGrad = ctx.createRadialGradient(ix - 5, iy - 5, 2, ix, iy, this.radius);
-    headGrad.addColorStop(0, '#80ffff');
-    headGrad.addColorStop(0.5, '#00cccc');
-    headGrad.addColorStop(1, '#006666');
+    // Use generated color for gradients
+    headGrad.addColorStop(0, '#fff');
+    headGrad.addColorStop(0.5, this.color);
+    headGrad.addColorStop(1, '#000'); // darker edge
     ctx.fillStyle = headGrad;
     ctx.fill();
 
-    ctx.strokeStyle = '#004444';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
     ctx.stroke();
 
     // Cannon
@@ -74,10 +86,13 @@ export class RemotePlayer extends Entity {
     ctx.stroke();
     ctx.restore();
     
-    // Display ID above head
-    ctx.fillStyle = '#0f0';
-    ctx.font = '10px monospace';
+    // Display Name above head
+    ctx.fillStyle = this.color;
+    ctx.font = 'bold 12px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(this.id.split('-')[1] || this.id, ix, iy - 20);
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 4;
+    ctx.fillText(this.name, ix, iy - 25);
+    ctx.shadowBlur = 0;
   }
 }

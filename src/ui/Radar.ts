@@ -1,5 +1,6 @@
 import { Entity } from '../core/Entity';
 import { Player } from '../entities/Player';
+import { RemotePlayer } from '../entities/RemotePlayer';
 import { SoundManager } from '../core/SoundManager';
 
 interface RadarBlip {
@@ -7,6 +8,7 @@ interface RadarBlip {
     y: number;
     type: string;
     life: number; // 1.0 down to 0 for fading
+    color?: string;
 }
 
 export class Radar {
@@ -102,11 +104,16 @@ export class Radar {
           // Use a semi-unique ID (using instance for simplicity in this prototype)
           // In a real game use entity.id
           const id = entity.constructor.name + "_" + Math.floor(entity.x) + "_" + Math.floor(entity.y);
+          
+          let specificColor: string | undefined;
+          if (entity instanceof RemotePlayer) specificColor = entity.color;
+
           this.blips.set(id, {
               x: dx * scale,
               y: dy * scale,
               type: entity.constructor.name,
-              life: 1.0
+              life: 1.0,
+              color: specificColor
           });
           pingTriggered = true;
       }
@@ -121,20 +128,22 @@ export class Radar {
         const x = center + blip.x;
         const y = center + blip.y;
         
-        let color = '255, 0, 0'; // Default Red (Enemy)
-        if (blip.type === 'Projectile') color = '255, 255, 0';
-        if (blip.type === 'Drop') color = '0, 255, 255';
-        if (blip.type === 'RemotePlayer') color = '0, 255, 255'; // Cyan for other players
+        let color = '#ff0000'; // Default Red (Enemy)
+        if (blip.type === 'Projectile') color = '#ffff00';
+        if (blip.type === 'Drop') color = '#00ffff';
+        if (blip.color) color = blip.color;
 
-        this.ctx.fillStyle = `rgba(${color}, ${blip.life})`;
+        this.ctx.globalAlpha = blip.life;
+        this.ctx.fillStyle = color;
         this.ctx.shadowBlur = 5 * blip.life;
-        this.ctx.shadowColor = `rgba(${color}, ${blip.life})`;
+        this.ctx.shadowColor = color;
         
         this.ctx.beginPath();
         this.ctx.arc(x, y, 2, 0, Math.PI * 2);
         this.ctx.fill();
     });
     this.ctx.shadowBlur = 0;
+    this.ctx.globalAlpha = 1.0;
 
     // 4. Player (Fixed at center)
     this.ctx.fillStyle = '#fff';

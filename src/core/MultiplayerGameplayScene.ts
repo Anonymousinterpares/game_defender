@@ -83,7 +83,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
   }
 
   private getSafePVPSpawn(p1Pos: {x: number, y: number}): {x: number, y: number} {
-      const minTilesDist = 15;
+      const minTilesDist = 20;
       const tileSize = (this.world as any).tileSize || 32;
       const minDist = minTilesDist * tileSize;
       
@@ -260,14 +260,15 @@ export class MultiplayerGameplayScene extends GameplayScene {
         id: MultiplayerManager.getInstance().myId,
         x: Math.round(this.player.x),
         y: Math.round(this.player.y),
-        r: this.rotationToNetwork(this.player.rotation)
+        r: this.rotationToNetwork(this.player.rotation),
+        n: MultiplayerManager.getInstance().myName
       };
 
       MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_STATE, state);
   }
 
   private handlePlayerState(data: any): void {
-    const { id, x, y, r } = data;
+    const { id, x, y, r, n } = data;
     if (id === MultiplayerManager.getInstance().myId) return;
 
     let rp = this.remotePlayers.get(id);
@@ -276,7 +277,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
       this.remotePlayers.set(id, rp);
     }
 
-    rp.updateFromNetwork(x, y, this.rotationFromNetwork(r));
+    rp.updateFromNetwork(x, y, this.rotationFromNetwork(r), n);
   }
 
   private rotationToNetwork(rad: number): number { return Math.round(rad * 1000); }

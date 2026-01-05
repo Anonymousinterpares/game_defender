@@ -55,6 +55,10 @@ export class MultiplayerMenuScene implements Scene {
       <div id="mp-status" style="margin-bottom: 20px; color: #aaa; font-family: monospace;">Initialize Connection...</div>
       
       <div class="control-group">
+        <label style="display:block; color:#aaa; font-size: 0.8em;">Your Username:</label>
+        <input type="text" id="player-name" placeholder="Enter Name" value="Player" 
+               style="width: 100%; padding: 8px; background: #000; color: #fff; border: 1px solid #333; margin-bottom: 20px;">
+        
         <button id="btn-host">Host Session</button>
         <p style="font-size: 0.8em; color: #666;">Be the server. Others can join your game.</p>
       </div>
@@ -84,6 +88,9 @@ export class MultiplayerMenuScene implements Scene {
     document.getElementById('btn-host')?.addEventListener('click', async () => {
       SoundManager.getInstance().playSound('ui_click');
       const mm = MultiplayerManager.getInstance();
+      const nameInput = document.getElementById('player-name') as HTMLInputElement;
+      if (nameInput) mm.myName = nameInput.value.trim() || 'Host';
+      
       try {
         const id = await mm.init();
         mm.host();
@@ -114,6 +121,9 @@ export class MultiplayerMenuScene implements Scene {
       if (!id) return;
 
       const mm = MultiplayerManager.getInstance();
+      const nameInput = document.getElementById('player-name') as HTMLInputElement;
+      if (nameInput) mm.myName = nameInput.value.trim() || 'Player';
+
       try {
         await mm.init(); // Init my own peer first
         mm.onMessage((msg) => {
