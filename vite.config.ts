@@ -1,16 +1,12 @@
 import { defineConfig } from 'vite';
 
-export default defineConfig(({ command, mode }) => {
-  // If we are building for production, use the repo name
-  const isProd = command === 'build';
-  
+export default defineConfig(({ command }) => {
   return {
-    base: isProd ? '/game_defender/' : '/',
+    // If we are running 'npm run build', use the repo name. 
+    // If we are running 'npm run dev', use the root '/'.
+    base: command === 'build' ? '/game_defender/' : '/',
     build: {
       outDir: 'dist',
     },
-    server: {
-      port: 5173
-    }
   };
 });
