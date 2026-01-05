@@ -24,16 +24,31 @@ export class MultiplayerMenuScene implements Scene {
   update(dt: number): void {
     const mm = MultiplayerManager.getInstance();
     if (this.statusEl && mm.getConnectedPeersCount() > 0) {
-        // Only show start button if it's not already there
-        if (!document.getElementById('btn-start-multi')) {
-            this.statusEl.innerHTML += `<br><br><button id="btn-start-multi" style="background: #00ff00; color: #000; font-weight: bold;">START MISSION</button>`;
-            document.getElementById('btn-start-multi')?.addEventListener('click', () => {
-                SoundManager.getInstance().playSound('ui_click');
-                // Notify others to start? For 1:1, we can just switch. 
-                // Better approach: Host broadcasts START message.
-                mm.broadcast(NetworkMessageType.CHAT, { system: 'START_GAME' });
-                this.sceneManager.switchScene('multiplayer_gameplay');
-            });
+        if (mm.isHost) {
+            // Only show start button if it's not already there
+            if (!document.getElementById('btn-start-multi')) {
+                this.statusEl.innerHTML = `
+                    <span style="color: #0f0;">HOSTING ACTIVE</span><br>
+                    Share this ID: <b style="color: #fff; background: #222; padding: 2px 5px;">${mm.myId}</b>
+                    <br><br>
+                    <span style="color: #0f0;">PEER CONNECTED!</span>
+                    <br><br>
+                    <button id="btn-start-multi" style="background: #00ff00; color: #000; font-weight: bold; width: 100%; padding: 10px;">START MISSION</button>
+                `;
+                document.getElementById('btn-start-multi')?.addEventListener('click', () => {
+                    SoundManager.getInstance().playSound('ui_click');
+                    mm.broadcast(NetworkMessageType.CHAT, { system: 'START_GAME' });
+                    this.sceneManager.switchScene('multiplayer_gameplay');
+                });
+            }
+        } else {
+            // Client connected
+            if (!this.statusEl.innerHTML.includes('CONNECTED TO HOST')) {
+                this.statusEl.innerHTML = `
+                    <span style="color: #0f0;">CONNECTED TO HOST!</span><br>
+                    <span style="color: #aaa;">Waiting for host to start mission...</span>
+                `;
+            }
         }
     }
   }
