@@ -781,7 +781,7 @@ export class HeatMap {
                         const rx = worldX + sx * subSize;
                         const ry = worldY + sy * subSize;
 
-                        if (this.fireAsset) {
+                        if (this.fireAsset && this.fireAsset.complete && this.fireAsset.naturalWidth > 0) {
                             const frameCount = 8;
                             const frame = Math.floor((time * 15 + i) % frameCount);
                             const fw = this.fireAsset.width / frameCount;

@@ -96,7 +96,7 @@ export abstract class Entity implements PhysicsBody {
   }
 
   public renderFire(ctx: CanvasRenderingContext2D): void {
-      if (!this.isOnFire || !Entity.fireAsset) return;
+      if (!this.isOnFire || !Entity.fireAsset || !Entity.fireAsset.complete || Entity.fireAsset.naturalWidth === 0) return;
 
       const ix = this.interpolatedX;
       const iy = this.interpolatedY;
