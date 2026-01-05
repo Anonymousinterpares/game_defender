@@ -33,6 +33,12 @@ export class RemotePlayer extends Entity {
     this.initSegments(x, y);
   }
 
+  public setBodyLength(length: number): void {
+      if (this.segments.length === length) return;
+      this.bodyLength = length;
+      this.initSegments(this.x, this.y);
+  }
+
   private initSegments(x: number, y: number) {
     this.segments = [];
     for (let i = 0; i < this.bodyLength; i++) {

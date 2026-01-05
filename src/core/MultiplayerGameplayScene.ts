@@ -30,6 +30,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
   private lastActiveState: boolean = true;
   private respawnTimer: number = 0;
   public lastKilledBy: string | null = null;
+  private isSpawned: boolean = false;
 
   constructor(sceneManager: SceneManager, inputManager: InputManager) {
     super(sceneManager, inputManager);
@@ -108,6 +109,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
                         this.player.y = msg.d.y;
                         this.player.prevX = msg.d.x;
                         this.player.prevY = msg.d.y;
+                        this.isSpawned = true;
                     }
                 }
             });
@@ -115,6 +117,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
             mm.broadcast(NetworkMessageType.CHAT, { system: 'READY' });
         }
     }
+
+    if (mm.isHost) this.isSpawned = true;
   }
 
   private handleLocalDeath(): void {
@@ -207,6 +211,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
   }
 
   update(dt: number): void {
+    if (!this.isSpawned) return;
+    
     const mm = MultiplayerManager.getInstance();
 
     // 1. Update Core Gameplay (with custom logic for client/host)
@@ -214,8 +220,11 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
     // 2. Update remote players (visual only)
     this.remotePlayersMap.forEach(rp => rp.update(dt));
+    
+    // 3. Radar update
+    if (this.radar && this.player) this.radar.update(dt);
 
-    // 3. Network Sync
+    // 4. Network Sync
     this.networkTimer += dt;
     if (this.networkTimer >= this.networkTickRate) {
       this.sendLocalState();
@@ -256,6 +265,15 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
     if (this.hud.isDockOpen) return;
 
+    for (const [key, weaponName] of Object.entries(this.weaponSlots)) {
+        if (this.inputManager.isKeyJustPressed(key)) {
+            if (this.unlockedWeapons.has(weaponName)) {
+                ConfigManager.getInstance().set('Player', 'activeWeapon', weaponName);
+                SoundManager.getInstance().playSound('ui_click');
+            }
+        }
+    }
+
     this.weaponSystem.update(dt, this.inputManager);
     this.combatSystem.update(dt);
 
@@ -290,7 +308,31 @@ export class MultiplayerGameplayScene extends GameplayScene {
         this.enemies.forEach(e => e.update(dt, this.player || undefined));
     }
 
-    this.projectiles = this.projectiles.filter(p => { p.update(dt); return p.active; });
+    this.projectiles = this.projectiles.filter(p => { 
+        const active = p.update(dt); 
+        
+        // Handle projectile hits (moved from Projectile to Scene for network control)
+        if (p.active && this.world && this.heatMap) {
+            const hit = this.world.checkWallCollision(p.x, p.y, p.radius);
+            if (hit) {
+                // LOCAL EFFECT
+                p.onWorldHit(this.heatMap, p.x, p.y);
+                p.active = false;
+                
+                // BROADCAST (if we are the one who fired it)
+                if (p.shooterId === this.myId) {
+                    const tx = Math.floor(p.x / this.heatMap.tileSize);
+                    const ty = Math.floor(p.y / this.heatMap.tileSize);
+                    const mat = this.world.getTile(tx, ty);
+                    MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_UPDATE, {
+                        tx, ty, m: mat
+                    });
+                }
+            }
+        }
+        
+        return p.active; 
+    });
     ParticleSystem.getInstance().update(dt, this.world!, this.player!, this.enemies);
 
     if (mm.isHost) {
@@ -333,6 +375,11 @@ export class MultiplayerGameplayScene extends GameplayScene {
             }
         }
     }
+  }
+
+  render(ctx: CanvasRenderingContext2D): void {
+      if (!this.isSpawned) return;
+      super.render(ctx);
   }
 
   protected getRadarEntities(): Entity[] {
@@ -446,14 +493,16 @@ export class MultiplayerGameplayScene extends GameplayScene {
         y: Math.round(this.player.y),
         r: this.rotationToNetwork(this.player.rotation),
         n: MultiplayerManager.getInstance().myName,
-        h: Math.round(this.player.health)
+        h: Math.round(this.player.health),
+        l: this.player.segments.length, // Send segment count
+        w: ConfigManager.getInstance().get<string>('Player', 'activeWeapon') // Send weapon
       };
 
       MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_STATE, state);
   }
 
   private handlePlayerState(data: any): void {
-    const { id, x, y, r, n, h } = data;
+    const { id, x, y, r, n, h, l, w } = data;
     if (id === MultiplayerManager.getInstance().myId) return;
 
     let rp = this.remotePlayersMap.get(id);
@@ -461,7 +510,25 @@ export class MultiplayerGameplayScene extends GameplayScene {
       rp = new RemotePlayer(id, x, y);
       this.remotePlayersMap.set(id, rp);
       this.updateRemotePlayersArray();
+      
+      // Add to physics for collision
+      this.physics.addBody(rp);
     }
+
+    // Sync body length if it changed
+    if (l !== undefined && rp.segments.length !== l) {
+        // Remove old segments from physics
+        rp.segments.forEach(s => this.physics.removeBody(s));
+        
+        // Update segments
+        rp.setBodyLength(l);
+        
+        // Add new segments to physics
+        rp.segments.forEach(s => this.physics.addBody(s));
+    }
+    
+    // Sync weapon (could be used for visuals later)
+    if (w) (rp as any).activeWeapon = w;
 
     rp.updateFromNetwork(x, y, this.rotationFromNetwork(r), n, h);
   }
