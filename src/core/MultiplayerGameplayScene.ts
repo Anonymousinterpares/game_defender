@@ -45,10 +45,50 @@ export class MultiplayerGameplayScene extends GameplayScene {
       }
     });
 
-    // If I am the client, disable local enemy spawning logic
-    if (!mm.isHost) {
-        console.log('Client mode: Waiting for Host to spawn enemies...');
+    // PVP SPAWNING LOGIC
+    if (this.player && this.world) {
+        // Find safe spot for Player 1
+        const p1Pos = this.getRandomValidPos();
+        this.player.x = p1Pos.x;
+        this.player.y = p1Pos.y;
+        this.player.prevX = p1Pos.x;
+        this.player.prevY = p1Pos.y;
+        
+        // Host tells client where to spawn
+        if (mm.isHost) {
+            console.log('Host: Calculating spawn for Peer...');
+            const p2Pos = this.getSafePVPSpawn(p1Pos);
+            mm.broadcast(NetworkMessageType.CHAT, { system: 'SPAWN_POS', x: p2Pos.x, y: p2Pos.y });
+        } else {
+            // Client listens for its spawn pos
+            mm.onMessage((msg) => {
+                if (msg.t === NetworkMessageType.CHAT && msg.d.system === 'SPAWN_POS') {
+                    if (this.player) {
+                        this.player.x = msg.d.x;
+                        this.player.y = msg.d.y;
+                        this.player.prevX = msg.d.x;
+                        this.player.prevY = msg.d.y;
+                    }
+                }
+            });
+        }
     }
+  }
+
+  private getSafePVPSpawn(p1Pos: {x: number, y: number}): {x: number, y: number} {
+      const minTilesDist = 15;
+      const tileSize = (this.world as any).tileSize || 32;
+      const minDist = minTilesDist * tileSize;
+      
+      for (let i = 0; i < 50; i++) {
+          const pos = this.getRandomValidPos();
+          const dx = pos.x - p1Pos.x;
+          const dy = pos.y - p1Pos.y;
+          if (Math.sqrt(dx*dx + dy*dy) >= minDist) {
+              return pos;
+          }
+      }
+      return { x: 100, y: 100 }; // Fallback
   }
 
   onExit(): void {

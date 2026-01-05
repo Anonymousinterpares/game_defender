@@ -7,13 +7,14 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "predeploy": "npm run build",
+    "predeploy": "cross-env GITHUB_PAGES=true npm run build",
     "deploy": "gh-pages -d dist"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "gh-pages": "^6.3.0",
     "sass": "^1.83.0",
     "typescript": "^5.7.2",
