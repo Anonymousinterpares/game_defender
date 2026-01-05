@@ -56,7 +56,7 @@ export class HeatMap {
         const useSprite = ConfigManager.getInstance().get<boolean>('Fire', 'isFireSpritesheet');
         if (useSprite) {
             this.fireAsset = new Image();
-            this.fireAsset.src = '/assets/visuals/fire_spritesheet.svg';
+            this.fireAsset.src = 'assets/visuals/fire_spritesheet.svg';
             this.fireAsset.onerror = () => {
                 console.warn("Fire spritesheet not found, falling back to procedural.");
                 this.fireAsset = null;

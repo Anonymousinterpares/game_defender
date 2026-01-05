@@ -47,7 +47,7 @@ export abstract class Entity implements PhysicsBody {
     
     if (!Entity.fireAsset && ConfigManager.getInstance().get<boolean>('Fire', 'isFireSpritesheet')) {
         Entity.fireAsset = new Image();
-        Entity.fireAsset.src = '/assets/visuals/fire_spritesheet.svg';
+        Entity.fireAsset.src = 'assets/visuals/fire_spritesheet.svg';
     }
   }
 
