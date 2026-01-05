@@ -17,6 +17,7 @@ import { Drop } from '../entities/Drop';
 import { ParticleSystem } from './ParticleSystem';
 import { SoundManager } from './SoundManager';
 import { Quadtree } from '../utils/Quadtree';
+import { ConfigManager } from '../config/MasterConfig';
 
 export class MultiplayerGameplayScene extends GameplayScene {
   // remotePlayers is already defined here, but as a Map. 
@@ -313,17 +314,22 @@ export class MultiplayerGameplayScene extends GameplayScene {
         
         // Handle projectile hits (moved from Projectile to Scene for network control)
         if (p.active && this.world && this.heatMap) {
-            const hit = this.world.checkWallCollision(p.x, p.y, p.radius);
-            if (hit) {
+            if (this.world.isWall(p.x, p.y)) {
                 // LOCAL EFFECT
                 p.onWorldHit(this.heatMap, p.x, p.y);
                 p.active = false;
                 
                 // BROADCAST (if we are the one who fired it)
                 if (p.shooterId === this.myId) {
-                    const tx = Math.floor(p.x / this.heatMap.tileSize);
-                    const ty = Math.floor(p.y / this.heatMap.tileSize);
-                    const mat = this.world.getTile(tx, ty);
+                    const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                    const tx = Math.floor(p.x / tileSize);
+                    const ty = Math.floor(p.y / tileSize);
+                    // World doesn't have getTile, tiles is private. 
+                    // But we can check the heatmap material which is public-ish or just send the update
+                    // Actually, if we hit a wall, we just send the message to invalidate it.
+                    // The handleWorldUpdate uses the message data.m (material)
+                    // Let's get the material from the heatmap.
+                    const mat = this.heatMap.getMaterialAt(p.x, p.y);
                     MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_UPDATE, {
                         tx, ty, m: mat
                     });
