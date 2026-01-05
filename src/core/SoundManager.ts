@@ -71,6 +71,9 @@ export class SoundManager {
 
   public setWorld(world: World): void {
       this.world = world;
+      if (ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs')) {
+          console.log('[Audio] World reference set');
+      }
   }
 
   public updateAreaSound(name: string, x: number, y: number, intensity: number): void {
@@ -464,7 +467,8 @@ export class SoundManager {
     } catch (e) {
       // Retry with simple relative path if we used a base-prefixed one
       // This catches cases where BASE_URL might be interfering with local dev resolving
-      if (url.startsWith('/') || url.startsWith('http')) {
+      // SKIP for _hit_ sounds as they are likely just probing misses
+      if (!name.includes('_hit_') && (url.startsWith('/') || url.startsWith('http'))) {
          try {
              const relativeUrl = 'assets/sounds/' + url.split('assets/sounds/')[1];
              console.log(`Retrying ${name} with relative path: ${relativeUrl}`);
