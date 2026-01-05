@@ -18,44 +18,10 @@ export class World {
 
   // Render Caching
   private tileCanvasCache: Map<string, HTMLCanvasElement> = new Map();
-  private backgroundCanvas: HTMLCanvasElement | null = null;
   private wallChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, dirty: boolean }> = new Map();
   private chunkSize: number = 512;
   private lastSnowAccumulation: number = 0;
   private sharedTiles: Uint8Array | null = null;
-
-  private initBackground(): void {
-      this.backgroundCanvas = document.createElement('canvas');
-      this.backgroundCanvas.width = this.getWidthPixels();
-      this.backgroundCanvas.height = this.getHeightPixels();
-      const ctx = this.backgroundCanvas.getContext('2d')!;
-
-      const snow = WeatherManager.getInstance().getSnowAccumulation();
-      let groundColor = '#1c1c1c';
-      if (snow > 0) {
-          const r = Math.floor(28 + (200 - 28) * snow);
-          const g = Math.floor(28 + (210 - 28) * snow);
-          const b = Math.floor(28 + (230 - 28) * snow);
-          groundColor = `rgb(${r},${g},${b})`;
-      }
-
-      ctx.fillStyle = groundColor;
-      ctx.fillRect(0, 0, this.backgroundCanvas.width, this.backgroundCanvas.height);
-
-      ctx.beginPath();
-      ctx.strokeStyle = snow > 0.5 ? 'rgba(255,255,255,0.1)' : '#222222';
-      ctx.lineWidth = 1;
-
-      for (let x = 0; x <= this.backgroundCanvas.width; x += this.tileSize) {
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, this.backgroundCanvas.height);
-      }
-      for (let y = 0; y <= this.backgroundCanvas.height; y += this.tileSize) {
-          ctx.moveTo(0, y);
-          ctx.lineTo(this.backgroundCanvas.width, y);
-      }
-      ctx.stroke();
-  }
 
   constructor() {
     this.width = ConfigManager.getInstance().get('World', 'width');
@@ -266,21 +232,42 @@ export class World {
     const currentSnow = WeatherManager.getInstance().getSnowAccumulation();
     if (Math.abs(currentSnow - this.lastSnowAccumulation) > 0.05) {
         this.tileCanvasCache.clear();
-        this.backgroundCanvas = null; 
         this.wallChunks.forEach(c => c.dirty = true);
         this.lastSnowAccumulation = currentSnow;
     }
 
     if (!silhouette) {
-        if (!this.backgroundCanvas) {
-            this.initBackground();
+        // Procedural background instead of massive canvas
+        let groundColor = '#1c1c1c';
+        if (currentSnow > 0) {
+            const r = Math.floor(28 + (200 - 28) * currentSnow);
+            const g = Math.floor(28 + (210 - 28) * currentSnow);
+            const b = Math.floor(28 + (230 - 28) * currentSnow);
+            groundColor = `rgb(${r},${g},${b})`;
         }
-        
-        ctx.drawImage(
-            this.backgroundCanvas!, 
-            cameraX, cameraY, viewWidth, viewHeight,
-            cameraX, cameraY, viewWidth, viewHeight 
-        );
+
+        ctx.fillStyle = groundColor;
+        ctx.fillRect(cameraX, cameraY, viewWidth, viewHeight);
+
+        // Draw Grid Lines for visible area
+        ctx.beginPath();
+        ctx.strokeStyle = currentSnow > 0.5 ? 'rgba(255,255,255,0.1)' : '#222222';
+        ctx.lineWidth = 1;
+
+        const startX = Math.floor(cameraX / this.tileSize) * this.tileSize;
+        const endX = cameraX + viewWidth;
+        const startY = Math.floor(cameraY / this.tileSize) * this.tileSize;
+        const endY = cameraY + viewHeight;
+
+        for (let x = startX; x <= endX; x += this.tileSize) {
+            ctx.moveTo(x, cameraY);
+            ctx.lineTo(x, endY);
+        }
+        for (let y = startY; y <= endY; y += this.tileSize) {
+            ctx.moveTo(cameraX, y);
+            ctx.lineTo(endX, y);
+        }
+        ctx.stroke();
     }
 
     // 2. Render Walls via Chunks

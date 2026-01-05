@@ -60,6 +60,7 @@ export class LightingRenderer {
     private particles: { x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number }[] = [];
     private splashes: { x: number, y: number, life: number, type: 'rain' | 'snow' }[] = [];
     private lastParticleUpdate: number = 0;
+    private lastCameraPos: { x: number, y: number } = { x: -999, y: -999 };
 
     constructor(private parent: LightingParent) {
         this.resolutionScale = ConfigManager.getInstance().get<number>('Benchmark', 'resolutionScale') || 0.5;
@@ -228,11 +229,34 @@ export class LightingRenderer {
         const lightingEnabled = ConfigManager.getInstance().get<boolean>('Lighting', 'enabled');
         if (!lightingEnabled || !this.parent.world) return;
 
-        PerfMonitor.getInstance().begin('lighting_setup');
         const fullW = ctx.canvas.width;
         const fullH = ctx.canvas.height;
         const w = Math.floor(fullW * this.resolutionScale);
         const h = Math.floor(fullH * this.resolutionScale);
+        
+        const worldMeshVersion = this.parent.world.getMeshVersion();
+        const lightsCount = LightManager.getInstance().getLights().length;
+        
+        const weather = WeatherManager.getInstance().getWeatherState();
+        const isWeatherActive = weather.precipitationIntensity > 0.05 || weather.fogDensity > 0.05 || weather.cloudType !== CloudType.NONE;
+
+        // Skip entirely if static AND no active weather
+        const camMoved = Math.abs(this.parent.cameraX - this.lastCameraPos.x) > 0.5 || 
+                         Math.abs(this.parent.cameraY - this.lastCameraPos.y) > 0.5;
+        
+        if (!camMoved && !isWeatherActive && worldMeshVersion === this.meshVersion && (this as any)._lastLightsCount === lightsCount && !this.parent.isFiringBeam && !this.parent.isFiringFlamethrower) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'multiply';
+            ctx.drawImage(this.lightCanvas, 0, 0, fullW, fullH);
+            ctx.restore();
+            return;
+        }
+
+        this.lastCameraPos.x = this.parent.cameraX;
+        this.lastCameraPos.y = this.parent.cameraY;
+        (this as any)._lastLightsCount = lightsCount;
+
+        PerfMonitor.getInstance().begin('lighting_setup');
         
         if (this.lightCanvas.width !== w || this.lightCanvas.height !== h) {
             this.lightCanvas.width = w; this.lightCanvas.height = h;
@@ -243,9 +267,7 @@ export class LightingRenderer {
         }
 
         const { sun, moon, baseAmbient, isDaylight } = WorldClock.getInstance().getTimeState();
-        const worldMeshVersion = this.parent.world.getMeshVersion();
         const lctx = this.lightCtx;
-        const weather = WeatherManager.getInstance().getWeatherState();
 
         // Scale for internal lighting coordinates
         lctx.save();

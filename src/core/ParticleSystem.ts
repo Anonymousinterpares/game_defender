@@ -25,7 +25,18 @@ export class ParticleSystem {
 
     private colorPalette: string[] = [];
     private nextFreeIdx: number = 0;
+    private activeIndices: Uint32Array;
+    private activeCount: number = 0;
     
+    // Bucket map for O(N) rendering: Map<hash, bucket>
+    private buckets: Map<number, { count: number, x: Float32Array, y: Float32Array, r: Float32Array }>;
+
+    // Pre-allocated batching buffers to avoid object creation
+    private batchBufferX = new Float32Array(MAX_PARTICLES);
+    private batchBufferY = new Float32Array(MAX_PARTICLES);
+    private batchBufferR = new Float32Array(MAX_PARTICLES);
+    private batchBufferA = new Float32Array(MAX_PARTICLES);
+
     private spriteCache: Map<string, HTMLCanvasElement> = new Map();
 
     private worker: Worker;
@@ -77,6 +88,8 @@ export class ParticleSystem {
         this.type = getU8();
         this.flags = getU8();
         this.colorIdx = getU32();
+        this.activeIndices = new Uint32Array(count);
+        this.buckets = new Map();
 
         // Initialize Worker
         this.worker = new Worker(new URL('../workers/particle.worker.ts', import.meta.url), { type: 'module' });
@@ -266,10 +279,13 @@ export class ParticleSystem {
             this.updateMainThread(dt, world, player, enemies);
         }
         
-        // Final updates that need to happen on main thread (like color shifts)
-        // for rendering synchronization.
+        // Populate activeIndices and handle main-thread color shifts
+        this.activeCount = 0;
         for (let i = 0; i < MAX_PARTICLES; i++) {
             if (!(this.flags[i] & FLAG_ACTIVE)) continue;
+            
+            // Track active particle for faster rendering
+            this.activeIndices[this.activeCount++] = i;
             
             const lifeRatio = this.life[i] / this.maxLife[i];
             if (this.flags[i] & FLAG_IS_FLAME) {
@@ -367,12 +383,23 @@ export class ParticleSystem {
         ctx.globalAlpha = 1.0;
         ctx.globalCompositeOperation = 'source-over';
         
-        // Batch for standard particles
-        const batches: Map<string, { x: number, y: number, r: number, a: number }[]> = new Map();
+        // Reset Buckets
+        // We use a flattened array for buckets to avoid GC: buckets[colorIdx * 6 + alphaIdx]
+        // 6 Alpha buckets: 0.2, 0.4, 0.6, 0.8, 1.0, >1.0
+        // We need a way to store indices. A jagged array is easiest but allocates.
+        // To be zero-alloc, we can use a linked-list in typed arrays or just accept the tiny overhead of pushing numbers 
+        // since we are reducing iterations from 125,000 to 5,000.
+        // Let's use a map of Arrays for now, but clear them instead of re-creating.
+        if (!this.buckets) {
+            this.buckets = new Map();
+        }
+        
+        // Clear existing buckets
+        this.buckets.forEach(bucket => bucket.count = 0);
 
-        for (let i = 0; i < MAX_PARTICLES; i++) {
-            if (!(this.flags[i] & FLAG_ACTIVE)) continue;
-
+        for (let j = 0; j < this.activeCount; j++) {
+            const i = this.activeIndices[j];
+            
             const ix = this.prevX[i] + (this.x[i] - this.prevX[i]) * alpha;
             const iy = this.prevY[i] + (this.y[i] - this.prevY[i]) * alpha;
             
@@ -384,7 +411,7 @@ export class ParticleSystem {
 
             const iz = this.prevZ[i] + (this.z[i] - this.prevZ[i]) * alpha;
             const pType = this.type[i];
-            const colorStr = this.colorPalette[this.colorIdx[i]];
+            const colorIdx = this.colorIdx[i];
             const lifeRatio = this.life[i] / this.maxLife[i];
 
             if (pType === ParticleType.STANDARD) {
@@ -398,20 +425,28 @@ export class ParticleSystem {
                         ctx.globalCompositeOperation = currentGCO = targetGCO;
                     }
 
+                    const colorStr = this.colorPalette[colorIdx];
                     const sprite = this.spriteCache.get(`flame_${colorStr}`);
                     if (sprite) {
                         const r = this.radius[i];
                         ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
                     }
                 } else {
-                    // Standard solid particles - add to batch
-                    const targetAlpha = Math.max(0, lifeRatio);
-                    let list = batches.get(colorStr);
-                    if (!list) {
-                        list = [];
-                        batches.set(colorStr, list);
+                    // Standard solid particles - BUCKET THEM
+                    const pAlpha = Math.max(0, lifeRatio);
+                    const alphaIdx = Math.min(5, Math.ceil(pAlpha * 5)); // 1..5
+                    const bucketKey = (colorIdx << 3) | alphaIdx; // Simple hash
+                    
+                    let bucket = this.buckets.get(bucketKey);
+                    if (!bucket) {
+                        bucket = { count: 0, x: new Float32Array(MAX_PARTICLES), y: new Float32Array(MAX_PARTICLES), r: new Float32Array(MAX_PARTICLES) };
+                        this.buckets.set(bucketKey, bucket);
                     }
-                    list.push({ x: ix, y: iy, r: this.radius[i], a: targetAlpha });
+                    
+                    bucket.x[bucket.count] = ix;
+                    bucket.y[bucket.count] = iy;
+                    bucket.r[bucket.count] = this.radius[i];
+                    bucket.count++;
                 }
             } 
             else if (pType === ParticleType.SHOCKWAVE) {
@@ -470,33 +505,27 @@ export class ParticleSystem {
             }
         }
 
-        // Draw Batches
+        // Render Buckets
         if (currentGCO !== 'source-over') {
             ctx.globalCompositeOperation = 'source-over';
         }
-        
-        batches.forEach((list, color) => {
-            ctx.fillStyle = color;
-            
-            // Sort by alpha to minimize state changes
-            // We group particles into coarse alpha buckets (0.2, 0.4, 0.6, 0.8, 1.0)
-            const alphaBuckets: Map<number, { x: number, y: number, r: number }[]> = new Map();
-            list.forEach(p => {
-                const bucket = Math.ceil(p.a * 5) / 5;
-                if (!alphaBuckets.has(bucket)) alphaBuckets.set(bucket, []);
-                alphaBuckets.get(bucket)!.push(p);
-            });
 
-            alphaBuckets.forEach((pList, a) => {
-                ctx.globalAlpha = a;
-                ctx.beginPath();
-                pList.forEach(p => {
-                    // Move to start of arc to avoid connecting lines
-                    ctx.moveTo(p.x + p.r, p.y);
-                    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-                });
-                ctx.fill();
-            });
+        this.buckets.forEach((bucket, key) => {
+            if (bucket.count === 0) return;
+            
+            const colorIdx = key >> 3;
+            const alphaIdx = key & 7;
+            const bucketAlpha = alphaIdx / 5; // 0.2, 0.4 ...
+
+            ctx.fillStyle = this.colorPalette[colorIdx];
+            ctx.globalAlpha = Math.min(1.0, bucketAlpha);
+            ctx.beginPath();
+            
+            for (let k = 0; k < bucket.count; k++) {
+                ctx.moveTo(bucket.x[k] + bucket.r[k], bucket.y[k]);
+                ctx.arc(bucket.x[k], bucket.y[k], bucket.r[k], 0, Math.PI * 2);
+            }
+            ctx.fill();
         });
 
         ctx.globalAlpha = 1.0;
