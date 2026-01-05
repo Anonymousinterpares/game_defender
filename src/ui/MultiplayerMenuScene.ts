@@ -1,7 +1,7 @@
 import { Scene } from '../core/Scene';
 import { SceneManager } from '../core/SceneManager';
 import { SoundManager } from '../core/SoundManager';
-import { MultiplayerManager } from '../core/MultiplayerManager';
+import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
 
 export class MultiplayerMenuScene implements Scene {
   private container: HTMLDivElement | null = null;

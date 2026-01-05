@@ -3,6 +3,15 @@ import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
 import { RemotePlayer } from '../entities/RemotePlayer';
 import { SceneManager } from './SceneManager';
 import { InputManager } from './InputManager';
+import { WorldClock } from './WorldClock';
+import { LightManager } from './LightManager';
+import { FloorDecalManager } from './FloorDecalManager';
+import { Entity } from './Entity';
+import { Player } from '../entities/Player';
+import { Projectile } from '../entities/Projectile';
+import { Enemy } from '../entities/Enemy';
+import { ParticleSystem } from './ParticleSystem';
+import { SoundManager } from './SoundManager';
 
 export class MultiplayerGameplayScene extends GameplayScene {
   private remotePlayers: Map<string, RemotePlayer> = new Map();
@@ -19,7 +28,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
     const mm = MultiplayerManager.getInstance();
     
     // Listen for network messages
-    mm.onMessage((msg, conn) => {
+    mm.onMessage((msg, _conn) => {
       switch (msg.t) {
         case NetworkMessageType.PLAYER_STATE:
           this.handlePlayerState(msg.d);
@@ -94,7 +103,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
     // Update local entities
     this.entities.forEach(e => {
         if (e instanceof Player) {
-            e.update(dt, this.enemies, (x, y, angle) => {
+            e.update(dt, this.enemies, (x: number, y: number, angle: number) => {
                 // LOCAL SPAWN
                 const p = new Projectile(x, y, angle);
                 this.projectiles.push(p);
@@ -111,7 +120,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
     }
 
     this.projectiles = this.projectiles.filter(p => { p.update(dt); return p.active; });
-    ParticleSystem.getInstance().update(dt, this.world, this.player, this.enemies);
+    ParticleSystem.getInstance().update(dt, this.world!, this.player!, this.enemies);
 
     if (mm.isHost) {
         this.enemies = this.enemies.filter(e => { if(!e.active) this.physics.removeBody(e); return e.active; });
@@ -132,7 +141,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
     this.heatMap?.update(dt);
   }
 
-  private updateHostSpawning(dt: number): void {
+  private updateHostSpawning(_dt: number): void {
       // Logic moved from GameplayScene
       // (Simplified for this phase)
   }
@@ -169,13 +178,16 @@ export class MultiplayerGameplayScene extends GameplayScene {
                   this.enemies.push(enemy);
                   // We don't add to physics on client to prevent jitter/conflict
               }
-              // Update state from host
-              enemy.prevX = enemy.x;
-              enemy.prevY = enemy.y;
-              enemy.x = ed.x;
-              enemy.y = ed.y;
-              enemy.rotation = ed.r;
-              enemy.health = ed.h;
+              
+              if (enemy) {
+                  // Update state from host
+                  enemy.prevX = enemy.x;
+                  enemy.prevY = enemy.y;
+                  enemy.x = ed.x;
+                  enemy.y = ed.y;
+                  enemy.rotation = ed.r;
+                  enemy.health = ed.h;
+              }
           });
       }
   }
@@ -183,7 +195,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
   private handleWorldUpdate(data: any): void {
       if (this.world && this.heatMap) {
           // data: { tx, ty, m }
-          this.world['tiles'][data.ty][data.tx] = data.m;
+          (this.world as any).tiles[data.ty][data.tx] = data.m;
           this.world.invalidateTileCache(data.tx, data.ty);
           this.world.markMeshDirty();
       }
