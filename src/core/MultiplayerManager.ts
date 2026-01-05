@@ -28,6 +28,7 @@ export class MultiplayerManager {
   public static getInstance(): MultiplayerManager {
     if (!MultiplayerManager.instance) {
       MultiplayerManager.instance = new MultiplayerManager();
+      (window as any).MultiplayerManagerInstance = MultiplayerManager.instance;
     }
     return MultiplayerManager.instance;
   }
