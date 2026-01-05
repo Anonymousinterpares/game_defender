@@ -39,11 +39,23 @@ export class MultiplayerManager {
   }
 
   public init(id?: string): Promise<string> {
+    if (this.peer && !this.peer.destroyed) {
+        return Promise.resolve(this.myId);
+    }
+    
     return new Promise((resolve, reject) => {
       // Create a random ID if not provided, prefixed for easier discovery
       const peerId = id || 'neon-' + Math.random().toString(36).substr(2, 6);
       
-      this.peer = new Peer(peerId);
+      this.peer = new Peer(peerId, {
+          config: {
+              'iceServers': [
+                  { url: 'stun:stun.l.google.com:19302' },
+                  { url: 'stun:stun1.l.google.com:19302' },
+                  { url: 'stun:stun2.l.google.com:19302' },
+              ]
+          }
+      });
 
       this.peer.on('open', (id) => {
         this.myId = id;
@@ -52,11 +64,20 @@ export class MultiplayerManager {
       });
 
       this.peer.on('connection', (conn) => {
+        console.log('Incoming connection from:', conn.peer);
         this.setupConnection(conn);
       });
 
+      this.peer.on('disconnected', () => {
+        console.warn('PeerJS disconnected from signaling server');
+      });
+
+      this.peer.on('close', () => {
+        console.log('PeerJS connection closed');
+      });
+
       this.peer.on('error', (err) => {
-        console.error('PeerJS error:', err);
+        console.error('PeerJS global error:', err.type, err);
         reject(err);
       });
     });
@@ -76,7 +97,7 @@ export class MultiplayerManager {
 
   private setupConnection(conn: DataConnection): void {
     conn.on('open', () => {
-      console.log('Connected to:', conn.peer);
+      console.log('Data connection OPEN to:', conn.peer);
       this.connections.set(conn.peer, conn);
     });
 
@@ -86,8 +107,12 @@ export class MultiplayerManager {
     });
 
     conn.on('close', () => {
-      console.log('Connection closed:', conn.peer);
+      console.log('Data connection CLOSED:', conn.peer);
       this.connections.delete(conn.peer);
+    });
+
+    conn.on('error', (err) => {
+        console.error('Data connection ERROR with:', conn.peer, err);
     });
   }
 
@@ -107,6 +132,14 @@ export class MultiplayerManager {
 
   public onMessage(cb: (msg: NetworkMessage, conn: DataConnection) => void): void {
     this.onMessageCallbacks.push(cb);
+  }
+
+  public offMessage(cb: (msg: NetworkMessage, conn: DataConnection) => void): void {
+    this.onMessageCallbacks = this.onMessageCallbacks.filter(c => c !== cb);
+  }
+
+  public clearMessageCallbacks(): void {
+    this.onMessageCallbacks = [];
   }
 
   public disconnect(): void {

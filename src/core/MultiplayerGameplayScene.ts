@@ -53,6 +53,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
     super.onEnter();
     
     const mm = MultiplayerManager.getInstance();
+    mm.clearMessageCallbacks();
     
     // Listen for network messages
     mm.onMessage((msg, _conn) => {
