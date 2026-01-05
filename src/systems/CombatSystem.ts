@@ -61,40 +61,7 @@ export class CombatSystem {
         if (!world || !player) return;
 
         for (const p of projectiles) {
-            // Projectile vs World
-            const mapW = world.getWidthPixels();
-            const mapH = world.getHeightPixels();
-            const hitWall = world.isWall(p.x, p.y);
-            const hitBorder = p.x < 0 || p.x > mapW || p.y < 0 || p.y > mapH;
-
-            if (hitWall || hitBorder) {
-                if (p.aoeRadius > 0) {
-                    this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
-                } else {
-                    const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
-                    SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
-                    this.createImpactParticles(p.x, p.y, p.color);
-                }
-
-                if (hitWall && this.parent.heatMap) {
-                    const mat = this.parent.heatMap.getMaterialAt(p.x, p.y);
-                    const intensity = this.parent.heatMap.getIntensityAt(p.x, p.y);
-                    
-                    p.onWorldHit(this.parent.heatMap, p.x, p.y);
-                    
-                    if (mat === MaterialType.METAL && intensity > 0.4) {
-                        const count = 5 + Math.floor(Math.random() * 5);
-                        for (let i = 0; i < count; i++) {
-                            const angle = p.rotation + Math.PI + (Math.random() - 0.5);
-                            const speed = 40 + Math.random() * 40;
-                            ParticleSystem.getInstance().spawnMoltenMetal(p.x, p.y, Math.cos(angle) * speed, Math.sin(angle) * speed);
-                        }
-                    }
-                }
-                
-                p.active = false;
-                continue;
-            }
+            // Projectile vs World - REMOVED (Handled in Scene for better network sync)
 
             // Projectile vs Entities (Enemies & RemotePlayers)
             if (p.active) {

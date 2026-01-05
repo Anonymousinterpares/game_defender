@@ -11,7 +11,7 @@ import { LightManager } from './LightManager';
 import { FloorDecalManager } from './FloorDecalManager';
 import { Entity } from './Entity';
 import { Player } from '../entities/Player';
-import { Projectile } from '../entities/Projectile';
+import { Projectile, ProjectileType } from '../entities/Projectile';
 import { Enemy } from '../entities/Enemy';
 import { Drop } from '../entities/Drop';
 import { ParticleSystem } from './ParticleSystem';
@@ -26,7 +26,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
   // We'll rename the map to remotePlayersMap and expose remotePlayers getter/property.
   private remotePlayersMap: Map<string, RemotePlayer> = new Map();
   private scores: Map<string, number> = new Map();
-  private networkTickRate: number = 0.05; // 20 times per second
+  private networkTickRate: number = 0.033; // ~30 times per second
   private networkTimer: number = 0;
   private envSyncTimer: number = 0;
   private lastActiveState: boolean = true;
@@ -44,7 +44,9 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
   private updateRemotePlayersArray(): void {
       this.remotePlayers.length = 0;
-      this.remotePlayersMap.forEach(rp => this.remotePlayers.push(rp));
+      this.remotePlayersMap.forEach(rp => {
+          if (rp.active) this.remotePlayers.push(rp);
+      });
   }
 
   onEnter(): void {
@@ -295,6 +297,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
         }
     }
 
+    this.updateRemotePlayersArray();
     this.weaponSystem.update(dt, this.inputManager);
     this.combatSystem.update(dt);
 
@@ -313,7 +316,11 @@ export class MultiplayerGameplayScene extends GameplayScene {
                 // LOCAL SPAWN
                 const p = new Projectile(x, y, angle);
                 p.shooterId = this.myId;
+                // Add weapon type to the projectile
+                const activeWeapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon') as ProjectileType;
+                p.type = activeWeapon;
                 this.projectiles.push(p);
+                
                 // NETWORK BROADCAST
                 mm.broadcast(NetworkMessageType.PROJECTILE, { 
                     x, y, a: angle, type: p.type, 
@@ -332,27 +339,45 @@ export class MultiplayerGameplayScene extends GameplayScene {
     this.projectiles = this.projectiles.filter(p => { 
         const active = p.update(dt); 
         
-        // Handle projectile hits (moved from Projectile to Scene for network control)
         if (p.active && this.world && this.heatMap) {
+            const mapW = this.world.getWidthPixels();
+            const mapH = this.world.getHeightPixels();
             const hitPoint = this.world.checkWallCollision(p.x, p.y, p.radius);
-            if (hitPoint) {
-                const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-                const tx = Math.floor(hitPoint.x / tileSize);
-                const ty = Math.floor(hitPoint.y / tileSize);
+            const hitBorder = p.x < 0 || p.x > mapW || p.y < 0 || p.y > mapH;
+
+            if (hitPoint || hitBorder) {
+                // LOCAL VISUALS (Always play for local satisfaction)
+                if (p.aoeRadius > 0) {
+                    this.combatSystem.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
+                } else if (hitPoint) {
+                    const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
+                    SoundManager.getInstance().playSoundSpatial(sfx, hitPoint.x, hitPoint.y);
+                    this.combatSystem.createImpactParticles(hitPoint.x, hitPoint.y, p.color);
+                }
+
+                if (mm.isHost && hitPoint) {
+                    const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                    const tx = Math.floor(hitPoint.x / tileSize);
+                    const ty = Math.floor(hitPoint.y / tileSize);
+                    
+                    // HOST EFFECT (Actually modifies the map)
+                    p.onWorldHit(this.heatMap, hitPoint.x, hitPoint.y);
+                    
+                    // BROADCAST to all clients
+                    const tiles = (this.world as any).tiles;
+                    const hpData = this.heatMap.getTileHP(tx, ty);
+                    
+                    mm.broadcast(NetworkMessageType.WORLD_UPDATE, {
+                        tx, ty, 
+                        m: tiles[ty][tx],
+                        hp: hpData ? Array.from(hpData) : null,
+                        pt: p.type, // Send projectile type for better client-side effects
+                        hx: hitPoint.x,
+                        hy: hitPoint.y
+                    });
+                }
                 
-                // LOCAL EFFECT
-                p.onWorldHit(this.heatMap, hitPoint.x, hitPoint.y);
                 p.active = false;
-                
-                // Check if tile was destroyed and broadcast
-                const tiles = (this.world as any).tiles;
-                const hpData = this.heatMap.getTileHP(tx, ty);
-                
-                MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_UPDATE, {
-                    tx, ty, 
-                    m: tiles[ty][tx],
-                    hp: hpData ? Array.from(hpData) : null 
-                });
             }
         }
         
@@ -379,7 +404,12 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
     this.spatialGrid.clear();
     if (this.player) this.spatialGrid.insert(this.player);
-    this.remotePlayersMap.forEach(rp => this.spatialGrid.insert(rp));
+    this.remotePlayersMap.forEach(rp => {
+        if (rp.active) {
+            this.spatialGrid.insert(rp);
+            rp.segments.forEach(s => this.spatialGrid.insert(s));
+        }
+    });
     this.enemies.forEach(e => this.spatialGrid.insert(e));
     this.projectiles.forEach(p => this.spatialGrid.insert(p));
 
@@ -440,8 +470,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
   }
 
   private handleRemoteProjectile(data: any): void {
-      const p = new Projectile(data.x, data.y, data.a);
-      if (data.type) p.type = data.type; 
+      const p = new Projectile(data.x, data.y, data.a, data.type);
       if (data.sid) p.shooterId = data.sid;
       
       this.projectiles.push(p);
@@ -502,8 +531,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
       }
 
       if (this.world && this.heatMap) {
-          // data: { tx, ty, m, hp }
-          const { tx, ty, m, hp } = data;
+          // data: { tx, ty, m, hp, pt, hx, hy }
+          const { tx, ty, m, hp, pt, hx, hy } = data;
           
           // Update World Tile
           (this.world as any).tiles[ty][tx] = m;
@@ -514,7 +543,6 @@ export class MultiplayerGameplayScene extends GameplayScene {
               if (currentHP) {
                   for (let i = 0; i < hp.length; i++) currentHP[i] = hp[i];
               } else {
-                  // If HP data doesn't exist for this tile yet, we might need to initialize it
                   this.heatMap.setMaterial(tx, ty, m);
                   const newHP = this.heatMap.getTileHP(tx, ty);
                   if (newHP) {
@@ -525,6 +553,20 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
           this.world.invalidateTileCache(tx, ty);
           this.world.markMeshDirty();
+
+          // Trigger visual effects on Client if they weren't already played
+          if (!MultiplayerManager.getInstance().isHost && pt && hx !== undefined && hy !== undefined) {
+              const cfg = ConfigManager.getInstance();
+              if (pt === ProjectileType.ROCKET || pt === ProjectileType.MISSILE || pt === ProjectileType.MINE) {
+                  const aoe = (pt === ProjectileType.MINE ? cfg.get<number>('Weapons', 'mineAOE') : (pt === ProjectileType.ROCKET ? cfg.get<number>('Weapons', 'rocketAOE') : cfg.get<number>('Weapons', 'missileAOE'))) * cfg.get<number>('World', 'tileSize');
+                  this.combatSystem.createExplosion(hx, hy, aoe, 0);
+              } else {
+                  const sfx = pt === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
+                  SoundManager.getInstance().playSoundSpatial(sfx, hx, hy);
+                  const color = pt === ProjectileType.CANNON ? '#ffff00' : '#ff6600';
+                  this.combatSystem.createImpactParticles(hx, hy, color);
+              }
+          }
       }
   }
 
