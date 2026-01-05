@@ -16,6 +16,7 @@ import { Enemy } from '../entities/Enemy';
 import { Drop } from '../entities/Drop';
 import { ParticleSystem } from './ParticleSystem';
 import { SoundManager } from './SoundManager';
+import { Quadtree } from '../utils/Quadtree';
 
 export class MultiplayerGameplayScene extends GameplayScene {
   // remotePlayers is already defined here, but as a Map. 
@@ -172,6 +173,15 @@ export class MultiplayerGameplayScene extends GameplayScene {
           this.physics.setWorld(this.world);
           SoundManager.getInstance().setWorld(this.world);
           ParticleSystem.getInstance().initWorker(this.world);
+          
+          // Reset rendering systems for the new world
+          this.lightingRenderer.clearCache();
+          this.spatialGrid = new Quadtree<Entity>({ 
+              x: 0, 
+              y: 0, 
+              w: this.world.getWidthPixels(), 
+              h: this.world.getHeightPixels() 
+          });
       }
   }
 

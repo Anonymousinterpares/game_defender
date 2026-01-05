@@ -26,7 +26,7 @@ export class RemotePlayer extends Entity {
     
     this.radius = 15;
     this.prevX = x;
-    this.prevY = x;
+    this.prevY = y;
     this.targetX = x;
     this.targetY = y;
 

@@ -45,6 +45,8 @@ export abstract class Entity implements PhysicsBody {
   constructor(x: number, y: number) {
     this.x = x;
     this.y = y;
+    this.prevX = x;
+    this.prevY = y;
     
     if (!Entity.fireAsset && ConfigManager.getInstance().get<boolean>('Fire', 'isFireSpritesheet')) {
         Entity.fireAsset = new Image();
