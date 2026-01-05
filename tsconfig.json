@@ -13,7 +13,8 @@
     "noEmit": true,
     "noUnusedLocals": false,
     "noImplicitReturns": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }

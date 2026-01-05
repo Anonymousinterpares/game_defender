@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { World } from './World';
 import { SoundRaycaster, AudiblePath } from '../utils/SoundRaycaster';
 import { ConfigManager } from '../config/MasterConfig';
@@ -473,7 +474,7 @@ export class SoundManager {
           let found = true;
           while (found && i < 20) { // Safety cap of 20 variants
               const name = `${mat}_hit_${i}`;
-              const url = `/assets/sounds/${name}.wav`;
+              const url = `${import.meta.env.BASE_URL}assets/sounds/${name}.wav`;
               found = await this.loadSound(name, url);
               if (found) {
                   i++;

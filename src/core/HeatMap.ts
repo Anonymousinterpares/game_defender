@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { SoundManager } from './SoundManager';
 import { ConfigManager } from '../config/MasterConfig';
 import { FloorDecalManager } from './FloorDecalManager';

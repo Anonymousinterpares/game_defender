@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { Scene } from './Scene';
 import { SceneManager } from './SceneManager';
 import { InputManager } from './InputManager';
@@ -411,12 +412,18 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.lightingRenderer.render(ctx);
     PerfMonitor.getInstance().end('render_lighting');
 
-    if (this.radar) this.radar.render(this.player, [this.player, ...this.enemies, ...this.projectiles]);
+    if (this.radar && this.player) {
+        this.radar.render(this.player, this.getRadarEntities());
+    }
     this.hud.render(ctx);
     
     if (ConfigManager.getInstance().get<boolean>('Benchmark', 'showPerfMetrics')) {
         PerfMonitor.getInstance().render(ctx);
     }
+  }
+
+  protected getRadarEntities(): Entity[] {
+      return [this.player!, ...this.enemies, ...this.projectiles];
   }
 
   private spawnDrop(): void {

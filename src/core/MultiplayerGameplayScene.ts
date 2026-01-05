@@ -47,22 +47,27 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
     // PVP SPAWNING LOGIC
     if (this.player && this.world) {
-        // Find safe spot for Player 1
+        // Find safe spot for Player 1 (Host or Client, they both do it locally first)
         const p1Pos = this.getRandomValidPos();
         this.player.x = p1Pos.x;
         this.player.y = p1Pos.y;
         this.player.prevX = p1Pos.x;
         this.player.prevY = p1Pos.y;
         
-        // Host tells client where to spawn
         if (mm.isHost) {
-            console.log('Host: Calculating spawn for Peer...');
-            const p2Pos = this.getSafePVPSpawn(p1Pos);
-            mm.broadcast(NetworkMessageType.CHAT, { system: 'SPAWN_POS', x: p2Pos.x, y: p2Pos.y });
+            console.log('Host: Waiting for Client READY...');
+            mm.onMessage((msg) => {
+                if (msg.t === NetworkMessageType.CHAT && msg.d.system === 'READY') {
+                    console.log('Host: Client is READY, sending spawn pos');
+                    const p2Pos = this.getSafePVPSpawn(p1Pos);
+                    mm.broadcast(NetworkMessageType.CHAT, { system: 'SPAWN_POS', x: p2Pos.x, y: p2Pos.y });
+                }
+            });
         } else {
             // Client listens for its spawn pos
             mm.onMessage((msg) => {
                 if (msg.t === NetworkMessageType.CHAT && msg.d.system === 'SPAWN_POS') {
+                    console.log('Client: Received spawn pos from Host');
                     if (this.player) {
                         this.player.x = msg.d.x;
                         this.player.y = msg.d.y;
@@ -71,6 +76,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
                     }
                 }
             });
+            // Tell host we are ready
+            mm.broadcast(NetworkMessageType.CHAT, { system: 'READY' });
         }
     }
   }
@@ -175,10 +182,15 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
     this.spatialGrid.clear();
     if (this.player) this.spatialGrid.insert(this.player);
+    this.remotePlayers.forEach(rp => this.spatialGrid.insert(rp));
     this.enemies.forEach(e => this.spatialGrid.insert(e));
     this.projectiles.forEach(p => this.spatialGrid.insert(p));
 
     this.heatMap?.update(dt);
+  }
+
+  protected getRadarEntities(): Entity[] {
+      return [this.player!, ...this.remotePlayers.values(), ...this.enemies, ...this.projectiles];
   }
 
   private updateHostSpawning(_dt: number): void {

@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { PhysicsBody, PhysicsEngine } from './PhysicsEngine';
 import { ConfigManager } from '../config/MasterConfig';
 

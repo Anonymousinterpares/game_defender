@@ -124,6 +124,7 @@ export class Radar {
         let color = '255, 0, 0'; // Default Red (Enemy)
         if (blip.type === 'Projectile') color = '255, 255, 0';
         if (blip.type === 'Drop') color = '0, 255, 255';
+        if (blip.type === 'RemotePlayer') color = '0, 255, 255'; // Cyan for other players
 
         this.ctx.fillStyle = `rgba(${color}, ${blip.life})`;
         this.ctx.shadowBlur = 5 * blip.life;
