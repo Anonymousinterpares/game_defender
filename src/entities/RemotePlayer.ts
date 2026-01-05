@@ -1,5 +1,6 @@
 import { Entity } from '../core/Entity';
 import { PhysicsBody } from '../core/PhysicsEngine';
+import { ConfigManager } from '../config/MasterConfig';
 
 export class RemotePlayer extends Entity {
   public targetX: number = 0;
@@ -8,7 +9,7 @@ export class RemotePlayer extends Entity {
   public name: string = '';
   
   public segments: Entity[] = [];
-  private bodyLength: number = 5; // Default match Player
+  private bodyLength: number = ConfigManager.getInstance().get<number>('Player', 'bodyLength');
   private segmentSpacing: number = 35;
 
   constructor(id: string, x: number, y: number) {

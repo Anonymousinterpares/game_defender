@@ -83,12 +83,6 @@ export class World {
       if (this.heatMapRef && this.heatMapRef.isTileMostlyDestroyed(tx, ty)) {
           this.tiles[ty][tx] = MaterialType.NONE;
           this.markMeshDirty();
-
-          // NEW: Notify multiplayer peers if we are the host
-          const mm = (window as any).MultiplayerManagerInstance; 
-          if (mm && mm.isHost) {
-              mm.broadcast('wu', { tx, ty, m: MaterialType.NONE });
-          }
       }
   }
 

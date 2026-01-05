@@ -23,6 +23,9 @@ export interface CombatParent {
     coinsCollected: number;
     world: World | null;
     physics: PhysicsEngine;
+    myId?: string;
+    onExplosion?: (x: number, y: number, radius: number, damage: number) => void;
+    lastKilledBy?: string | null;
 }
 
 export class CombatSystem {
