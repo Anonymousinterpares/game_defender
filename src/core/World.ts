@@ -8,6 +8,9 @@ export class World {
   private tileSize: number;
   private tiles: MaterialType[][]; // Material of the tile
   private heatMapRef: any = null;
+  
+  private seed: number;
+  private rngState: number;
 
   // Optimized Shadow Geometry
   private cachedSegments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
@@ -26,11 +29,16 @@ export class World {
   private scratchCanvas: HTMLCanvasElement;
   private scratchCtx: CanvasRenderingContext2D;
 
-  constructor() {
+  constructor(seed?: number) {
     this.width = ConfigManager.getInstance().get('World', 'width');
     this.height = ConfigManager.getInstance().get('World', 'height');
     this.tileSize = ConfigManager.getInstance().get('World', 'tileSize');
     this.tiles = [];
+
+    // Init Seed
+    this.seed = seed !== undefined ? seed : Date.now();
+    this.rngState = this.seed;
+    console.log(`World initialized with Seed: ${this.seed}`);
 
     this.scratchCanvas = document.createElement('canvas');
     this.scratchCanvas.width = this.chunkSize;
@@ -38,6 +46,16 @@ export class World {
     this.scratchCtx = this.scratchCanvas.getContext('2d')!;
 
     this.generate();
+  }
+
+  private seededRandom(): number {
+      // Simple LCG (Linear Congruential Generator)
+      // Mulberry32 is also good, but LCG is standard enough for this
+      const a = 1664525;
+      const c = 1013904223;
+      const m = 4294967296; // 2^32
+      this.rngState = (a * this.rngState + c) % m;
+      return this.rngState / m;
   }
 
   public setHeatMap(hm: any): void {
@@ -123,8 +141,8 @@ export class World {
         if (x === 0 || x === this.width - 1 || y === 0 || y === this.height - 1) {
           row.push(MaterialType.INDESTRUCTIBLE);
         } else {
-            if (Math.random() < 0.05) {
-                const mat = materials[Math.floor(Math.random() * materials.length)];
+            if (this.seededRandom() < 0.05) {
+                const mat = materials[Math.floor(this.seededRandom() * materials.length)];
                 row.push(mat);
             } else {
                 row.push(MaterialType.NONE);

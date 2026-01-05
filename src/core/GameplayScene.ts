@@ -4,6 +4,7 @@ import { SceneManager } from './SceneManager';
 import { InputManager } from './InputManager';
 import { World } from './World';
 import { Player } from '../entities/Player';
+import { RemotePlayer } from '../entities/RemotePlayer';
 import { PhysicsEngine } from './PhysicsEngine';
 import { SoundManager } from './SoundManager';
 import { Radar } from '../ui/Radar';
@@ -42,6 +43,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
   
   public entities: Entity[] = [];
   public enemies: Enemy[] = [];
+  public remotePlayers: RemotePlayer[] = [];
   public drops: Drop[] = [];
   public projectiles: Projectile[] = [];
   
@@ -189,6 +191,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.hud.cleanup();
     this.entities = [];
     this.enemies = [];
+    this.remotePlayers = [];
     this.drops = [];
     this.projectiles = [];
     this.physics = new PhysicsEngine();

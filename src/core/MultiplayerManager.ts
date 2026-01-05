@@ -6,7 +6,11 @@ export enum NetworkMessageType {
   ENTITY_SPAWN = 'es',
   ENTITY_DESTROY = 'ed',
   PROJECTILE = 'pj',
-  CHAT = 'ch'
+  CHAT = 'ch',
+  WORLD_SEED = 'ws',
+  PLAYER_HIT = 'ph',
+  EXPLOSION = 'ex',
+  PLAYER_DEATH = 'pd'
 }
 
 export interface NetworkMessage {

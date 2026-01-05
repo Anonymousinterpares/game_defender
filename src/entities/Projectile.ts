@@ -18,6 +18,7 @@ export class Projectile extends Entity {
   public damage: number = 10;
   public isArmed: boolean = true;
   public aoeRadius: number = 0;
+  public shooterId: string | null = null;
   
   // For guided missiles
   public target: Entity | null = null;
