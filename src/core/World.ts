@@ -377,6 +377,24 @@ export class World {
       }
   }
 
+  public checkWallCollision(x: number, y: number, radius: number): {x: number, y: number} | null {
+      // Check center and 8 points on circle
+      const points = [
+          {x, y},
+          {x: x - radius, y}, {x: x + radius, y},
+          {x, y: y - radius}, {x, y: y + radius},
+          {x: x - radius * 0.7, y: y - radius * 0.7},
+          {x: x + radius * 0.7, y: y - radius * 0.7},
+          {x: x - radius * 0.7, y: y + radius * 0.7},
+          {x: x + radius * 0.7, y: y + radius * 0.7}
+      ];
+
+      for (const p of points) {
+          if (this.isWall(p.x, p.y)) return p;
+      }
+      return null;
+  }
+
   public isWall(x: number, y: number): boolean {
     const gx = Math.floor(x / this.tileSize);
     const gy = Math.floor(y / this.tileSize);

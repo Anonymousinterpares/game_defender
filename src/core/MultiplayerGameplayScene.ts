@@ -76,6 +76,9 @@ export class MultiplayerGameplayScene extends GameplayScene {
         case NetworkMessageType.PLAYER_DEATH:
           this.handleRemoteDeath(msg.d);
           break;
+        case NetworkMessageType.PLAYER_HIT:
+          this.handlePlayerHit(msg.d);
+          break;
       }
     });
 
@@ -121,6 +124,22 @@ export class MultiplayerGameplayScene extends GameplayScene {
     }
 
     if (mm.isHost) this.isSpawned = true;
+  }
+
+  private handlePlayerHit(data: any): void {
+      const { id, damage, killerId } = data;
+      
+      if (id === this.myId && this.player) {
+          this.player.takeDamage(damage);
+          if (this.player.health <= 0) {
+              this.lastKilledBy = killerId;
+          }
+      } else {
+          const rp = this.remotePlayersMap.get(id);
+          if (rp) {
+              rp.takeDamage(damage);
+          }
+      }
   }
 
   private handleLocalDeath(): void {
@@ -315,30 +334,25 @@ export class MultiplayerGameplayScene extends GameplayScene {
         
         // Handle projectile hits (moved from Projectile to Scene for network control)
         if (p.active && this.world && this.heatMap) {
-            if (this.world.isWall(p.x, p.y)) {
-                const tx = Math.floor(p.x / ConfigManager.getInstance().get<number>('World', 'tileSize'));
-                const ty = Math.floor(p.y / ConfigManager.getInstance().get<number>('World', 'tileSize'));
+            const hitPoint = this.world.checkWallCollision(p.x, p.y, p.radius);
+            if (hitPoint) {
+                const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                const tx = Math.floor(hitPoint.x / tileSize);
+                const ty = Math.floor(hitPoint.y / tileSize);
                 
                 // LOCAL EFFECT
-                p.onWorldHit(this.heatMap, p.x, p.y);
+                p.onWorldHit(this.heatMap, hitPoint.x, hitPoint.y);
                 p.active = false;
                 
                 // Check if tile was destroyed and broadcast
-                if (this.world.getTilesSharedBuffer()) { // Trick to check if tiles are accessible
-                     // Actually let's just use the fact that tiles is private but we have access in this class context if we cast
-                     const tiles = (this.world as any).tiles;
-                     if (tiles[ty][tx] === MaterialType.NONE) {
-                         MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_UPDATE, {
-                             tx, ty, m: MaterialType.NONE
-                         });
-                     } else {
-                         // Still send the material update for damage consistency
-                         const mat = this.heatMap.getMaterialAt(p.x, p.y);
-                         MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_UPDATE, {
-                             tx, ty, m: mat
-                         });
-                     }
-                }
+                const tiles = (this.world as any).tiles;
+                const hpData = this.heatMap.getTileHP(tx, ty);
+                
+                MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_UPDATE, {
+                    tx, ty, 
+                    m: tiles[ty][tx],
+                    hp: hpData ? Array.from(hpData) : null 
+                });
             }
         }
         
@@ -488,9 +502,28 @@ export class MultiplayerGameplayScene extends GameplayScene {
       }
 
       if (this.world && this.heatMap) {
-          // data: { tx, ty, m }
-          (this.world as any).tiles[data.ty][data.tx] = data.m;
-          this.world.invalidateTileCache(data.tx, data.ty);
+          // data: { tx, ty, m, hp }
+          const { tx, ty, m, hp } = data;
+          
+          // Update World Tile
+          (this.world as any).tiles[ty][tx] = m;
+          
+          // Update HeatMap HP
+          if (hp) {
+              const currentHP = this.heatMap.getTileHP(tx, ty);
+              if (currentHP) {
+                  for (let i = 0; i < hp.length; i++) currentHP[i] = hp[i];
+              } else {
+                  // If HP data doesn't exist for this tile yet, we might need to initialize it
+                  this.heatMap.setMaterial(tx, ty, m);
+                  const newHP = this.heatMap.getTileHP(tx, ty);
+                  if (newHP) {
+                      for (let i = 0; i < hp.length; i++) newHP[i] = hp[i];
+                  }
+              }
+          }
+
+          this.world.invalidateTileCache(tx, ty);
           this.world.markMeshDirty();
       }
   }

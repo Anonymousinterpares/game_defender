@@ -12,6 +12,7 @@ import { PhysicsEngine } from '../core/PhysicsEngine';
 import { ConfigManager } from '../config/MasterConfig';
 import { Drop, DropType } from '../entities/Drop';
 import { ParticleSystem } from '../core/ParticleSystem';
+import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
 
 export interface CombatParent {
     enemies: Enemy[];
@@ -166,11 +167,16 @@ export class CombatSystem {
                                 if (p.aoeRadius > 0) {
                                     this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
                                 } else {
-                                    // Visual hit only for now (no network health sync yet)
+                                    // Visual hit only locally
                                     const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
                                     SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
-                                    // Maybe add blood/spark particles here?
                                     this.createImpactParticles(p.x, p.y, rp.color);
+
+                                    // BROADCAST the hit so the remote player takes damage
+                                    if (p.shooterId === this.parent.myId) {
+                                        const mm = MultiplayerManager.getInstance();
+                                        mm.broadcast(NetworkMessageType.PLAYER_HIT, { id: rp.id, damage: p.damage, killerId: this.parent.myId });
+                                    }
                                 }
                                 p.active = false;
                                 hit = true;
