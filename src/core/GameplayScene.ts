@@ -441,7 +441,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     }
   }
 
-  private getRandomValidPos(): {x: number, y: number} {
+  protected getRandomValidPos(): {x: number, y: number} {
     if (!this.world) return {x: 0, y: 0};
     for(let i=0; i<20; i++) {
         const rx = Math.random() * this.world.getWidthPixels();
