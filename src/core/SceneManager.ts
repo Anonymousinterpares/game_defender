@@ -2,6 +2,7 @@ import { Scene } from './Scene';
 import { MainMenuScene } from '../ui/MainMenuScene';
 import { SettingsScene } from '../ui/SettingsScene';
 import { GameplayScene } from './GameplayScene';
+import { MultiplayerMenuScene } from '../ui/MultiplayerMenuScene';
 import { BenchmarkScene } from './BenchmarkScene';
 import { InputManager } from './InputManager';
 
@@ -18,6 +19,7 @@ export class SceneManager {
     this.scenes.set('menu', new MainMenuScene(this));
     this.scenes.set('settings', new SettingsScene(this, inputManager));
     this.scenes.set('gameplay', new GameplayScene(this, inputManager));
+    this.scenes.set('multiplayer_menu', new MultiplayerMenuScene(this));
     this.scenes.set('benchmark', new BenchmarkScene(this, inputManager));
 
     // Start with Menu
