@@ -650,7 +650,7 @@ export class LightingRenderer {
 
         // Erase object footprints from shadow mask
         mctx.globalCompositeOperation = 'destination-out';
-        if (this.parent.world) this.parent.world.renderAsSilhouette(mctx, this.parent.cameraX, this.parent.cameraY, '#ffffff');
+        if (this.parent.world) this.parent.world.renderAsSilhouette(mctx, this.parent.cameraX, this.parent.cameraY);
         if (this.parent.player) this.parent.player.renderAsSilhouette(mctx, '#ffffff');
         this.parent.enemies.forEach(e => e.renderAsSilhouette(mctx, '#ffffff'));
 

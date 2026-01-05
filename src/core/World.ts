@@ -23,11 +23,19 @@ export class World {
   private lastSnowAccumulation: number = 0;
   private sharedTiles: Uint8Array | null = null;
 
+  private scratchCanvas: HTMLCanvasElement;
+  private scratchCtx: CanvasRenderingContext2D;
+
   constructor() {
     this.width = ConfigManager.getInstance().get('World', 'width');
     this.height = ConfigManager.getInstance().get('World', 'height');
     this.tileSize = ConfigManager.getInstance().get('World', 'tileSize');
     this.tiles = [];
+
+    this.scratchCanvas = document.createElement('canvas');
+    this.scratchCanvas.width = this.chunkSize;
+    this.scratchCanvas.height = this.chunkSize + 32;
+    this.scratchCtx = this.scratchCanvas.getContext('2d')!;
 
     this.generate();
   }
@@ -220,7 +228,7 @@ export class World {
       this.renderInternal(ctx, cameraX, cameraY, false);
   }
 
-  public renderAsSilhouette(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, color: string): void {
+  public renderAsSilhouette(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, color?: string): void {
       this.renderInternal(ctx, cameraX, cameraY, true, color);
   }
 
@@ -302,18 +310,16 @@ export class World {
                 // to match the shadow volume coordinate space.
                 ctx.save();
                 if (silColor) {
-                    // Create a temporary solid mask if needed, but for shadows 
-                    // we usually just need the alpha of the chunk.
-                    ctx.fillStyle = silColor;
-                    // We draw the chunk but only use its alpha
-                    const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = chunk.canvas.width;
-                    tempCanvas.height = chunk.canvas.height;
-                    const tctx = tempCanvas.getContext('2d')!;
-                    tctx.drawImage(chunk.canvas, 0, 0);
-                    tctx.globalCompositeOperation = 'source-in';
-                    tctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-                    ctx.drawImage(tempCanvas, gx * this.chunkSize, gy * this.chunkSize - 8);
+                    // Use shared scratch canvas to tint
+                    const sctx = this.scratchCtx;
+                    sctx.clearRect(0, 0, this.chunkSize, this.chunkSize + 32);
+                    sctx.drawImage(chunk.canvas, 0, 0);
+                    sctx.globalCompositeOperation = 'source-in';
+                    sctx.fillStyle = silColor;
+                    sctx.fillRect(0, 0, this.chunkSize, this.chunkSize + 32);
+                    sctx.globalCompositeOperation = 'source-over'; // Reset
+                    
+                    ctx.drawImage(this.scratchCanvas, gx * this.chunkSize, gy * this.chunkSize - 8);
                 } else {
                     ctx.drawImage(chunk.canvas, gx * this.chunkSize, gy * this.chunkSize - 8);
                 }
