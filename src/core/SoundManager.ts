@@ -313,6 +313,10 @@ export class SoundManager {
 
     const finalVolume = Math.min(2.0, pathVol * baseVol * volumeScale);
 
+    if (ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs')) {
+        console.log(`[Audio 3D] Playing ${name} at (${Math.round(x)},${Math.round(y)}) | Dist: ${Math.round(paths[0].distance)} | Vol: ${finalVolume.toFixed(2)} | Cutoff: ${minCutoff}`);
+    }
+
     const buffer = this.sounds.get(name);
     if (!buffer) {
         console.warn(`Sound buffer not found: ${name}. Falling back to synthesis.`);
@@ -507,13 +511,27 @@ export class SoundManager {
       this.audioCtx.resume();
     }
 
+    const shouldLog = ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs');
+
     const buffer = this.sounds.get(name);
     if (buffer) {
+      // FIX: Use individual volume config for 2D sounds too
+      let baseVol = ConfigManager.getInstance().get<number>('Audio', 'vol_' + name);
+      if (baseVol === undefined) baseVol = 1.0;
+
       const source = this.audioCtx.createBufferSource();
       source.buffer = buffer;
-      source.connect(this.masterGain);
+      
+      const gain = this.audioCtx.createGain();
+      gain.gain.value = baseVol;
+      
+      source.connect(gain);
+      gain.connect(this.masterGain);
       source.start();
+
+      if (shouldLog) console.log(`[Audio 2D] Playing ${name} | Vol: ${baseVol}`);
     } else {
+      if (shouldLog) console.log(`[Audio 2D] Synthesizing ${name}`);
       // Fallback synthesis based on name
       switch(name) {
           case 'ping': this.synthesizePing(); break;

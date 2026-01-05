@@ -124,6 +124,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     
     const sm = SoundManager.getInstance();
     sm.init();
+    sm.setWorld(this.world);
     
     // Ensure base ends with slash and doesn't cause double slash issues
     let base = import.meta.env.BASE_URL;
