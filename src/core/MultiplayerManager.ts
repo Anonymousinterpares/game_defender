@@ -57,8 +57,7 @@ export class MultiplayerManager {
       const peerId = id || 'neon-' + Math.random().toString(36).substr(2, 6);
       console.log('[MP] Creating Peer with ID:', peerId);
       
-      // debug: 3 provides full WebRTC logs in console
-      this.peer = new Peer(peerId, { debug: 3 });
+      this.peer = new Peer(peerId);
 
       this.peer.on('open', (id) => {
         this.myId = id;

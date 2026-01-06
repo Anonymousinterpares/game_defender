@@ -243,7 +243,19 @@ export class MultiplayerGameplayScene extends GameplayScene {
     this.updateMultiplayerCore(dt);
 
     // 2. Update remote players (visual only)
-    this.remotePlayersMap.forEach(rp => rp.update(dt));
+    this.remotePlayersMap.forEach(rp => {
+        rp.update(dt);
+        if (!rp.active) {
+            // Force active if we are receiving updates
+             if (this.networkTimer > 0) rp.active = true;
+        }
+    });
+
+    // Debug Log for Visibility
+    if (this.remotePlayers.length > 0 && Math.random() < 0.01) {
+        const rp = this.remotePlayers[0];
+        console.log(`[VIS] RP ${rp.id} | Pos: ${Math.round(rp.x)},${Math.round(rp.y)} | Active: ${rp.active} | InGrid: ?`);
+    }
     
     // 3. Radar update
     if (this.radar && this.player) this.radar.update(dt);
