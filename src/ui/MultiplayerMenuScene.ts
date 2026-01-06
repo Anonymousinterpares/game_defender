@@ -23,6 +23,13 @@ export class MultiplayerMenuScene implements Scene {
 
   update(dt: number): void {
     const mm = MultiplayerManager.getInstance();
+    
+    // Debugging: only log if state changes or every few seconds
+    if ((window as any).lastMPCount !== mm.getConnectedPeersCount()) {
+        console.log(`[MENU] MP State - Peers: ${mm.getConnectedPeersCount()}, IsHost: ${mm.isHost}`);
+        (window as any).lastMPCount = mm.getConnectedPeersCount();
+    }
+
     if (this.statusEl && mm.getConnectedPeersCount() > 0) {
         if (mm.isHost) {
             // Only show start button if it's not already there
@@ -140,7 +147,8 @@ export class MultiplayerMenuScene implements Scene {
       if (nameInput) mm.myName = nameInput.value.trim() || 'Player';
 
       try {
-        await mm.init(); // Init my own peer first
+        await mm.init(); // Always try to init/reconnect
+        mm.clearMessageCallbacks(); 
         mm.onMessage((msg) => {
             if (msg.t === NetworkMessageType.CHAT && msg.d.system === 'START_GAME') {
                 this.sceneManager.switchScene('multiplayer_gameplay');

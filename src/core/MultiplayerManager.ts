@@ -39,81 +39,101 @@ export class MultiplayerManager {
   }
 
   public init(id?: string): Promise<string> {
-    if (this.peer && !this.peer.destroyed) {
+    console.log('[MP] Init called. ID:', id, 'Peer exists:', !!this.peer);
+    
+    if (this.peer && !this.peer.destroyed && !this.peer.disconnected) {
         return Promise.resolve(this.myId);
     }
-    
+
+    if (this.peer && this.peer.disconnected && !this.peer.destroyed) {
+        console.log('[MP] Reconnecting peer...');
+        return new Promise((resolve) => {
+            this.peer!.once('open', (id) => resolve(id));
+            this.peer!.reconnect();
+        });
+    }
+
     return new Promise((resolve, reject) => {
-      // Create a random ID if not provided, prefixed for easier discovery
       const peerId = id || 'neon-' + Math.random().toString(36).substr(2, 6);
+      console.log('[MP] Creating Peer with ID:', peerId);
       
-      this.peer = new Peer(peerId, {
-          config: {
-              'iceServers': [
-                  { url: 'stun:stun.l.google.com:19302' },
-                  { url: 'stun:stun1.l.google.com:19302' },
-                  { url: 'stun:stun2.l.google.com:19302' },
-              ]
-          }
-      });
+      // debug: 3 provides full WebRTC logs in console
+      this.peer = new Peer(peerId, { debug: 3 });
 
       this.peer.on('open', (id) => {
         this.myId = id;
-        console.log('PeerJS connected with ID:', id);
+        console.log('[MP] Peer opened:', id);
         resolve(id);
       });
 
       this.peer.on('connection', (conn) => {
-        console.log('Incoming connection from:', conn.peer);
+        console.log('[MP] INCOMING CONNECTION from:', conn.peer);
         this.setupConnection(conn);
       });
 
-      this.peer.on('disconnected', () => {
-        console.warn('PeerJS disconnected from signaling server');
-      });
-
-      this.peer.on('close', () => {
-        console.log('PeerJS connection closed');
-      });
-
       this.peer.on('error', (err) => {
-        console.error('PeerJS global error:', err.type, err);
+        console.error('[MP] Peer error:', err.type, err);
         reject(err);
       });
+
+      this.peer.on('disconnected', () => console.warn('[MP] Peer disconnected'));
     });
   }
 
   public host(): void {
     this.isHost = true;
-    console.log('Acting as Host');
+    console.log('[MP] Role: HOST');
   }
 
   public join(hostId: string): void {
     if (!this.peer) return;
+    console.log('[MP] Joining host:', hostId);
     this.isHost = false;
     const conn = this.peer.connect(hostId);
     this.setupConnection(conn);
   }
 
   private setupConnection(conn: DataConnection): void {
+    console.log('[MP] setupConnection for:', conn.peer);
+
+    let isInitialized = false;
+    const markAsOpen = () => {
+        if (isInitialized) return;
+        isInitialized = true;
+        console.log('[MP] Connection established with:', conn.peer);
+        this.connections.set(conn.peer, conn);
+    };
+
+    // Standard PeerJS open event
     conn.on('open', () => {
-      console.log('Data connection OPEN to:', conn.peer);
-      this.connections.set(conn.peer, conn);
+        console.log('[MP] Connection event: OPEN');
+        markAsOpen();
     });
 
+    // Fallback: If we get data, the connection is definitely functional
     conn.on('data', (data: any) => {
+      if (!isInitialized) {
+          console.log('[MP] Connection fallback: DATA received before OPEN event');
+          markAsOpen();
+      }
       const msg = data as NetworkMessage;
       this.onMessageCallbacks.forEach(cb => cb(msg, conn));
     });
 
     conn.on('close', () => {
-      console.log('Data connection CLOSED:', conn.peer);
+      console.log('[MP] Connection CLOSED:', conn.peer);
       this.connections.delete(conn.peer);
     });
 
     conn.on('error', (err) => {
-        console.error('Data connection ERROR with:', conn.peer, err);
+      console.error('[MP] DataConnection ERROR:', err);
     });
+
+    // Immediate check if it's already open (rare but happens)
+    if (conn.open) {
+        console.log('[MP] Connection already open at setup');
+        markAsOpen();
+    }
   }
 
   public broadcast(type: NetworkMessageType, data: any): void {
@@ -149,6 +169,7 @@ export class MultiplayerManager {
       this.peer.destroy();
       this.peer = null;
     }
+    this.myId = '';
     this.isHost = false;
     this.onMessageCallbacks = [];
   }
