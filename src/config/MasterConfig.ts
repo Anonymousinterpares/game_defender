@@ -86,7 +86,7 @@ export const MasterConfig: GameConfigSchema = {
     showGrid: { value: true, type: 'boolean', description: 'Show Map Grid' },
     fpsCounter: { value: true, type: 'boolean', description: 'Show FPS' },
     FpsShow: { value: true, type: 'boolean', description: 'Show FPS Counter' },
-    extendedLogs: { value: true, type: 'boolean', description: 'Show detailed logs (Audio, Net, etc)' },
+    extendedLogs: { value: false, type: 'boolean', description: 'Show detailed logs (Audio, Net, etc)' },
     devModeAlwaysOn: { value: true, type: 'boolean', description: 'Dev commands always active' },
     enableEnemySpawning: { value: false, type: 'boolean', description: 'Enable Enemy Spawning' }
   },
