@@ -602,10 +602,13 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
   private handlePlayerState(data: any): void {
     const { id, x, y, r, n, h, l, w } = data;
+    // console.log(`[SCENE] Handle PS from ${id} (MyID: ${MultiplayerManager.getInstance().myId})`);
+    
     if (id === MultiplayerManager.getInstance().myId) return;
 
     let rp = this.remotePlayersMap.get(id);
     if (!rp) {
+      console.log(`[SCENE] Creating NEW RemotePlayer for ${id}`);
       rp = new RemotePlayer(id, x, y);
       this.remotePlayersMap.set(id, rp);
       this.updateRemotePlayersArray();

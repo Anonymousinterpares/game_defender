@@ -57,7 +57,8 @@ export class MultiplayerManager {
       const peerId = id || 'neon-' + Math.random().toString(36).substr(2, 6);
       console.log('[MP] Creating Peer with ID:', peerId);
       
-      this.peer = new Peer(peerId);
+      // Explicitly disable verbose logs
+      this.peer = new Peer(peerId, { debug: 0 });
 
       this.peer.on('open', (id) => {
         this.myId = id;
@@ -116,6 +117,10 @@ export class MultiplayerManager {
           markAsOpen();
       }
       const msg = data as NetworkMessage;
+      // Log only infrequent messages or sample freq ones
+      if (Math.random() < 0.05 || (msg.t !== 'ps' && msg.t !== 'wu')) {
+          console.log(`[MP] RX ${msg.t} from ${conn.peer}`);
+      }
       this.onMessageCallbacks.forEach(cb => cb(msg, conn));
     });
 
