@@ -270,7 +270,50 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.enemies.forEach(e => e.update(dt, this.player || undefined));
     this.drops.forEach(d => d.update(dt));
     
-    this.projectiles = this.projectiles.filter(p => { p.update(dt); return p.active; });
+    this.projectiles = this.projectiles.filter(p => { 
+        const oldX = p.x;
+        const oldY = p.y;
+        
+        p.update(dt); 
+        
+        if (p.active && this.world && this.heatMap) {
+            const mapW = this.world.getWidthPixels();
+            const mapH = this.world.getHeightPixels();
+            
+            // 3-Point Check: Old, Mid, and New position to prevent tunneling
+            const checkPoints = [
+                {x: oldX, y: oldY},
+                {x: (oldX + p.x) / 2, y: (oldY + p.y) / 2},
+                {x: p.x, y: p.y}
+            ];
+
+            let hitPoint: {x: number, y: number} | null = null;
+            for (const pt of checkPoints) {
+                hitPoint = this.world.checkWallCollision(pt.x, pt.y, p.radius);
+                if (hitPoint) break;
+            }
+
+            const hitBorder = p.x < 0 || p.x > mapW || p.y < 0 || p.y > mapH;
+
+            if (hitPoint || hitBorder) {
+                const collisionX = hitPoint ? hitPoint.x : p.x;
+                const collisionY = hitPoint ? hitPoint.y : p.y;
+
+                if (p.aoeRadius > 0) {
+                    this.combatSystem.createExplosion(collisionX, collisionY, p.aoeRadius, p.damage);
+                } else if (hitPoint) {
+                    p.onWorldHit(this.heatMap, collisionX, collisionY);
+                    const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
+                    SoundManager.getInstance().playSoundSpatial(sfx, collisionX, collisionY);
+                    this.combatSystem.createImpactParticles(collisionX, collisionY, p.color);
+                }
+                
+                p.active = false;
+            }
+        }
+        
+        return p.active; 
+    });
     
     ParticleSystem.getInstance().update(dt, this.world, this.player, this.enemies);
 
@@ -421,6 +464,12 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     PerfMonitor.getInstance().begin('render_lighting');
     this.lightingRenderer.render(ctx);
     PerfMonitor.getInstance().end('render_lighting');
+
+    // UI Overlay (HP Bars, Names) - Rendered AFTER lighting/fog
+    if (this.player) {
+        const mm = (window as any).MultiplayerManagerInstance || null;
+        this.hud.renderEntityOverlay(ctx, this.player, this.cameraX, this.cameraY, mm ? mm.myName : 'Player');
+    }
 
     if (this.radar && this.player) {
         this.radar.render(this.player, this.getRadarEntities());

@@ -679,6 +679,20 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
     // 5. Post-processing (Lighting, Radar, HUD)
     this.lightingRenderer.render(ctx);
+    PerfMonitor.getInstance().end('render_lighting');
+
+    // UI Overlay (HP Bars, Names) - Rendered AFTER lighting/fog
+    if (this.player) {
+        const mm = MultiplayerManager.getInstance();
+        this.hud.renderEntityOverlay(ctx, this.player, this.cameraX, this.cameraY, mm.myName);
+    }
+    
+    this.remotePlayersMap.forEach(rp => {
+        if (rp.active) {
+            this.hud.renderEntityOverlay(ctx, rp, this.cameraX, this.cameraY);
+        }
+    });
+
     if (this.radar && this.player) {
         this.radar.render(this.player, this.getRadarEntities());
     }

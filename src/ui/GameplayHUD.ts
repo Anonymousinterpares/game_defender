@@ -309,4 +309,26 @@ export class GameplayHUD {
             ctx.restore();
         }
     }
+
+    public renderEntityOverlay(ctx: CanvasRenderingContext2D, entity: any, cameraX: number, cameraY: number, nameOverride?: string): void {
+        const hix = entity.interpolatedX - cameraX;
+        const hiy = entity.interpolatedY - cameraY;
+        
+        // Name
+        ctx.fillStyle = entity.color || '#cfaa6e';
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'center';
+        ctx.shadowColor = '#000';
+        ctx.shadowBlur = 4;
+        ctx.fillText(nameOverride || (entity as any).name || 'Player', hix, hiy - 30);
+        ctx.shadowBlur = 0;
+
+        // Health Bar
+        const hbW = 40;
+        const hbH = 4;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(hix - hbW/2, hiy - 25, hbW, hbH);
+        ctx.fillStyle = entity.health > 30 ? '#0f0' : '#f00';
+        ctx.fillRect(hix - hbW/2, hiy - 25, hbW * (entity.health / entity.maxHealth), hbH);
+    }
 }

@@ -110,16 +110,18 @@ export class CombatSystem {
                             if (p.aoeRadius > 0) {
                                 this.createExplosion(p.x, p.y, p.aoeRadius, p.damage, p.shooterId);
                             } else {
-                                // Direct hit from someone else - BROADCAST (Authoritative)
-                                if (p.shooterId && p.shooterId !== this.parent.myId) {
-                                    // Visual impact only locally
-                                    const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
-                                    SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
-                                    this.createImpactParticles(p.x, p.y, player.color);
-                                    
-                                    // We don't call player.takeDamage here anymore!
-                                    // The shooter will broadcast the hit, or we could broadcast our own hit.
-                                    // For consistency: Shooter broadcasts hits they observe.
+                                // Visual impact
+                                const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
+                                SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
+                                this.createImpactParticles(p.x, p.y, player.color);
+
+                                // Direct hit from someone else or enemy
+                                if (this.parent.myId === 'local') {
+                                    // Singleplayer: take damage directly
+                                    player.takeDamage(p.damage);
+                                } else if (p.shooterId && p.shooterId !== this.parent.myId) {
+                                    // Multiplayer: shooter broadcasts the hit, but we can also broadcast our own hit for robustness?
+                                    // Actually, standard is authoritative: shooter broadcasts.
                                 }
                             }
                             p.active = false;
@@ -219,6 +221,41 @@ export class CombatSystem {
         
         if (this.parent.heatMap) {
             this.parent.heatMap.addHeat(x, y, 0.8, radius * 1.5);
+            
+            // --- WORLD DAMAGE LOGIC ---
+            // Direct Tile Destruction for Singleplayer or Host
+            const mm = MultiplayerManager.getInstance();
+            if (this.parent.myId === 'local' || mm.isHost) {
+                // Determine destruction intensity based on explosion radius
+                this.parent.heatMap.destroyArea(x, y, radius, true);
+                
+                // If Host, we might need to sync the results of this destruction
+                // (Thoughwhs sync might cover it, WORLD_UPDATE is more immediate)
+                if (mm.isHost) {
+                    const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                    const tx = Math.floor(x / tileSize);
+                    const ty = Math.floor(y / tileSize);
+                    const tileRadius = Math.ceil((radius + 10) / tileSize);
+
+                    // Sync all affected tiles
+                    for (let ry = -tileRadius; ry <= tileRadius; ry++) {
+                        for (let rx = -tileRadius; rx <= tileRadius; rx++) {
+                            const ntx = tx + rx;
+                            const nty = ty + ry;
+                            if (this.parent.world && ntx >= 0 && ntx < (this.parent.world as any).width && nty >= 0 && nty < (this.parent.world as any).height) {
+                                const hpData = this.parent.heatMap.getTileHP(ntx, nty);
+                                mm.broadcast(NetworkMessageType.WORLD_UPDATE, {
+                                    tx: ntx, ty: nty,
+                                    m: (this.parent.world as any).tiles[nty][ntx],
+                                    hp: hpData ? Array.from(hpData) : null,
+                                    hx: x, hy: y // Original explosion center for visual sync
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
             // ... (shrapnel code)
             const centerMat = this.parent.heatMap.getMaterialAt(x, y);
             if (centerMat !== MaterialType.NONE) {
@@ -274,11 +311,16 @@ export class CombatSystem {
             const dist = Math.sqrt(dx*dx + dy*dy);
             if (dist < radius) {
                 const falloff = 1 - (dist / radius);
-                // IF I OWN THE EXPLOSION, broadcast hit to myself
-                if (isMyExplosion) {
+                const dmg = damage * falloff;
+                
+                if (this.parent.myId === 'local') {
+                    // Singleplayer: damage directly
+                    this.parent.player.takeDamage(dmg);
+                } else if (isMyExplosion) {
+                    // Multiplayer: broadcast hit to myself
                     mm.broadcast(NetworkMessageType.PLAYER_HIT, { 
                         id: this.parent.myId, 
-                        damage: damage * falloff, 
+                        damage: dmg, 
                         killerId: shooterId 
                     });
                 }
