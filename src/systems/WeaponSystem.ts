@@ -15,6 +15,7 @@ export interface WeaponParent {
     world: World | null;
     heatMap: HeatMap | null;
     enemies: Enemy[];
+    remotePlayers: any[];
     projectiles: Projectile[];
     weaponAmmo: Map<string, number>;
     unlockedWeapons: Set<string>;
@@ -189,6 +190,7 @@ export class WeaponSystem {
                 break;
             }
             
+            // Check Enemies
             for (const e of this.parent.enemies) {
                 const dx = e.x - tx;
                 const dy = e.y - ty;
@@ -199,6 +201,45 @@ export class WeaponSystem {
                 }
             }
             if (hitEnemy) break;
+
+            // Check Remote Players (Authoritative Hit Detection)
+            let hitRP = null;
+            for (const rp of this.parent.remotePlayers) {
+                const dx = rp.x - tx;
+                const dy = rp.y - ty;
+                if (Math.sqrt(dx*dx + dy*dy) < rp.radius) {
+                    hitRP = rp;
+                    hitSomething = true;
+                    break;
+                }
+            }
+
+            if (hitRP) {
+                if (type === 'laser') {
+                    const dmg = ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt;
+                    if (Math.random() < 0.2) { // Rate limit hit broadcast
+                        MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
+                            id: hitRP.id,
+                            damage: dmg,
+                            killerId: this.parent.myId
+                        });
+                    }
+                } else {
+                    const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                    const distInTiles = dist / tileSize;
+                    const base = ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage');
+                    const dmg = (base / (1 + distInTiles * distInTiles)) * dt;
+                    if (Math.random() < 0.2) {
+                        MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
+                            id: hitRP.id,
+                            damage: dmg,
+                            killerId: this.parent.myId
+                        });
+                    }
+                }
+                break;
+            }
+
             dist += step;
         }
         
@@ -248,7 +289,7 @@ export class WeaponSystem {
         const damage = ConfigManager.getInstance().get<number>('Weapons', 'flamethrowerDamage');
         const coneAngle = Math.PI / 4;
 
-        const targets: Entity[] = [...this.parent.enemies];
+        const targets: Entity[] = [...this.parent.enemies, ...this.parent.remotePlayers];
         targets.forEach(e => {
             const dx = e.x - player.x;
             const dy = e.y - player.y;
@@ -261,7 +302,18 @@ export class WeaponSystem {
                 while (diff > Math.PI) diff -= Math.PI * 2;
 
                 if (Math.abs(diff) < coneAngle / 2) {
-                    e.takeDamage(damage * dt);
+                    // If it's a remote player, we must broadcast the hit
+                    if ((e as any).id && (e as any).id !== this.parent.myId && !(e instanceof Enemy)) {
+                        if (Math.random() < 0.2) {
+                             MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
+                                id: (e as any).id,
+                                damage: damage * dt,
+                                killerId: this.parent.myId
+                            });
+                        }
+                    } else {
+                        e.takeDamage(damage * dt);
+                    }
                     (e as any).isOnFire = true;
                 }
             }
