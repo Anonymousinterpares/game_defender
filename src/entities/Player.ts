@@ -7,7 +7,7 @@ import { Upgrade } from './upgrades/Upgrade';
 export class Player extends Entity {
   public segments: Entity[] = []; // Treat segments as full Entities for collision
   public upgrades: Map<number, Upgrade> = new Map(); // Index -> Upgrade
-  private input: InputManager;
+  public inputManager: InputManager;
   
   // Stats
   private baseSpeedStat: number = 0;
@@ -18,7 +18,7 @@ export class Player extends Entity {
 
   constructor(x: number, y: number, input: InputManager) {
     super(x, y);
-    this.input = input;
+    this.inputManager = input;
     this.color = '#cfaa6e';
     this.radius = 15;
 
@@ -94,14 +94,14 @@ export class Player extends Entity {
     this.handleFireLogic(dt, fireDPS, baseExtinguish);
     this.segments.forEach(seg => seg.handleFireLogic(dt, fireDPS, baseExtinguish));
 
-    if (!this.active) return;
+    if (!this.active || !this.inputManager) return;
 
     // 1. MOUSE AIMING
     const screenX = window.innerWidth / 2;
     const screenY = window.innerHeight / 2;
     
-    const dx = this.input.mouseX - screenX;
-    const dy = this.input.mouseY - screenY;
+    const dx = this.inputManager.mouseX - screenX;
+    const dy = this.inputManager.mouseY - screenY;
     const distToMouse = Math.sqrt(dx*dx + dy*dy);
     
     if (distToMouse > 20) {
@@ -114,8 +114,8 @@ export class Player extends Entity {
 
     // 2. MOVEMENT
     let driveSpeed = 0;
-    if (this.input.isActionDown('moveUp')) driveSpeed = this.speed;
-    else if (this.input.isActionDown('moveDown')) driveSpeed = -this.speed * 0.6;
+    if (this.inputManager.isActionDown('moveUp')) driveSpeed = this.speed;
+    else if (this.inputManager.isActionDown('moveDown')) driveSpeed = -this.speed * 0.6;
 
     if (driveSpeed === 0) {
         this.vx = 0;
@@ -153,31 +153,13 @@ export class Player extends Entity {
           
           // Constraint: maintain distance 'segmentSpacing'
           if (dist !== 0) {
-              // If we are PULLING (forward), dist > spacing
-              // If we are PUSHING (reverse), dist < spacing
-              // We correct the segment position to be exactly 'spacing' away from leader.
-              
-              // However, for "Car-like reverse", simply snapping distance isn't enough.
-              // We need to push the segment AWAY if it's too close.
-              
               const diff = dist - this.segmentSpacing;
               
-              // Move segment to satisfy constraint
-              // We only move the segment, leader is "heavy" (driven)
               const moveX = (dx / dist) * diff;
               const moveY = (dy / dist) * diff;
               
               segment.x += moveX;
               segment.y += moveY;
-              
-              // Verify Self-Collision with Head
-              // If segment overlaps head, push it out?
-              // Actually, preventing pass-through is hard with simple constraints.
-              // But let's add a basic circle check against the head
-              if (i > 0) { // Don't check first segment against head, they are linked
-                   // Check collision with Head
-                   // ... logic ...
-              }
           }
           
           leader = segment;
@@ -206,7 +188,6 @@ export class Player extends Entity {
       const iy = s.interpolatedY;
       
       ctx.save();
-      // Apply visual scale bump for segments
       if (!silhouette && s.visualScale !== 1.0) {
           ctx.translate(ix, iy);
           ctx.scale(s.visualScale, s.visualScale);
@@ -219,7 +200,6 @@ export class Player extends Entity {
       if (silhouette) {
           ctx.fillStyle = silColor || '#fff';
       } else {
-          // Brass Gradient
           const grad = ctx.createRadialGradient(ix - 5, iy - 5, 2, ix, iy, size);
           grad.addColorStop(0, '#ebd5b3'); 
           grad.addColorStop(0.5, '#b58d4a'); 
@@ -233,8 +213,6 @@ export class Player extends Entity {
           ctx.strokeStyle = '#3d2e1e';
           ctx.lineWidth = 2;
           ctx.stroke();
-
-          // Damage Flash Overlay for segments
           if (s.damageFlash > 0) {
               ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (s.damageFlash / 0.2)})`;
               ctx.fill();
@@ -242,7 +220,6 @@ export class Player extends Entity {
       }
       ctx.restore();
 
-      // Render fire on segment if burning
       if (!silhouette && s.isOnFire) {
           s.renderFire(ctx);
       }
@@ -253,7 +230,6 @@ export class Player extends Entity {
     const hiy = this.interpolatedY;
 
     ctx.save();
-    // Apply visual scale bump for head
     if (!silhouette && this.visualScale !== 1.0) {
         ctx.translate(hix, hiy);
         ctx.scale(this.visualScale, this.visualScale);
@@ -279,8 +255,6 @@ export class Player extends Entity {
         ctx.strokeStyle = '#594326';
         ctx.lineWidth = 3;
         ctx.stroke();
-
-        // Damage Flash Overlay for head
         if (this.damageFlash > 0) {
             ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
             ctx.fill();
@@ -289,22 +263,17 @@ export class Player extends Entity {
     ctx.restore();
 
     if (!silhouette) {
-        // Render fire on head if burning
         this.renderFire(ctx);
-        
-        // Cannon
         const cannonLen = 25;
         ctx.save();
         ctx.translate(hix, hiy);
         ctx.rotate(this.rotation);
-        
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.lineTo(cannonLen, 0);
         ctx.strokeStyle = '#222';
         ctx.lineWidth = 6;
         ctx.stroke();
-        
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.lineTo(cannonLen, 0);

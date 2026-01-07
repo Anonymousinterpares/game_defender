@@ -27,109 +27,80 @@ import { ParticleSystem } from './ParticleSystem';
 import { PerfMonitor } from '../utils/PerfMonitor';
 import { BenchmarkSystem } from '../utils/BenchmarkSystem';
 import { Quadtree, Rect } from '../utils/Quadtree';
+import { Simulation, SimulationRole } from './Simulation';
 
-export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatParent, LightingParent {
-  public world: World | null = null;
-  public player: Player | null = null;
-  public physics: PhysicsEngine;
+export class GameplayScene implements Scene, HUDParent, LightingParent {
+  public simulation: Simulation;
   protected radar: Radar | null = null;
   protected hud: GameplayHUD;
-  protected weaponSystem: WeaponSystem;
-  protected combatSystem: CombatSystem;
   protected lightingRenderer: LightingRenderer;
   protected benchmark: BenchmarkSystem;
   protected inputManager: InputManager;
-  protected spatialGrid: Quadtree<Entity>;
-  
-  public entities: Entity[] = [];
-  public enemies: Enemy[] = [];
-  public remotePlayers: RemotePlayer[] = [];
-  public drops: Drop[] = [];
-  public projectiles: Projectile[] = [];
   
   public cameraX: number = 0;
   public cameraY: number = 0;
-  public coinsCollected: number = 0;
-  public get myId(): string { return 'local'; }
   
-  public lastShotTime: number = 0;
-  public shootCooldown: number = 0.2;
-  private nextDropSpawn: number = 5;
-  private nextEnemySpawn: number = 3; 
-
-  // Weapon State
-  public weaponAmmo: Map<string, number> = new Map();
-  public unlockedWeapons: Set<string> = new Set(['cannon']);
-  public weaponReloading: Map<string, boolean> = new Map();
-  public weaponReloadTimer: Map<string, number> = new Map();
-
-  public readonly weaponSlots: { [key: string]: string } = {
-    'Digit1': 'cannon',
-    'Digit2': 'rocket',
-    'Digit3': 'missile',
-    'Digit4': 'laser',
-    'Digit5': 'ray',
-    'Digit6': 'mine',
-    'Digit7': 'flamethrower'
-  };
+  // Getters to bridge to simulation for HUD/Renderer compatibility
+  public get world() { return this.simulation.world; }
+  public get player() { return this.simulation.player; }
+  public get physics() { return this.simulation.physics; }
+  public get heatMap() { return this.simulation.heatMap; }
+  public get enemies() { return this.simulation.enemies; }
+  public get remotePlayers() { return this.simulation.remotePlayers; }
+  public get drops() { return this.simulation.drops; }
+  public get projectiles() { return this.simulation.projectiles; }
+  public get coinsCollected() { return this.simulation.coinsCollected; }
+  public set coinsCollected(val: number) { this.simulation.coinsCollected = val; }
+  public get myId() { return this.simulation.myId; }
+  
+  public get weaponAmmo() { return this.simulation.weaponAmmo; }
+  public get unlockedWeapons() { return this.simulation.unlockedWeapons; }
+  public get weaponReloading() { return this.simulation.weaponReloading; }
+  public get weaponReloadTimer() { return this.simulation.weaponReloadTimer; }
 
   private isDevMode: boolean = false;
-  private spawnEnemies: boolean = true;
-
-  // Beam state - managed by weaponSystem now
-  public get isFiringBeam() { return this.weaponSystem.isFiringBeam; }
-  public get isFiringFlamethrower() { return this.weaponSystem.isFiringFlamethrower; }
-  public get beamEndPos() { return this.weaponSystem.beamEndPos; }
-  
-  public heatMap: HeatMap | null = null;
   private lightUpdateCounter: number = 0;
+
+  public get isFiringBeam() { return this.simulation.weaponSystem.isFiringBeam; }
+  public get isFiringFlamethrower() { return this.simulation.weaponSystem.isFiringFlamethrower; }
+  public get beamEndPos() { return this.simulation.weaponSystem.beamEndPos; }
+
+  public readonly weaponSlots: { [key: string]: string } = {
+    'Digit1': 'cannon', 'Digit2': 'rocket', 'Digit3': 'missile', 'Digit4': 'laser', 'Digit5': 'ray', 'Digit6': 'mine', 'Digit7': 'flamethrower'
+  };
 
   constructor(public sceneManager: SceneManager, inputManager: InputManager) {
     this.inputManager = inputManager;
-    this.physics = new PhysicsEngine();
+    this.simulation = new Simulation(SimulationRole.SINGLEPLAYER);
     this.hud = new GameplayHUD(this);
-    this.weaponSystem = new WeaponSystem(this);
-    this.combatSystem = new CombatSystem(this);
     this.lightingRenderer = new LightingRenderer(this);
     this.benchmark = new BenchmarkSystem(this);
-    this.spatialGrid = new Quadtree<Entity>({ x: 0, y: 0, w: 2000, h: 2000 });
-  }
-
-  public setLastShotTime(time: number): void {
-      this.lastShotTime = time;
   }
 
   public subtractCoins(amount: number): boolean {
-    if (this.coinsCollected >= amount) {
-        this.coinsCollected -= amount;
+    if (this.simulation.coinsCollected >= amount) {
+        this.simulation.coinsCollected -= amount;
         return true;
     }
     return false;
   }
 
   public refreshHUD(): void {
-      this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
+      this.simulation.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
   }
 
   onEnter(): void {
-    this.world = new World();
-    this.spatialGrid = new Quadtree<Entity>({ 
-        x: 0, 
-        y: 0, 
-        w: this.world.getWidthPixels(), 
-        h: this.world.getHeightPixels() 
-    });
-    this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
-    this.world.setHeatMap(this.heatMap);
-    this.physics.setWorld(this.world);
+    const seed = ConfigManager.getInstance().get<number>('Debug', 'forcedSeed');
+    this.simulation = new Simulation(SimulationRole.SINGLEPLAYER, seed);
+    this.simulation.player.inputManager = this.inputManager; // Link input
+
     ParticleSystem.getInstance().clear();
-    ParticleSystem.getInstance().initWorker(this.world);
+    ParticleSystem.getInstance().initWorker(this.simulation.world);
     
     const sm = SoundManager.getInstance();
     sm.init();
-    sm.setWorld(this.world);
+    sm.setWorld(this.simulation.world);
     
-    // Ensure base ends with slash and doesn't cause double slash issues
     let base = import.meta.env.BASE_URL;
     if (!base.endsWith('/')) base += '/';
     const getPath = (file: string) => `${base}assets/sounds/${file}`;
@@ -154,48 +125,13 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
 
     sm.discoverMaterialVariants(['wood', 'brick', 'stone', 'metal', 'indestructible']);
 
-    const centerX = this.world.getWidthPixels() / 2;
-    const centerY = this.world.getHeightPixels() / 2;
-    this.player = new Player(centerX, centerY, this.inputManager);
-    
-    this.entities.push(this.player);
-    this.physics.addBody(this.player);
-    this.player.getAllBodies().forEach(b => {
-        if (b !== this.player) this.physics.addBody(b);
-    });
-
     this.radar = new Radar();
-    this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
-    this.coinsCollected = ConfigManager.getInstance().get<number>('Debug', 'startingCoins') || 0;
-    
-    const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine', 'flamethrower'];
-    const alwaysOn = ConfigManager.getInstance().get<boolean>('Debug', 'devModeAlwaysOn');
-    
-    weapons.forEach(w => {
-        const configKey = w === 'laser' || w === 'ray' || w === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
-        const max = ConfigManager.getInstance().get<number>('Weapons', w + configKey);
-        this.weaponAmmo.set(w, max);
-        this.weaponReloading.set(w, false);
-        this.weaponReloadTimer.set(w, 0);
-        if (alwaysOn) this.unlockedWeapons.add(w);
-    });
-
-    this.spawnEnemies = ConfigManager.getInstance().get<boolean>('Debug', 'enableEnemySpawning');
     this.hud.create();
   }
 
   onExit(): void {
-    if (this.radar) {
-      this.radar.destroy();
-      this.radar = null;
-    }
+    if (this.radar) { this.radar.destroy(); this.radar = null; }
     this.hud.cleanup();
-    this.entities = [];
-    this.enemies = [];
-    this.remotePlayers = [];
-    this.drops = [];
-    this.projectiles = [];
-    this.physics = new PhysicsEngine();
     this.lightingRenderer.clearCache();
     FloorDecalManager.getInstance().clear();
     SoundManager.getInstance().stopLoopSpatial('shoot_laser');
@@ -228,142 +164,24 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
 
     for (const [key, weaponName] of Object.entries(this.weaponSlots)) {
         if (this.inputManager.isKeyJustPressed(key)) {
-            if (this.unlockedWeapons.has(weaponName)) {
+            if (this.simulation.unlockedWeapons.has(weaponName)) {
                 ConfigManager.getInstance().set('Player', 'activeWeapon', weaponName);
                 SoundManager.getInstance().playSound('ui_click');
             }
         }
     }
 
-    this.weaponSystem.update(dt, this.inputManager);
-    this.combatSystem.update(dt);
-
-    this.physics.update(dt);
-    Entity.setInterpolationAlpha(this.physics.alpha);
+    // UPDATE SIMULATION
+    this.simulation.update(dt, this.inputManager);
 
     if (this.player) {
         SoundManager.getInstance().updateListener(this.player.interpolatedX, this.player.interpolatedY);
+        this.cameraX = this.player.interpolatedX - window.innerWidth / 2;
+        this.cameraY = this.player.interpolatedY - window.innerHeight / 2;
     }
 
-    this.nextDropSpawn -= dt;
-    if (this.nextDropSpawn <= 0) {
-        this.spawnDrop();
-        this.nextDropSpawn = 5 + Math.random() * 10;
-    }
-
-    this.nextEnemySpawn -= dt;
-    if (this.nextEnemySpawn <= 0) {
-        if (this.spawnEnemies) {
-            this.spawnEnemy();
-        }
-        this.nextEnemySpawn = 4 + Math.random() * 4;
-    }
-
-    this.entities.forEach(e => {
-        if (e instanceof Player) {
-            e.update(dt, this.enemies, (x, y, angle) => {
-                this.projectiles.push(new Projectile(x, y, angle));
-            });
-        }
-        else e.update(dt);
-    });
-    this.enemies.forEach(e => e.update(dt, this.player || undefined));
-    this.drops.forEach(d => d.update(dt));
-    
-    this.projectiles = this.projectiles.filter(p => { 
-        const oldX = p.x;
-        const oldY = p.y;
-        
-        p.update(dt); 
-        
-        if (p.active && this.world && this.heatMap) {
-            const mapW = this.world.getWidthPixels();
-            const mapH = this.world.getHeightPixels();
-            
-            // 3-Point Check: Old, Mid, and New position to prevent tunneling
-            const checkPoints = [
-                {x: oldX, y: oldY},
-                {x: (oldX + p.x) / 2, y: (oldY + p.y) / 2},
-                {x: p.x, y: p.y}
-            ];
-
-            let hitPoint: {x: number, y: number} | null = null;
-            for (const pt of checkPoints) {
-                hitPoint = this.world.checkWallCollision(pt.x, pt.y, p.radius);
-                if (hitPoint) break;
-            }
-
-            const hitBorder = p.x < 0 || p.x > mapW || p.y < 0 || p.y > mapH;
-
-            if (hitPoint || hitBorder) {
-                const collisionX = hitPoint ? hitPoint.x : p.x;
-                const collisionY = hitPoint ? hitPoint.y : p.y;
-
-                if (p.aoeRadius > 0) {
-                    this.combatSystem.createExplosion(collisionX, collisionY, p.aoeRadius, p.damage);
-                } else if (hitPoint) {
-                    p.onWorldHit(this.heatMap, collisionX, collisionY);
-                    const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
-                    SoundManager.getInstance().playSoundSpatial(sfx, collisionX, collisionY);
-                    this.combatSystem.createImpactParticles(collisionX, collisionY, p.color);
-                }
-                
-                p.active = false;
-            }
-        }
-        
-        return p.active; 
-    });
-    
     ParticleSystem.getInstance().update(dt, this.world, this.player, this.enemies);
-
-    this.enemies = this.enemies.filter(e => { if(!e.active) this.physics.removeBody(e); return e.active; });
-    this.drops = this.drops.filter(d => d.active);
-
-    if (this.player) {
-      const allActiveEntities: Entity[] = [this.player, ...this.player.segments, ...this.enemies];
-      allActiveEntities.forEach(e => {
-          if (this.heatMap) {
-              const maxIntensity = this.heatMap.getMaxIntensityArea(e.x, e.y, e.radius);
-              if (!e.isOnFire && maxIntensity > 0.05) {
-                  const ignitionPercent = Math.round(10 + 90 * maxIntensity);
-                  if (Math.random() < (ignitionPercent / 100) * dt) e.isOnFire = true;
-              }
-              if (maxIntensity > 0.05) {
-                  const heatDPS = Math.ceil(20 * maxIntensity);
-                  e.takeDamage(heatDPS * dt);
-              }
-              if (!e.isOnFire && this.heatMap.checkFireArea(e.x, e.y, e.radius)) {
-                  this.tryIgniteEntity(e, dt);
-              }
-          }
-      });
-
-      const allBurning = allActiveEntities.filter(e => e.isOnFire && e.active);
-      const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
-      allBurning.forEach(source => {
-          allActiveEntities.forEach(target => {
-              if (source !== target && target.active && !target.isOnFire) {
-                  const dx = source.x - target.x;
-                  const dy = source.y - target.y;
-                  if (dx*dx + dy*dy < (source.radius + target.radius)**2) {
-                      if (Math.random() < catchChance * dt) target.isOnFire = true;
-                  }
-              }
-          });
-      });
-
-      this.cameraX = this.player.interpolatedX - window.innerWidth / 2;
-      this.cameraY = this.player.interpolatedY - window.innerHeight / 2;
-    }
-
     if (this.radar && this.player) this.radar.update(dt);
-
-    // Update Spatial Grid for Rendering
-    this.spatialGrid.clear();
-    if (this.player) this.spatialGrid.insert(this.player);
-    this.enemies.forEach(e => this.spatialGrid.insert(e));
-    this.projectiles.forEach(p => this.spatialGrid.insert(p));
 
     const timeState = WorldClock.getInstance().getTimeState();
     const useFog = ConfigManager.getInstance().get<boolean>('Visuals', 'fogOfWar');
@@ -374,7 +192,6 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
         LightManager.getInstance().clearConstantLights();
         LightManager.getInstance().clearType('fire');
     }
-    this.heatMap?.update(dt);
     PerfMonitor.getInstance().end('update_total');
   }
 
@@ -402,7 +219,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
           const time = performance.now() * 0.001;
           const flicker = Math.sin(time * 30) * 0.2 + Math.random() * 0.1;
           const intensity = 1.2 + flicker;
-          const range = (this as any).flameHitDist || (ConfigManager.getInstance().get<number>('Weapons', 'flamethrowerRange') * ConfigManager.getInstance().get<number>('World', 'tileSize'));
+          const range = (this.simulation.weaponSystem as any).flameHitDist || (ConfigManager.getInstance().get<number>('Weapons', 'flamethrowerRange') * ConfigManager.getInstance().get<number>('World', 'tileSize'));
           const fireColor = `rgb(255, ${Math.floor(160 + Math.sin(time * 15) * 40)}, 0)`;
           lm.addConstantLight({ id: 'flamethrower_nozzle', x: this.player.x + Math.cos(this.player.rotation) * 20, y: this.player.y + Math.sin(this.player.rotation) * 20, radius: 120, color: fireColor, intensity: intensity, type: 'transient' });
           for (let i = 1; i <= 3; i++) {
@@ -435,18 +252,13 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     ctx.save();
     ctx.translate(-this.cameraX, -this.cameraY);
     this.world.render(ctx, this.cameraX, this.cameraY);
-    FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY, this.world!.getWidthPixels(), this.world!.getHeightPixels());
+    FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY, this.world.getWidthPixels(), this.world.getHeightPixels());
     if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY);
     this.drops.forEach(d => d.render(ctx));
     
-    // Efficiently render visible entities using Spatial Grid
     const viewport: Rect = { x: this.cameraX, y: this.cameraY, w: window.innerWidth, h: window.innerHeight };
-    const visibleEntities = this.spatialGrid.retrieve(viewport);
-    
-    visibleEntities.forEach(e => {
-        // We still check for Player specifically if needed, but here we just render all visible
-        e.render(ctx);
-    });
+    const visibleEntities = this.simulation.spatialGrid.retrieve(viewport);
+    visibleEntities.forEach(e => e.render(ctx));
     
     PerfMonitor.getInstance().begin('render_particles');
     ParticleSystem.getInstance().render(ctx, this.cameraX, this.cameraY);
@@ -465,7 +277,6 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
     this.lightingRenderer.render(ctx);
     PerfMonitor.getInstance().end('render_lighting');
 
-    // UI Overlay (HP Bars, Names) - Rendered AFTER lighting/fog
     if (this.player) {
         const mm = (window as any).MultiplayerManagerInstance || null;
         this.hud.renderEntityOverlay(ctx, this.player, this.cameraX, this.cameraY, mm ? mm.myName : 'Player');
@@ -485,59 +296,6 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
       return [this.player!, ...this.enemies, ...this.projectiles];
   }
 
-  private spawnDrop(): void {
-    if (!this.world) return;
-    const pos = this.getRandomValidPos();
-    this.drops.push(new Drop(pos.x, pos.y, Math.random() < 0.8 ? DropType.COIN : DropType.BOOSTER));
-  }
-
-  private spawnEnemy(): void {
-    if (!this.world || !this.player) return;
-    for(let i=0; i<10; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = 400 + Math.random() * 400;
-        const ex = this.player.x + Math.cos(angle) * dist;
-        const ey = this.player.y + Math.sin(angle) * dist;
-        if (!this.world.isWall(ex, ey)) {
-            const e = new Enemy(ex, ey);
-            this.enemies.push(e);
-            this.physics.addBody(e);
-            break;
-        }
-    }
-  }
-
-  protected getRandomValidPos(): {x: number, y: number} {
-    if (!this.world) return {x: 0, y: 0};
-    for(let i=0; i<20; i++) {
-        const rx = Math.random() * this.world.getWidthPixels();
-        const ry = Math.random() * this.world.getHeightPixels();
-        if (!this.world.isWall(rx, ry)) return {x: rx, y: ry};
-    }
-    return {x: 100, y: 100};
-  }
-
-  public createImpactParticles(x: number, y: number, color: string): void {
-      this.combatSystem.createImpactParticles(x, y, color);
-  }
-
-  public startReload(weapon: string): void {
-      if (this.weaponReloading.get(weapon)) return;
-      const reloadTime = ConfigManager.getInstance().get<number>('Weapons', weapon + 'ReloadTime');
-      if (reloadTime <= 0) {
-          this.weaponAmmo.set(weapon, ConfigManager.getInstance().get<number>('Weapons', weapon + (weapon === 'laser' || weapon === 'ray' ? 'MaxEnergy' : 'MaxAmmo')));
-          return;
-      }
-      this.weaponReloading.set(weapon, true);
-      this.weaponReloadTimer.set(weapon, reloadTime);
-      if (weapon === ConfigManager.getInstance().get<string>('Player', 'activeWeapon') && this.player) SoundManager.getInstance().playSoundSpatial('weapon_reload', this.player.x, this.player.y);
-  }
-
-  private tryIgniteEntity(e: Entity, dt: number): void {
-      if (e.isOnFire) return;
-      if (Math.random() < ConfigManager.getInstance().get<number>('Fire', 'catchChance') * dt * 5) e.isOnFire = true;
-  }
-
   public handleCommand(cmd: string): boolean {
     const cleanCmd = cmd.trim().toLowerCase();
     if (cleanCmd === 'dev_on') { this.isDevMode = true; return true; }
@@ -547,20 +305,19 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
         const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine', 'flamethrower'];
         if (num >= 1 && num <= 7) {
             const wName = weapons[num-1];
-            this.unlockedWeapons.add(wName);
+            this.simulation.unlockedWeapons.add(wName);
             ConfigManager.getInstance().set('Player', 'activeWeapon', wName);
             return true;
         }
     }
     if (cleanCmd.startsWith('add_coins')) {
         const amount = parseInt(cleanCmd.replace('add_coins', ''));
-        if (!isNaN(amount)) { this.coinsCollected += amount; return true; }
+        if (!isNaN(amount)) { this.simulation.coinsCollected += amount; return true; }
     }
-    if (cleanCmd === 'spawn_on') { this.spawnEnemies = true; ConfigManager.getInstance().set('Debug', 'enableEnemySpawning', true); return true; }
-    if (cleanCmd === 'spawn_off') { this.spawnEnemies = false; ConfigManager.getInstance().set('Debug', 'enableEnemySpawning', false); return true; }
+    if (cleanCmd === 'spawn_on') { ConfigManager.getInstance().set('Debug', 'enableEnemySpawning', true); return true; }
+    if (cleanCmd === 'spawn_off') { ConfigManager.getInstance().set('Debug', 'enableEnemySpawning', false); return true; }
     if (cleanCmd === 'perf_benchmark') { this.benchmark.start(); return true; }
     
-    // Weather Commands
     if (cleanCmd === 'set_weather_clear') { WeatherManager.getInstance().setWeather(WeatherType.CLEAR); return true; }
     if (cleanCmd === 'set_weather_cloudy') { WeatherManager.getInstance().setWeather(WeatherType.CLOUDY); return true; }
     if (cleanCmd === 'set_weather_fog') { WeatherManager.getInstance().setWeather(WeatherType.FOG); return true; }
@@ -575,7 +332,6 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
         const val = parseFloat(cleanCmd.split(' ')[1]);
         if (!isNaN(val)) { WorldClock.getInstance().setHour(val); return true; }
     }
-    
     return false;
   }
 }

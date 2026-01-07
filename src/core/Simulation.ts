@@ -1,0 +1,328 @@
+import { World } from './World';
+import { Player } from '../entities/Player';
+import { RemotePlayer } from '../entities/RemotePlayer';
+import { PhysicsEngine } from './PhysicsEngine';
+import { Entity } from './Entity';
+import { Projectile, ProjectileType } from '../entities/Projectile';
+import { Enemy } from '../entities/Enemy';
+import { Drop, DropType } from '../entities/Drop';
+import { HeatMap, MaterialType } from './HeatMap';
+import { Quadtree } from '../utils/Quadtree';
+import { ConfigManager } from '../config/MasterConfig';
+import { WeaponSystem, WeaponParent } from '../systems/WeaponSystem';
+import { CombatSystem, CombatParent } from '../systems/CombatSystem';
+import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
+import { ParticleSystem } from './ParticleSystem';
+import { SoundManager } from './SoundManager';
+
+export enum SimulationRole {
+    SINGLEPLAYER,
+    HOST,
+    CLIENT
+}
+
+export class Simulation implements WeaponParent, CombatParent {
+    public world: World;
+    public physics: PhysicsEngine;
+    public heatMap: HeatMap;
+    public player: Player;
+    public spatialGrid: Quadtree<Entity>;
+    
+    public entities: Entity[] = [];
+    public enemies: Enemy[] = [];
+    public remotePlayers: RemotePlayer[] = [];
+    public drops: Drop[] = [];
+    public projectiles: Projectile[] = [];
+    
+    public weaponSystem: WeaponSystem;
+    public combatSystem: CombatSystem;
+    
+    public coinsCollected: number = 0;
+    public lastShotTime: number = 0;
+    public shootCooldown: number = 0.2;
+    
+    public weaponAmmo: Map<string, number> = new Map();
+    public unlockedWeapons: Set<string> = new Set(['cannon']);
+    public weaponReloading: Map<string, boolean> = new Map();
+    public weaponReloadTimer: Map<string, number> = new Map();
+
+    private nextDropSpawn: number = 5;
+    private nextEnemySpawn: number = 3;
+    private role: SimulationRole;
+
+    constructor(role: SimulationRole, seed?: number) {
+        this.role = role;
+        this.world = new World(seed);
+        this.physics = new PhysicsEngine();
+        this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
+        
+        this.world.setHeatMap(this.heatMap);
+        this.physics.setWorld(this.world);
+        
+        this.weaponSystem = new WeaponSystem(this);
+        this.combatSystem = new CombatSystem(this);
+        
+        this.spatialGrid = new Quadtree<Entity>({ 
+            x: 0, 
+            y: 0, 
+            w: this.world.getWidthPixels(), 
+            h: this.world.getHeightPixels() 
+        });
+
+        // Initialize Player at center
+        const centerX = this.world.getWidthPixels() / 2;
+        const centerY = this.world.getHeightPixels() / 2;
+        // We'll let the Scene pass the InputManager to the player later or here
+        // For now, we just need a player instance.
+        this.player = new Player(centerX, centerY, null as any); 
+        this.entities.push(this.player);
+        this.physics.addBody(this.player);
+
+        this.initWeapons();
+        this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
+        this.coinsCollected = ConfigManager.getInstance().get<number>('Debug', 'startingCoins') || 0;
+    }
+
+    private initWeapons(): void {
+        const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine', 'flamethrower'];
+        const alwaysOn = ConfigManager.getInstance().get<boolean>('Debug', 'devModeAlwaysOn');
+        
+        weapons.forEach(w => {
+            const configKey = w === 'laser' || w === 'ray' || w === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
+            const max = ConfigManager.getInstance().get<number>('Weapons', w + configKey);
+            this.weaponAmmo.set(w, max);
+            this.weaponReloading.set(w, false);
+            this.weaponReloadTimer.set(w, 0);
+            if (alwaysOn) this.unlockedWeapons.add(w);
+        });
+    }
+
+    public get myId(): string {
+        if (this.role === SimulationRole.SINGLEPLAYER) return 'local';
+        return MultiplayerManager.getInstance().myId || 'pending';
+    }
+
+    public update(dt: number, inputManager?: any): void {
+        // 1. Systems Update
+        if (inputManager) {
+            this.weaponSystem.update(dt, inputManager);
+        }
+        this.combatSystem.update(dt);
+
+        // 2. Physics Step
+        this.physics.update(dt);
+        Entity.setInterpolationAlpha(this.physics.alpha);
+
+        // 3. Spawning (Only SP or Host)
+        if (this.role !== SimulationRole.CLIENT) {
+            this.updateSpawning(dt);
+        }
+
+        // 4. Entity Updates
+        this.updateEntities(dt);
+
+        // 5. Fire & Heat Logic
+        this.updateEnvironmentLogic(dt);
+
+        // 6. Cleanup
+        this.cleanupEntities();
+
+        // 7. Spatial Grid Update
+        this.updateSpatialGrid();
+
+        this.heatMap.update(dt);
+    }
+
+    private updateSpawning(dt: number): void {
+        this.nextDropSpawn -= dt;
+        if (this.nextDropSpawn <= 0) {
+            this.spawnDrop();
+            this.nextDropSpawn = 5 + Math.random() * 10;
+        }
+
+        this.nextEnemySpawn -= dt;
+        if (this.nextEnemySpawn <= 0) {
+            if (ConfigManager.getInstance().get<boolean>('Debug', 'enableEnemySpawning')) {
+                this.spawnEnemy();
+            }
+            this.nextEnemySpawn = 4 + Math.random() * 4;
+        }
+    }
+
+    private updateEntities(dt: number): void {
+        this.player.update(dt);
+        
+        // Host/SP updates enemies AI
+        if (this.role !== SimulationRole.CLIENT) {
+            this.enemies.forEach(e => e.update(dt, this.player));
+        }
+
+        this.drops.forEach(d => d.update(dt));
+        this.remotePlayers.forEach(rp => rp.update(dt));
+
+        this.projectiles = this.projectiles.filter(p => {
+            const oldX = p.x;
+            const oldY = p.y;
+            p.update(dt);
+
+            if (p.active && this.world) {
+                const hitPoint = this.world.checkWallCollision(p.x, p.y, p.radius);
+                const hitBorder = p.x < 0 || p.x > this.world.getWidthPixels() || p.y < 0 || p.y > this.world.getHeightPixels();
+
+                if (hitPoint || hitBorder) {
+                    const cx = hitPoint ? hitPoint.x : p.x;
+                    const cy = hitPoint ? hitPoint.y : p.y;
+                    this.handleProjectileWorldHit(p, cx, cy);
+                    p.active = false;
+                }
+            }
+            return p.active;
+        });
+    }
+
+    private handleProjectileWorldHit(p: Projectile, x: number, y: number): void {
+        if (p.aoeRadius > 0) {
+            this.combatSystem.createExplosion(x, y, p.aoeRadius, p.damage, p.shooterId);
+        } else {
+            p.onWorldHit(this.heatMap, x, y);
+            const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
+            SoundManager.getInstance().playSoundSpatial(sfx, x, y);
+            this.combatSystem.createImpactParticles(x, y, p.color);
+
+            // Sync for Multiplayer
+            if (this.role === SimulationRole.CLIENT) {
+                const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                const tx = Math.floor(x / tileSize);
+                const ty = Math.floor(y / tileSize);
+                // We need to know who the host is. In this phase, we'll assume there is a way to get it or just broadcast.
+                // Actually, sendTo host is better. We'll use a hack or just broadcast for now as MultiplayerManager.broadcast 
+                // from a client sends to the host in a 1:1 connection.
+                MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_DAMAGE_REQUEST, {
+                    tx, ty, m: (this.world as any).tiles[ty][tx], pt: p.type, hx: x, hy: y
+                });
+            } else if (this.role === SimulationRole.HOST) {
+                const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                const tx = Math.floor(x / tileSize);
+                const ty = Math.floor(y / tileSize);
+                const hpData = this.heatMap.getTileHP(tx, ty);
+                MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_UPDATE, {
+                    tx, ty, m: (this.world as any).tiles[ty][tx],
+                    hp: hpData ? Array.from(hpData) : null,
+                    pt: p.type, hx: x, hy: y
+                });
+            }
+        }
+    }
+
+    private updateEnvironmentLogic(dt: number): void {
+        const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
+        const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
+        const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
+
+        const allActive = [this.player, ...this.player.segments, ...this.enemies, ...this.remotePlayers];
+        
+        allActive.forEach(e => {
+            if (!e.active) return;
+            
+            // Heat damage & Ignition
+            const maxIntensity = this.heatMap.getMaxIntensityArea(e.x, e.y, e.radius);
+            if (!e.isOnFire && maxIntensity > 0.05) {
+                if (Math.random() < (10 + 90 * maxIntensity) / 100 * dt) e.isOnFire = true;
+            }
+            if (maxIntensity > 0.05) e.takeDamage(Math.ceil(20 * maxIntensity) * dt);
+            
+            if (!e.isOnFire && this.heatMap.checkFireArea(e.x, e.y, e.radius)) {
+                if (Math.random() < catchChance * dt * 5) e.isOnFire = true;
+            }
+
+            e.handleFireLogic(dt, fireDPS, baseExtinguish);
+        });
+
+        // Fire spread
+        const allBurning = allActive.filter(e => e.isOnFire && e.active);
+        allBurning.forEach(source => {
+            allActive.forEach(target => {
+                if (source !== target && target.active && !target.isOnFire) {
+                    const dx = source.x - target.x;
+                    const dy = source.y - target.y;
+                    if (dx*dx + dy*dy < (source.radius + target.radius)**2) {
+                        if (Math.random() < catchChance * dt) target.isOnFire = true;
+                    }
+                }
+            });
+        });
+    }
+
+    private cleanupEntities(): void {
+        this.enemies = this.enemies.filter(e => {
+            if (!e.active) {
+                this.physics.removeBody(e);
+                if (this.role === SimulationRole.HOST) {
+                    MultiplayerManager.getInstance().broadcast(NetworkMessageType.ENTITY_DESTROY, { type: 'enemy', id: e.id });
+                }
+            }
+            return e.active;
+        });
+        this.drops = this.drops.filter(d => d.active);
+    }
+
+    private updateSpatialGrid(): void {
+        this.spatialGrid.clear();
+        this.spatialGrid.insert(this.player);
+        this.enemies.forEach(e => this.spatialGrid.insert(e));
+        this.projectiles.forEach(p => this.spatialGrid.insert(p));
+        this.remotePlayers.forEach(rp => {
+            if (rp.active) {
+                this.spatialGrid.insert(rp);
+                rp.segments.forEach(s => this.spatialGrid.insert(s));
+            }
+        });
+    }
+
+    public spawnEnemy(): void {
+        for(let i=0; i<10; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 400 + Math.random() * 400;
+            const ex = this.player.x + Math.cos(angle) * dist;
+            const ey = this.player.y + Math.sin(angle) * dist;
+            if (!this.world.isWall(ex, ey)) {
+                const e = new Enemy(ex, ey);
+                this.enemies.push(e);
+                this.physics.addBody(e);
+                break;
+            }
+        }
+    }
+
+    public spawnDrop(): void {
+        const pos = this.getRandomValidPos();
+        this.drops.push(new Drop(pos.x, pos.y, Math.random() < 0.8 ? DropType.COIN : DropType.BOOSTER));
+    }
+
+    private getRandomValidPos(): {x: number, y: number} {
+        for(let i=0; i<20; i++) {
+            const rx = Math.random() * this.world.getWidthPixels();
+            const ry = Math.random() * this.world.getHeightPixels();
+            if (!this.world.isWall(rx, ry)) return {x: rx, y: ry};
+        }
+        return {x: 100, y: 100};
+    }
+
+    // WeaponParent implementation
+    public setLastShotTime(time: number): void { this.lastShotTime = time; }
+    public startReload(weapon: string): void {
+        if (this.weaponReloading.get(weapon)) return;
+        const reloadTime = ConfigManager.getInstance().get<number>('Weapons', weapon + 'ReloadTime');
+        if (reloadTime <= 0) {
+            const configKey = weapon === 'laser' || weapon === 'ray' || weapon === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
+            this.weaponAmmo.set(weapon, ConfigManager.getInstance().get<number>('Weapons', weapon + configKey));
+            return;
+        }
+        this.weaponReloading.set(weapon, true);
+        this.weaponReloadTimer.set(weapon, reloadTime);
+        SoundManager.getInstance().playSoundSpatial('weapon_reload', this.player.x, this.player.y);
+    }
+    public createImpactParticles(x: number, y: number, color: string): void {
+        this.combatSystem.createImpactParticles(x, y, color);
+    }
+}

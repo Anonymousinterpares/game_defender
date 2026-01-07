@@ -32,8 +32,8 @@ export class BenchmarkScene extends GameplayScene {
         }
 
         // 3. Clear existing world state
-        this.enemies = [];
-        this.projectiles = [];
+        (this.simulation as any).enemies = [];
+        (this.simulation as any).projectiles = [];
         ParticleSystem.getInstance().clear();
 
         // 4. Start recording
@@ -114,7 +114,7 @@ export class BenchmarkScene extends GameplayScene {
             if (this.enemies.length < 20) {
                 this.spawnGhostEnemy();
             }
-        } 
+        }
         // Finalize
         else {
             this.finishBenchmark();
@@ -133,7 +133,7 @@ export class BenchmarkScene extends GameplayScene {
         ParticleSystem.getInstance().update(dt, this.world, this.player, this.enemies);
         this.heatMap?.update(dt);
         this.enemies.forEach(e => e.update(dt, this.player || undefined));
-        this.projectiles = this.projectiles.filter(p => { p.update(dt); return p.active; });
+        (this.simulation as any).projectiles = this.projectiles.filter(p => { p.update(dt); return p.active; });
         PerfMonitor.getInstance().end('update_total');
     }
 
@@ -154,7 +154,8 @@ export class BenchmarkScene extends GameplayScene {
         const ey = this.player!.y + Math.sin(angle) * 300;
         const e = new Enemy(ex, ey);
         e.takeDamage = () => {}; // Invincible
-        this.enemies.push(e);
+        this.simulation.enemies.push(e);
+        this.simulation.physics.addBody(e);
     }
 
     private finishBenchmark(): void {
