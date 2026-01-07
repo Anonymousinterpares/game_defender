@@ -1,6 +1,7 @@
 export interface ConfigItem<T> {
   value: T;
-  type: 'number' | 'boolean' | 'string' | 'object' | 'color'; // Added 'object' and 'color' types
+  secondary?: T; // For secondary keybindings
+  type: 'number' | 'boolean' | 'string' | 'object' | 'color'; 
   min?: number;
   max?: number;
   step?: number;
@@ -163,7 +164,12 @@ export const MasterConfig: GameConfigSchema = {
     randomMoonPhase: { value: false, type: 'boolean', description: 'Randomize starting moon phase' }
   },
   Keybindings: {
-      openDock: { value: 'KeyP', type: 'string', description: 'Open Dock/Shop' }
+      moveUp: { value: 'KeyW', secondary: 'ArrowUp', type: 'string', description: 'Throttle Forward' },
+      moveDown: { value: 'KeyS', secondary: 'ArrowDown', type: 'string', description: 'Reverse Gear' },
+      moveLeft: { value: 'KeyA', secondary: 'ArrowLeft', type: 'string', description: 'Steer Left' },
+      moveRight: { value: 'KeyD', secondary: 'ArrowRight', type: 'string', description: 'Steer Right' },
+      fire: { value: 'Space', type: 'string', description: 'Fire Primary Cannon' },
+      openDock: { value: 'KeyP', type: 'string', description: 'Open Engineering Dock' }
   },
   Weather: {
     initialWeather: { 

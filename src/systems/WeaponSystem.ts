@@ -55,7 +55,7 @@ export class WeaponSystem {
         const isReloading = this.parent.weaponReloading.get(weapon);
         const currentAmmo = this.parent.weaponAmmo.get(weapon) || 0;
 
-        if (inputManager.isKeyDown('Space') && this.parent.player && this.parent.player.active && !isReloading) {
+        if (inputManager.isActionDown('fire') && this.parent.player && this.parent.player.active && !isReloading) {
             if (weapon === 'cannon' || weapon === 'rocket' || weapon === 'missile' || weapon === 'mine') {
                 const now = performance.now() / 1000;
                 if (now - this.parent.lastShotTime > this.parent.shootCooldown) {

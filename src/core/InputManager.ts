@@ -1,8 +1,10 @@
+import { ConfigManager } from '../config/MasterConfig';
+
 export class InputManager {
   private keys: Set<string> = new Set();
   private prevKeys: Set<string> = new Set();
   
-  // Directions (calculated from WASD/Arrows)
+  // Directions (calculated from bindings)
   public x: number = 0;
   public y: number = 0;
   
@@ -17,12 +19,6 @@ export class InputManager {
   }
   
   public update(): void {
-      // Create a snapshot of keys for "JustPressed" logic
-      // Actually, standard way is:
-      // update() is called at start of frame.
-      // We copy keys to prevKeys.
-      // But events happen async.
-      // Better: maintain prevKeys manually.
       this.prevKeys = new Set(this.keys);
   }
 
@@ -44,14 +40,30 @@ export class InputManager {
     this.updateDirection();
   }
 
-  private updateDirection(): void {
+  public updateDirection(): void {
     this.x = 0;
     this.y = 0;
 
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) this.y -= 1;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) this.y += 1;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) this.x -= 1;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) this.x += 1;
+    const config = ConfigManager.getInstance();
+    
+    if (this.isActionDown('moveUp')) this.y -= 1;
+    if (this.isActionDown('moveDown')) this.y += 1;
+    if (this.isActionDown('moveLeft')) this.x -= 1;
+    if (this.isActionDown('moveRight')) this.x += 1;
+  }
+
+  public isActionDown(action: string): boolean {
+    const binding = ConfigManager.getInstance().getSchema()['Keybindings'][action];
+    if (!binding) return false;
+    
+    // Check primary
+    if (this.keys.has(binding.value)) return true;
+    
+    // Check secondary if exists
+    // @ts-ignore
+    if (binding.secondary && this.keys.has(binding.secondary)) return true;
+    
+    return false;
   }
 
   public isKeyDown(code: string): boolean {
@@ -59,8 +71,16 @@ export class InputManager {
   }
   
   public isKeyJustPressed(code: string): boolean {
-      // This is hard without an explicit update() loop call from Game.ts
-      // Assuming user calls update() on input manager
       return this.keys.has(code) && !this.prevKeys.has(code);
+  }
+
+  /**
+   * Used for rebinding UI to capture the next key press
+   */
+  public getAnyKeyDown(): string | null {
+      if (this.keys.size > 0) {
+          return Array.from(this.keys)[0];
+      }
+      return null;
   }
 }

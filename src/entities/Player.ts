@@ -114,8 +114,8 @@ export class Player extends Entity {
 
     // 2. MOVEMENT
     let driveSpeed = 0;
-    if (this.input.isKeyDown('KeyW')) driveSpeed = this.speed;
-    else if (this.input.isKeyDown('KeyS')) driveSpeed = -this.speed * 0.6;
+    if (this.input.isActionDown('moveUp')) driveSpeed = this.speed;
+    else if (this.input.isActionDown('moveDown')) driveSpeed = -this.speed * 0.6;
 
     if (driveSpeed === 0) {
         this.vx = 0;
