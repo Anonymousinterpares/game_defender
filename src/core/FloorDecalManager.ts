@@ -170,6 +170,7 @@ export class FloorDecalManager {
     }
 
     private renderRealisticScorch(ctx: CanvasRenderingContext2D, d: Decal): void {
+        if (!isFinite(d.x) || !isFinite(d.y) || !isFinite(d.radius) || d.radius <= 0) return;
         const rand = this.seededRandom(d.seed);
         
         ctx.save();
@@ -184,8 +185,10 @@ export class FloorDecalManager {
             const dist = d.radius * 0.2 * rand();
             const rx = Math.cos(angle) * dist;
             const ry = Math.sin(angle) * dist;
-            const r = d.radius * (0.4 + rand() * 0.4);
+            const r = Math.max(0.1, d.radius * (0.4 + rand() * 0.4));
             
+            if (!isFinite(rx) || !isFinite(ry) || !isFinite(r) || r <= 0) continue;
+
             const grad = ctx.createRadialGradient(rx, ry, 0, rx, ry, r);
             grad.addColorStop(0, 'rgba(0,0,0,1)');
             grad.addColorStop(0.5, 'rgba(20,15,10,0.8)');

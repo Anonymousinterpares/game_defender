@@ -10,7 +10,8 @@ export enum NetworkMessageType {
   WORLD_SEED = 'ws',
   PLAYER_HIT = 'ph',
   EXPLOSION = 'ex',
-  PLAYER_DEATH = 'pd'
+  PLAYER_DEATH = 'pd',
+  WORLD_DAMAGE_REQUEST = 'wdr'
 }
 
 export interface NetworkMessage {

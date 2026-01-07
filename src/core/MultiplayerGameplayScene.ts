@@ -35,6 +35,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
   private respawnTimer: number = 0;
   public lastKilledBy: string | null = null;
   private isSpawned: boolean = false;
+  private hostId: string | null = null;
 
   constructor(sceneManager: SceneManager, inputManager: InputManager) {
     super(sceneManager, inputManager);
@@ -59,12 +60,18 @@ export class MultiplayerGameplayScene extends GameplayScene {
     
     // Listen for network messages
     mm.onMessage((msg, _conn) => {
+      if (!this.hostId && !mm.isHost) this.hostId = _conn.peer;
+      
       switch (msg.t) {
         case NetworkMessageType.PLAYER_STATE:
           this.handlePlayerState(msg.d);
           break;
         case NetworkMessageType.PROJECTILE:
+          console.log(`[MP] RX PROJECTILE from ${_conn.peer} | Type: ${msg.d.type} | Sid: ${msg.d.sid}`);
           this.handleRemoteProjectile(msg.d);
+          break;
+        case NetworkMessageType.WORLD_DAMAGE_REQUEST:
+          this.handleWorldDamageRequest(msg.d);
           break;
         case NetworkMessageType.ENTITY_SPAWN:
           this.handleEntitySpawn(msg.d);
@@ -145,6 +152,27 @@ export class MultiplayerGameplayScene extends GameplayScene {
               rp.takeDamage(damage);
           }
       }
+  }
+
+  private handleWorldDamageRequest(data: any): void {
+      const mm = MultiplayerManager.getInstance();
+      if (!mm.isHost || !this.world || !this.heatMap) return;
+
+      const { tx, ty, m, pt, hx, hy } = data;
+      
+      // 1. Apply damage on Host
+      const tiles = (this.world as any).tiles;
+      tiles[ty][tx] = m;
+      this.world.invalidateTileCache(tx, ty);
+      this.world.markMeshDirty();
+      
+      // 2. Broadcast result to everyone
+      const hpData = this.heatMap.getTileHP(tx, ty);
+      mm.broadcast(NetworkMessageType.WORLD_UPDATE, {
+          tx, ty, m,
+          hp: hpData ? Array.from(hpData) : null,
+          pt, hx, hy
+      });
   }
 
   private handleLocalDeath(): void {
@@ -317,6 +345,34 @@ export class MultiplayerGameplayScene extends GameplayScene {
     this.weaponSystem.update(dt, this.inputManager);
     this.combatSystem.update(dt);
 
+    // Simulate heat for Remote Players who are firing
+    if (this.heatMap) {
+        this.remotePlayersMap.forEach(rp => {
+            if ((rp as any).remoteFiringTimer > 0) {
+                const type = (rp as any).remoteFiringType;
+                const angle = (rp as any).remoteFiringAngle || rp.rotation;
+                const dist = type === 'laser' ? 800 : (type === 'ray' ? 500 : 180);
+                
+                // Raycast-like heat application along the line
+                const steps = type === 'flamethrower' ? 5 : 8;
+                for (let i = 1; i <= steps; i++) {
+                    const d = (i / steps) * dist;
+                    const hx = rp.x + Math.cos(angle) * d;
+                    const hy = rp.y + Math.sin(angle) * d;
+                    
+                    if (type === 'flamethrower') {
+                        this.heatMap!.addHeat(hx, hy, 0.8 * dt * 10, 25);
+                        if (Math.random() < 0.2 * dt * 10) this.heatMap!.forceIgniteArea(hx, hy, 15);
+                    } else {
+                        const heatAmount = type === 'laser' ? 0.3 : 0.5;
+                        this.heatMap!.addHeat(hx, hy, heatAmount * dt * 10, 10);
+                    }
+                }
+                (rp as any).remoteFiringTimer -= dt;
+            }
+        });
+    }
+
     this.physics.update(dt);
     Entity.setInterpolationAlpha(this.physics.alpha);
 
@@ -338,48 +394,78 @@ export class MultiplayerGameplayScene extends GameplayScene {
     }
 
     this.projectiles = this.projectiles.filter(p => { 
+        const oldX = p.x;
+        const oldY = p.y;
+        
         const active = p.update(dt); 
         
         if (p.active && this.world && this.heatMap) {
             const mapW = this.world.getWidthPixels();
             const mapH = this.world.getHeightPixels();
-            const hitPoint = this.world.checkWallCollision(p.x, p.y, p.radius);
+            
+            // 3-Point Check: Old, Mid, and New position
+            const checkPoints = [
+                {x: oldX, y: oldY},
+                {x: (oldX + p.x) / 2, y: (oldY + p.y) / 2},
+                {x: p.x, y: p.y}
+            ];
+
+            let hitPoint: {x: number, y: number} | null = null;
+            for (const pt of checkPoints) {
+                hitPoint = this.world.checkWallCollision(pt.x, pt.y, p.radius);
+                if (hitPoint) break;
+            }
+
             const hitBorder = p.x < 0 || p.x > mapW || p.y < 0 || p.y > mapH;
 
             if (hitPoint || hitBorder) {
-                // LOCAL VISUALS (Always play for local satisfaction)
+                const collisionX = hitPoint ? hitPoint.x : p.x;
+                const collisionY = hitPoint ? hitPoint.y : p.y;
+
+                // LOCAL VISUALS
                 if (p.aoeRadius > 0) {
-                    this.combatSystem.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
+                    this.combatSystem.createExplosion(collisionX, collisionY, p.aoeRadius, p.damage, p.shooterId);
                 } else if (hitPoint) {
                     const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
-                    SoundManager.getInstance().playSoundSpatial(sfx, hitPoint.x, hitPoint.y);
-                    this.combatSystem.createImpactParticles(hitPoint.x, hitPoint.y, p.color);
+                    SoundManager.getInstance().playSoundSpatial(sfx, collisionX, collisionY);
+                    this.combatSystem.createImpactParticles(collisionX, collisionY, p.color);
 
                     // LOCAL WORLD DAMAGE (Visual/Immediate for Client)
                     if (!mm.isHost) {
-                        p.onWorldHit(this.heatMap, hitPoint.x, hitPoint.y);
+                        p.onWorldHit(this.heatMap, collisionX, collisionY);
+                        
+                        const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                        const tx = Math.floor(collisionX / tileSize);
+                        const ty = Math.floor(collisionY / tileSize);
+                        
+                        // Bounds check before sending
+                        if (ty >= 0 && ty < (this.world as any).height && tx >= 0 && tx < (this.world as any).width) {
+                            mm.sendTo(this.hostId || '', NetworkMessageType.WORLD_DAMAGE_REQUEST, {
+                                tx, ty, 
+                                m: (this.world as any).tiles[ty][tx],
+                                pt: p.type,
+                                hx: collisionX,
+                                hy: collisionY
+                            });
+                        }
                     }
                 }
 
                 if (mm.isHost && hitPoint) {
                     const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-                    const tx = Math.floor(hitPoint.x / tileSize);
-                    const ty = Math.floor(hitPoint.y / tileSize);
+                    const tx = Math.floor(collisionX / tileSize);
+                    const ty = Math.floor(collisionY / tileSize);
                     
-                    // HOST EFFECT (Actually modifies the map)
-                    p.onWorldHit(this.heatMap, hitPoint.x, hitPoint.y);
+                    p.onWorldHit(this.heatMap, collisionX, collisionY);
                     
-                    // BROADCAST to all clients
-                    const tiles = (this.world as any).tiles;
                     const hpData = this.heatMap.getTileHP(tx, ty);
-                    
                     mm.broadcast(NetworkMessageType.WORLD_UPDATE, {
                         tx, ty, 
-                        m: tiles[ty][tx],
+                        m: (this.world as any).tiles[ty][tx],
                         hp: hpData ? Array.from(hpData) : null,
-                        pt: p.type, // Send projectile type for better client-side effects
-                        hx: hitPoint.x,
-                        hy: hitPoint.y
+                        pt: p.type,
+                        hx: collisionX,
+                        hy: collisionY
                     });
                 }
                 
@@ -389,6 +475,46 @@ export class MultiplayerGameplayScene extends GameplayScene {
         
         return p.active; 
     });
+
+    // Fire and Heat Damage Logic
+    if (this.player && this.heatMap) {
+        const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
+        const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
+        const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
+
+        const allLocalBodies = [this.player, ...this.player.segments];
+        allLocalBodies.forEach(e => {
+            const maxIntensity = this.heatMap!.getMaxIntensityArea(e.x, e.y, e.radius);
+            if (!e.isOnFire && maxIntensity > 0.05) {
+                const ignitionPercent = Math.round(10 + 90 * maxIntensity);
+                if (Math.random() < (ignitionPercent / 100) * dt) e.isOnFire = true;
+            }
+            if (maxIntensity > 0.05) {
+                const heatDPS = Math.ceil(20 * maxIntensity);
+                e.takeDamage(heatDPS * dt);
+            }
+            if (!e.isOnFire && this.heatMap!.checkFireArea(e.x, e.y, e.radius)) {
+                if (Math.random() < catchChance * dt * 5) e.isOnFire = true;
+            }
+            e.handleFireLogic(dt, fireDPS, baseExtinguish);
+        });
+
+        // Fire spread between all burning entities (including remote players for visual spread)
+        const allEntities = [this.player, ...this.player.segments, ...this.remotePlayersMap.values(), ...this.enemies];
+        const allBurning = allEntities.filter(e => e.isOnFire && e.active);
+        allBurning.forEach(source => {
+            allEntities.forEach(target => {
+                if (source !== target && target.active && !target.isOnFire) {
+                    const dx = source.x - target.x;
+                    const dy = source.y - target.y;
+                    if (dx*dx + dy*dy < (source.radius + target.radius)**2) {
+                        if (Math.random() < catchChance * dt) target.isOnFire = true;
+                    }
+                }
+            });
+        });
+    }
+
     ParticleSystem.getInstance().update(dt, this.world!, this.player!, this.enemies);
 
     if (mm.isHost) {
@@ -536,6 +662,19 @@ export class MultiplayerGameplayScene extends GameplayScene {
   }
 
   private handleRemoteProjectile(data: any): void {
+      if (data.type === 'laser' || data.type === 'ray' || data.type === 'flamethrower') {
+          const rp = this.remotePlayersMap.get(data.sid);
+          if (rp) {
+              // We store firing state on the RemotePlayer entity
+              (rp as any).remoteFiringType = data.type;
+              (rp as any).remoteFiringTimer = 0.25; // Keep alive for a few frames
+              (rp as any).remoteFiringAngle = data.a;
+              
+              SoundManager.getInstance().playSoundSpatial('shoot_' + data.type, data.x, data.y);
+          }
+          return;
+      }
+
       const p = new Projectile(data.x, data.y, data.a, data.type);
       if (data.sid) p.shooterId = data.sid;
       
@@ -639,6 +778,12 @@ export class MultiplayerGameplayScene extends GameplayScene {
   private sendLocalState(): void {
       if (!this.player) return;
 
+      const segData = this.player.segments.map(s => ({
+          x: Math.round(s.x),
+          y: Math.round(s.y),
+          f: s.isOnFire
+      }));
+
       const state = {
         id: MultiplayerManager.getInstance().myId,
         x: Math.round(this.player.x),
@@ -646,16 +791,17 @@ export class MultiplayerGameplayScene extends GameplayScene {
         r: this.rotationToNetwork(this.player.rotation),
         n: MultiplayerManager.getInstance().myName,
         h: Math.round(this.player.health),
-        l: this.player.segments.length, // Send segment count
-        w: ConfigManager.getInstance().get<string>('Player', 'activeWeapon') // Send weapon
+        l: this.player.segments.length, 
+        segs: segData, // Sync segment positions and fire
+        f: this.player.isOnFire, // Sync head fire state
+        w: ConfigManager.getInstance().get<string>('Player', 'activeWeapon')
       };
 
       MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_STATE, state);
   }
 
   private handlePlayerState(data: any): void {
-    const { id, x, y, r, n, h, l, w } = data;
-    // console.log(`[SCENE] Handle PS from ${id} (MyID: ${MultiplayerManager.getInstance().myId})`);
+    const { id, x, y, r, n, h, l, segs, f, w } = data;
     
     if (id === MultiplayerManager.getInstance().myId) return;
 
@@ -666,25 +812,26 @@ export class MultiplayerGameplayScene extends GameplayScene {
       this.remotePlayersMap.set(id, rp);
       this.updateRemotePlayersArray();
       
-      // Add head and segments to physics for collision
       this.physics.addBody(rp);
       rp.segments.forEach(s => this.physics.addBody(s));
     }
 
-    // Sync body length if it changed
     if (l !== undefined && rp.segments.length !== l) {
-        // Remove old segments from physics
         rp.segments.forEach(s => this.physics.removeBody(s));
-        
-        // Update segments
         rp.setBodyLength(l);
-        
-        // Add new segments to physics
         rp.segments.forEach(s => this.physics.addBody(s));
     }
     
-    // Sync weapon (could be used for visuals later)
+    if (segs && segs.length === rp.segments.length) {
+        for (let i = 0; i < segs.length; i++) {
+            rp.segments[i].x = segs[i].x;
+            rp.segments[i].y = segs[i].y;
+            if (segs[i].f !== undefined) rp.segments[i].isOnFire = segs[i].f;
+        }
+    }
+
     if (w) (rp as any).activeWeapon = w;
+    if (f !== undefined) rp.isOnFire = f;
 
     rp.updateFromNetwork(x, y, this.rotationFromNetwork(r), n, h);
   }

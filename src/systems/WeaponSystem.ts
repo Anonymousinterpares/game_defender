@@ -74,6 +74,18 @@ export class WeaponSystem {
                         this.isFiringBeam = true;
                         this.handleBeamFiring(weapon, dt);
                     }
+
+                    // BROADCAST firing state
+                    if (Math.random() < 0.15) { 
+                        MultiplayerManager.getInstance().broadcast(NetworkMessageType.PROJECTILE, {
+                            type: weapon, 
+                            x: this.parent.player.x,
+                            y: this.parent.player.y,
+                            a: this.parent.player.rotation, // Crucial for heat simulation
+                            sid: this.parent.myId
+                        });
+                    }
+
                     const loopSfx = weapon === 'laser' ? 'shoot_laser' : (weapon === 'ray' ? 'shoot_ray' : 'shoot_flamethrower');
                     SoundManager.getInstance().startLoopSpatial(loopSfx, this.parent.player.x, this.parent.player.y);
                     SoundManager.getInstance().updateLoopPosition(loopSfx, this.parent.player.x, this.parent.player.y);
