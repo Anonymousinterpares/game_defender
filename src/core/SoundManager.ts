@@ -3,6 +3,7 @@ import { World } from './World';
 import { SoundRaycaster, AudiblePath } from '../utils/SoundRaycaster';
 import { ConfigManager } from '../config/MasterConfig';
 import { EventBus, GameEvent } from './EventBus';
+import { AssetRegistry } from './AssetRegistry';
 
 interface SpatialVoice {
     source: AudioBufferSourceNode | OscillatorNode;
@@ -69,7 +70,39 @@ export class SoundManager {
       this.masterGain.connect(this.audioCtx.destination);
       
       this.subscribeToEvents();
+      this.loadFromRegistry();
     }
+  }
+
+  private async loadFromRegistry(): Promise<void> {
+    const registry = AssetRegistry.getInstance();
+    const soundIds = [
+        'brick_hit_1', 'brick_hit_2', 'brick_hit_3', 'collect_coin', 'explosion_large', 'fire',
+        'hit_cannon', 'hit_laser', 'hit_missile', 'hit_ray', 'indestructible_hit_1',
+        'metal_hit_1', 'metal_hit_2', 'metal_hit_3', 'metal_hit_4', 'metal_hit_5', 'metal_hit_6',
+        'ping', 'place_mine', 'shoot_cannon', 'shoot_laser', 'shoot_missile', 'shoot_ray', 'shoot_rocket',
+        'stone_hit_1', 'ui_click', 'weapon_reload', 'wood_hit_1', 'wood_hit_2', 'wood_hit_3'
+    ];
+
+    for (const id of soundIds) {
+        try {
+            const audio = registry.getAudio(id);
+            const response = await fetch(audio.src);
+            const arrayBuffer = await response.arrayBuffer();
+            const audioBuffer = await this.audioCtx!.decodeAudioData(arrayBuffer);
+            this.sounds.set(id, audioBuffer);
+
+            // Track material variants
+            if (id.includes('_hit_')) {
+                const category = id.split('_hit_')[0];
+                if (!this.materialVariants.has(category)) this.materialVariants.set(category, []);
+                this.materialVariants.get(category)!.push(id);
+            }
+        } catch (e) {
+            console.warn(`[SoundManager] Failed to decode ${id} from registry:`, e);
+        }
+    }
+    console.log(`[SoundManager] Loaded ${this.sounds.size} sounds from registry`);
   }
 
   private subscribeToEvents(): void {

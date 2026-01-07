@@ -1,5 +1,6 @@
 import { WeatherManager, WeatherType } from './WeatherManager';
 import { EventBus, GameEvent } from './EventBus';
+import { AssetRegistry } from './AssetRegistry';
 
 export interface Decal {
     x: number;
