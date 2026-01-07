@@ -1,10 +1,11 @@
 export interface ConfigItem<T> {
   value: T;
-  type: 'number' | 'boolean' | 'string';
+  type: 'number' | 'boolean' | 'string' | 'object' | 'color'; // Added 'object' and 'color' types
   min?: number;
   max?: number;
   step?: number;
   description: string;
+  options?: string[]; // For dropdowns
 }
 
 export interface ConfigCategory {
@@ -28,7 +29,7 @@ export const MasterConfig: GameConfigSchema = {
     maxHealth: { value: 100, type: 'number', min: 1, max: 1000, step: 10, description: 'Base Health' },
     bodyLength: { value: 2, type: 'number', min: 1, max: 20, step: 1, description: 'Additional Body Segments' },
     shootCooldown: { value: 0.2, type: 'number', min: 0.05, max: 2.0, step: 0.01, description: 'Weapon Fire Rate' },
-    activeWeapon: { value: 'cannon', type: 'string', description: 'Active Weapon (cannon, laser, ray, rocket, missile, mine)' }
+    activeWeapon: { value: 'cannon', type: 'string', description: 'Active Weapon (cannon, laser, ray, rocket, missile, mine)', options: ['cannon', 'laser', 'ray', 'rocket', 'missile', 'mine'] }
   },
   Weapons: {
     cannonDamage: { value: 10, type: 'number', min: 1, max: 100, step: 1, description: 'Cannon Damage' },
@@ -138,9 +139,9 @@ export const MasterConfig: GameConfigSchema = {
     giBlurAmount: { value: 4, type: 'number', description: 'Global Illumination blur intensity' },
     ambientMin: { value: 0.05, type: 'number', description: 'Minimum ambient light (Night)' },
     ambientMax: { value: 1.0, type: 'number', description: 'Maximum ambient light (Day)' },
-    fireLightColor: { value: '#ff6600', type: 'string', description: 'Color of fire light' },
+    fireLightColor: { value: '#ff6600', type: 'color', description: 'Color of fire light' },
     fireLightRadius: { value: 250, type: 'number', description: 'Radius of fire light clusters' },
-    moonColor: { value: '#aaccff', type: 'string', description: 'Color of moonlight' },
+    moonColor: { value: '#aaccff', type: 'color', description: 'Color of moonlight' },
     moonShadowMinLen: { value: 50, type: 'number', description: 'Minimum moon shadow length' },
     moonShadowMaxLen: { value: 250, type: 'number', description: 'Maximum moon shadow length' },
     transientLights: { 
@@ -149,8 +150,8 @@ export const MasterConfig: GameConfigSchema = {
             impact: { color: '#ffffff', intensity: 1.5, radius: 120, ttl: 0.1 },
             explosion: { color: '#ff7700', intensity: 6.0, radius: 600, ttl: 0.6 }
         }, 
-        type: 'string', // Actually object, but schema uses 'string'/'number'/'boolean'
-        description: 'Settings for short-lived light sources' 
+        type: 'object',
+        description: 'Settings for short-lived light sources (Muzzle flash, Impacts, Explosions)' 
     }
   },
   TimeSystem: {
@@ -165,7 +166,12 @@ export const MasterConfig: GameConfigSchema = {
       openDock: { value: 'KeyP', type: 'string', description: 'Open Dock/Shop' }
   },
   Weather: {
-    initialWeather: { value: 'clear', type: 'string', description: 'Initial weather type (clear, fog, rain, snow, cloudy, random)' },
+    initialWeather: { 
+        value: 'rain', 
+        type: 'string', 
+        description: 'Initial weather type',
+        options: ['clear', 'cloudy', 'fog', 'rain', 'snow', 'random'] 
+    },
     transitionSpeed: { value: 0.05, type: 'number', min: 0.01, max: 1.0, step: 0.01, description: 'Speed of weather transitions' },
     windMinSpeed: { value: 0.5, type: 'number', min: 0, max: 10, step: 0.1, description: 'Minimum wind speed' },
     windMaxSpeed: { value: 5.0, type: 'number', min: 0, max: 20, step: 0.1, description: 'Maximum wind speed' }

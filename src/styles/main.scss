@@ -163,6 +163,238 @@ canvas {
   }
 }
 
+/* Settings Panel & Tabs */
+.settings-panel {
+    pointer-events: auto;
+    background: linear-gradient(to bottom, rgba(43,34,30,0.98), rgba(26,21,18,0.98));
+    border: 3px double var(--steam-brass);
+    box-shadow: 0 0 0 2px #000, 0 0 30px rgba(0,0,0,0.9);
+    display: flex;
+    flex-direction: column;
+    font-family: 'Share Tech Mono', monospace;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 900px;
+    height: 750px;
+    z-index: 100;
+
+    .settings-header {
+        padding: 15px 25px;
+        background: rgba(0,0,0,0.3);
+        border-bottom: 2px solid var(--steam-brass);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        
+        h2 {
+            margin: 0;
+            color: var(--steam-gold);
+            font-family: 'Rye', serif;
+            letter-spacing: 2px;
+            text-shadow: 2px 2px 0 #000;
+        }
+    }
+
+    .settings-body {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+    }
+
+    .settings-sidebar {
+        width: 220px;
+        background: rgba(0,0,0,0.2);
+        border-right: 1px solid var(--steam-iron);
+        overflow-y: auto;
+        padding-top: 10px;
+
+        .tab-btn {
+            display: block;
+            width: 100%;
+            padding: 15px 20px;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: #888;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+            text-transform: uppercase;
+            font-size: 0.9em;
+            letter-spacing: 1px;
+
+            &:hover {
+                background: rgba(207, 170, 110, 0.1);
+                color: #ccc;
+            }
+
+            &.active {
+                background: rgba(207, 170, 110, 0.15);
+                color: var(--steam-gold);
+                border-left: 4px solid var(--steam-gold);
+                font-weight: bold;
+            }
+        }
+    }
+
+    .settings-content {
+        flex: 1;
+        padding: 30px;
+        overflow-y: auto;
+        background: rgba(0,0,0,0.1);
+
+        h3 {
+            color: var(--steam-brass);
+            margin-top: 0;
+            margin-bottom: 25px;
+            border-bottom: 1px dashed var(--steam-iron);
+            padding-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+            
+            label {
+                display: block;
+                color: var(--steam-copper);
+                margin-bottom: 8px;
+                font-size: 0.85em;
+                text-transform: uppercase;
+            }
+
+            .control-flex {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+
+                input[type="range"] {
+                    flex: 1;
+                    accent-color: var(--steam-gold);
+                }
+
+                .value-display {
+                    width: 60px;
+                    text-align: right;
+                    color: var(--steam-gold);
+                    font-weight: bold;
+                    font-size: 1.1em;
+                }
+            }
+
+            select, input[type="text"] {
+                width: 100%;
+                background: #111;
+                border: 1px solid var(--steam-iron);
+                color: var(--steam-text);
+                padding: 10px;
+                font-family: inherit;
+                outline: none;
+
+                &:focus {
+                    border-color: var(--steam-gold);
+                }
+            }
+
+            input[type="checkbox"] {
+                width: 20px;
+                height: 20px;
+                accent-color: var(--steam-gold);
+                cursor: pointer;
+            }
+
+            .color-picker-container {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+
+                input[type="color"] {
+                    width: 100%;
+                    height: 45px;
+                    border: 1px solid var(--steam-iron);
+                    background: #111;
+                    padding: 3px;
+                    cursor: pointer;
+                }
+
+                .palette-grid {
+                    display: grid;
+                    grid-template-columns: repeat(16, 1fr);
+                    gap: 2px;
+                    
+                    .palette-swatch {
+                        height: 18px;
+                        border: 1px solid #000;
+                        cursor: pointer;
+                        transition: transform 0.1s;
+
+                        &:hover {
+                            transform: scale(1.2);
+                            z-index: 10;
+                            border-color: #fff;
+                        }
+                    }
+                }
+            }
+
+            .keybinding-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 10px;
+                background: rgba(0,0,0,0.2);
+                border: 1px solid var(--steam-iron);
+                margin-bottom: 5px;
+
+                .key-label {
+                    color: var(--steam-text);
+                }
+
+                .key-value {
+                    background: var(--steam-iron);
+                    color: var(--steam-gold);
+                    padding: 5px 10px;
+                    min-width: 80px;
+                    text-align: center;
+                    border: 1px solid var(--steam-brass);
+                    cursor: pointer;
+                    font-weight: bold;
+                    
+                    &:hover {
+                        background: var(--steam-brass);
+                        color: #000;
+                    }
+
+                    &.recording {
+                        background: var(--steam-accent);
+                        color: #fff;
+                        animation: pulse 1s infinite;
+                    }
+                }
+            }
+        }
+    }
+
+    .settings-footer {
+        padding: 15px;
+        background: rgba(0,0,0,0.2);
+        border-top: 1px solid var(--steam-iron);
+        text-align: right;
+        font-size: 0.8em;
+        color: var(--steam-iron);
+        font-style: italic;
+    }
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
 /* Radar Styling Override */
 .ui-radar {
     border: 4px solid var(--steam-brass) !important;
