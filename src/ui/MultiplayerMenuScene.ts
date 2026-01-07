@@ -36,7 +36,7 @@ export class MultiplayerMenuScene implements Scene {
                 `;
                 this.statusEl.appendChild(statusDiv);
                 
-                document.getElementById('btn-start-multi')?.addEventListener('click', () => {
+                document.getElementById('btn-start-multi')?.addEventListener('click', async () => {
                     EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
                     mm.broadcast(NetworkMessageType.CHAT, { system: 'START_GAME' });
                     this.sceneManager.switchScene('multiplayer_gameplay');
@@ -126,7 +126,7 @@ export class MultiplayerMenuScene implements Scene {
       try {
         await mm.init();
         mm.clearMessageCallbacks(); 
-        mm.onMessage((msg) => {
+        mm.onMessage(async (msg) => {
             if (msg.t === NetworkMessageType.CHAT && msg.d.system === 'START_GAME') {
                 this.sceneManager.switchScene('multiplayer_gameplay');
             }
@@ -138,7 +138,7 @@ export class MultiplayerMenuScene implements Scene {
       }
     });
 
-    document.getElementById('btn-back')?.addEventListener('click', () => {
+    document.getElementById('btn-back')?.addEventListener('click', async () => {
       EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
       MultiplayerManager.getInstance().disconnect();
       this.sceneManager.switchScene('menu');

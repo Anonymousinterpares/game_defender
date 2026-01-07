@@ -6,10 +6,9 @@ import { Projectile } from '../../entities/Projectile';
 import { Entity } from '../Entity';
 import { WorldClock } from '../WorldClock';
 import { LightManager } from '../LightManager';
-import { VisibilitySystem, Point } from '../VisibilitySystem';
+import { Point } from '../VisibilitySystem';
 import { ConfigManager } from '../../config/MasterConfig';
 import { WeatherManager, WeatherType, CloudType } from '../WeatherManager';
-import { ParticleSystem } from '../ParticleSystem';
 import { PerfMonitor } from '../../utils/PerfMonitor';
 
 export interface LightingParent {

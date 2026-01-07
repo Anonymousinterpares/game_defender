@@ -147,6 +147,7 @@ export class CombatSystem {
                 // Check RemotePlayers
                 if (remotePlayers) {
                     for (const rp of remotePlayers) {
+                        if (!rp.active) continue;
                         // IGNORE if this remote player is the shooter
                         if (p.shooterId === rp.id && p.aoeRadius <= 0) continue;
 
@@ -203,7 +204,7 @@ export class CombatSystem {
         }
     }
 
-    public createExplosion(x: number, y: number, radius: number, damage: number, shooterId: string | null = null): void {
+    public createExplosion(x: number, y: number, radius: number, damage: number, shooterId: string | null = null, projectileType: ProjectileType | null = null): void {
         if (this.parent.onExplosion) {
             this.parent.onExplosion(x, y, radius, damage);
         }
@@ -241,7 +242,8 @@ export class CombatSystem {
                                     tx: ntx, ty: nty,
                                     m: (this.parent.world as any).tiles[nty][ntx],
                                     hp: hpData ? Array.from(hpData) : null,
-                                    hx: x, hy: y // Original explosion center for visual sync
+                                    hx: x, hy: y, // Original explosion center for visual sync
+                                    pt: (ntx === tx && nty === ty) ? projectileType : null // Only send pt for the center tile to avoid redundant visuals
                                 });
                             }
                         }
@@ -320,6 +322,7 @@ export class CombatSystem {
 
         if (this.parent.remotePlayers) {
             this.parent.remotePlayers.forEach((rp: RemotePlayer) => {
+                if (!rp.active) return;
                 const dx = rp.x - x;
                 const dy = rp.y - y;
                 const dist = Math.sqrt(dx*dx + dy*dy);

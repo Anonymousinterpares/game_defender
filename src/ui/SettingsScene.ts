@@ -86,7 +86,7 @@ export class SettingsScene implements Scene {
     const closeBtn = document.createElement('button');
     closeBtn.textContent = 'CLOSE [ESC]';
     closeBtn.className = 'hud-btn';
-    closeBtn.onclick = () => {
+    closeBtn.onclick = async () => {
         EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
         this.sceneManager.switchScene('menu');
     };

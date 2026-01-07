@@ -14,7 +14,7 @@ interface AssetDef {
 
 export class AssetRegistry {
     private static instance: AssetRegistry;
-    private assets: Map<string, HTMLImageElement | HTMLAudioElement> = new Map();
+    private assets: Map<string, HTMLImageElement | ArrayBuffer> = new Map();
     private loadingCount: number = 0;
     private totalCount: number = 0;
     private isLoaded: boolean = false;
@@ -81,40 +81,37 @@ export class AssetRegistry {
         console.log('[AssetRegistry] All assets loaded');
     }
 
-    private loadAsset(def: AssetDef): Promise<void> {
-        return new Promise((resolve) => {
+    private async loadAsset(def: AssetDef): Promise<void> {
+        const fullPath = import.meta.env.BASE_URL + def.path;
+        try {
             if (def.type === AssetType.AUDIO) {
-                const audio = new Audio();
-                audio.src = def.path;
-                audio.oncanplaythrough = () => {
-                    this.assets.set(def.id, audio);
-                    this.onAssetLoaded();
-                    resolve();
-                };
-                audio.onerror = () => {
-                    console.error(`Failed to load audio: ${def.path}`);
-                    resolve();
-                };
-                audio.load();
+                const response = await fetch(fullPath);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const buffer = await response.arrayBuffer();
+                this.assets.set(def.id, buffer);
+                this.onAssetLoaded();
             } else {
-                const img = new Image();
-                img.src = def.path;
-                img.onload = () => {
-                    this.assets.set(def.id, img);
-                    this.onAssetLoaded();
-                    resolve();
-                };
-                img.onerror = () => {
-                    console.error(`Failed to load image: ${def.path}`);
-                    resolve();
-                };
+                return new Promise((resolve) => {
+                    const img = new Image();
+                    img.src = fullPath;
+                    img.onload = () => {
+                        this.assets.set(def.id, img);
+                        this.onAssetLoaded();
+                        resolve();
+                    };
+                    img.onerror = () => {
+                        console.error(`Failed to load image: ${fullPath}`);
+                        resolve();
+                    };
+                });
             }
-        });
+        } catch (err) {
+            console.error(`Error loading asset ${def.id} from ${fullPath}:`, err);
+        }
     }
 
     private onAssetLoaded(): void {
         this.loadingCount++;
-        // We can emit a dedicated progress event if we want to show it in UI
     }
 
     public getImage(id: string): HTMLImageElement {
@@ -125,12 +122,16 @@ export class AssetRegistry {
         return asset;
     }
 
-    public getAudio(id: string): HTMLAudioElement {
+    public getAudioData(id: string): ArrayBuffer {
         const asset = this.assets.get(id);
-        if (!(asset instanceof HTMLAudioElement)) {
-            throw new Error(`Asset ${id} not found or is not audio`);
+        if (!(asset instanceof ArrayBuffer)) {
+            throw new Error(`Asset ${id} not found or is not audio data`);
         }
-        return asset;
+        // decodeAudioData detaches the buffer, so we MUST return a copy 
+        // to allow re-decoding (e.g. if SoundManager is re-initialized)
+        const copy = new ArrayBuffer(asset.byteLength);
+        new Uint8Array(copy).set(new Uint8Array(asset));
+        return copy;
     }
 
     public getProgress(): number {

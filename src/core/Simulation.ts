@@ -199,14 +199,28 @@ export class Simulation implements WeaponParent, CombatParent {
             p.update(dt);
 
             if (p.active && this.world) {
-                const hitPoint = this.world.checkWallCollision(p.x, p.y, p.radius);
+                // RAYCAST CCD
+                const dx = p.x - oldX;
+                const dy = p.y - oldY;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                const angle = Math.atan2(dy, dx);
+                
+                // Only raycast if moving significantly
+                const hit = dist > 1 ? this.world.raycast(oldX, oldY, angle, dist) : null;
+                const hitPoint = hit || this.world.checkWallCollision(p.x, p.y, p.radius);
                 const hitBorder = p.x < 0 || p.x > this.world.getWidthPixels() || p.y < 0 || p.y > this.world.getHeightPixels();
 
                 if (hitPoint || hitBorder) {
                     const cx = hitPoint ? hitPoint.x : p.x;
                     const cy = hitPoint ? hitPoint.y : p.y;
-                    this.handleProjectileWorldHit(p, cx, cy);
+                    
+                    // Stop visually for everyone immediately
                     p.active = false;
+
+                    // Authoritative logic: Only Host/SP or local owner (for request) handles damage
+                    if (this.role !== SimulationRole.CLIENT || p.shooterId === this.myId) {
+                        this.handleProjectileWorldHit(p, cx, cy);
+                    }
                 }
             }
             return p.active;
@@ -215,7 +229,7 @@ export class Simulation implements WeaponParent, CombatParent {
 
     private handleProjectileWorldHit(p: Projectile, x: number, y: number): void {
         if (p.aoeRadius > 0) {
-            this.combatSystem.createExplosion(x, y, p.aoeRadius, p.damage, p.shooterId);
+            this.combatSystem.createExplosion(x, y, p.aoeRadius, p.damage, p.shooterId, p.type);
         } else {
             p.onWorldHit(this.heatMap, x, y);
             EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
@@ -254,9 +268,9 @@ export class Simulation implements WeaponParent, CombatParent {
         const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
         const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
 
-        const allActive = [this.player, ...this.player.segments, ...this.enemies, ...this.remotePlayers];
+        const allPotential = [this.player, ...this.player.segments, ...this.enemies, ...this.remotePlayers];
         
-        allActive.forEach(e => {
+        allPotential.forEach(e => {
             if (!e.active) return;
             
             // Heat damage & Ignition
@@ -274,10 +288,11 @@ export class Simulation implements WeaponParent, CombatParent {
         });
 
         // Fire spread
-        const allBurning = allActive.filter(e => e.isOnFire && e.active);
+        const allActive = allPotential.filter(e => e.active);
+        const allBurning = allActive.filter(e => e.isOnFire);
         allBurning.forEach(source => {
             allActive.forEach(target => {
-                if (source !== target && target.active && !target.isOnFire) {
+                if (source !== target && !target.isOnFire) {
                     const dx = source.x - target.x;
                     const dy = source.y - target.y;
                     if (dx*dx + dy*dy < (source.radius + target.radius)**2) {
@@ -310,6 +325,16 @@ export class Simulation implements WeaponParent, CombatParent {
             if (rp.active) {
                 this.spatialGrid.insert(rp);
                 rp.segments.forEach(s => this.spatialGrid.insert(s));
+            }
+        });
+    }
+
+    public removeProjectileAt(x: number, y: number, radius: number): void {
+        this.projectiles.forEach(p => {
+            const dx = p.x - x;
+            const dy = p.y - y;
+            if (Math.sqrt(dx*dx + dy*dy) < radius) {
+                p.active = false;
             }
         });
     }

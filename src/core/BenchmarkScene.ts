@@ -14,31 +14,32 @@ export class BenchmarkScene extends GameplayScene {
     private isFinished: boolean = false;
     private finalReport: string = "";
 
-    onEnter(): void {
-        super.onEnter();
-        this.benchmarkTimer = 0;
-        this.currentPhase = 0;
-        this.isFinished = false;
-        this.finalReport = "";
+    onEnter(): Promise<void> {
+        return super.onEnter().then(() => {
+            this.benchmarkTimer = 0;
+            this.currentPhase = 0;
+            this.isFinished = false;
+            this.finalReport = "";
 
-        // 1. Force state for clean testing
-        this.handleCommand('dev_on');
-        this.handleCommand('spawn_off');
-        ConfigManager.getInstance().set('Benchmark', 'showPerfMetrics', true);
-        
-        // 2. Invincibility
-        if (this.player) {
-            this.player.takeDamage = () => {}; // Override with NOOP
-        }
+            // 1. Force state for clean testing
+            this.handleCommand('dev_on');
+            this.handleCommand('spawn_off');
+            ConfigManager.getInstance().set('Benchmark', 'showPerfMetrics', true);
+            
+            // 2. Invincibility
+            if (this.player) {
+                this.player.takeDamage = () => {}; // Override with NOOP
+            }
 
-        // 3. Clear existing world state
-        (this.simulation as any).enemies = [];
-        (this.simulation as any).projectiles = [];
-        ParticleSystem.getInstance().clear();
+            // 3. Clear existing world state
+            (this.simulation as any).enemies = [];
+            (this.simulation as any).projectiles = [];
+            ParticleSystem.getInstance().clear();
 
-        // 4. Start recording
-        PerfMonitor.getInstance().startSession();
-        console.log("=== BENCHMARK STARTED ===");
+            // 4. Start recording
+            PerfMonitor.getInstance().startSession();
+            console.log("=== BENCHMARK STARTED ===");
+        });
     }
 
     onExit(): void {

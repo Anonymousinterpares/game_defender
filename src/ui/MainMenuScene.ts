@@ -8,11 +8,11 @@ export class MainMenuScene implements Scene {
 
   constructor(private sceneManager: SceneManager) {}
 
-  onEnter(): void {
+  async onEnter(): Promise<void> {
     console.log('Entering Main Menu');
     this.createUI();
     // Init sound on first interaction
-    SoundManager.getInstance().init();
+    await SoundManager.getInstance().init();
   }
 
   onExit(): void {

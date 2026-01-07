@@ -24,12 +24,14 @@ let worldWidth = 0;
 let worldHeight = 0;
 let tileSize = 0;
 let worldTiles: Uint8Array | null = null;
+let isHost = true; // Default to host unless told otherwise
 
 self.onmessage = (e: MessageEvent) => {
     const { type, data } = e.data;
 
     if (type === 'init') {
-        const { buffer, worldData } = data;
+        const { buffer, worldData, role } = data;
+        if (role !== undefined) isHost = (role === 'host' || role === 'single');
         
         // Split the single SAB into individual views
         // MAX_PARTICLES * (13 * 4 + 3 * 4) bytes roughly
@@ -133,7 +135,7 @@ function updateParticles(dt: number, player: any, enemies: any[]) {
                 b.vy[i] *= 0.995;
 
                 if (b.z[i] > 0 && b.vz[i] > 0) {
-                    if (b.z[i] !== 0) {
+                    if (b.z[i] !== 0 && isHost) {
                         heatEvents.push({ x: b.x[i], y: b.y[i], intensity: 0.6, radius: 20 });
                     }
                     b.z[i] = 0;

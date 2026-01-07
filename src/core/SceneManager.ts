@@ -24,7 +24,6 @@ export class SceneManager {
     this.scenes.set('multiplayer_gameplay', new MultiplayerGameplayScene(this, inputManager));
     this.scenes.set('benchmark', new BenchmarkScene(this, inputManager));
 
-    // Start with Menu
     this.switchScene('menu');
   }
 
@@ -36,7 +35,10 @@ export class SceneManager {
     const nextScene = this.scenes.get(name);
     if (nextScene) {
       this.currentScene = nextScene;
-      this.currentScene.onEnter();
+      const result = this.currentScene.onEnter();
+      if (result instanceof Promise) {
+          result.catch(err => console.error(`Error entering scene ${name}:`, err));
+      }
     } else {
       console.error(`Scene ${name} not found!`);
     }

@@ -240,11 +240,12 @@ export class ParticleSystem {
         return ParticleSystem.instance;
     }
 
-    public initWorker(world: World): void {
+    public initWorker(world: World, role: string = 'single'): void {
         this.worker.postMessage({
             type: 'init',
             data: {
                 buffer: this.sharedBuffer,
+                role: role,
                 worldData: {
                     width: (world as any).width,
                     height: (world as any).height,
@@ -425,7 +426,9 @@ export class ParticleSystem {
                     this.vx[i] *= 0.995; this.vy[i] *= 0.995;
 
                     if (this.z[i] > 0 && this.vz[i] > 0) {
-                        if (this.z[i] !== 0 && (world as any)?.heatMap) {
+                        const mm = (window as any).MultiplayerManager?.getInstance();
+                        const isHost = !mm || mm.isHost;
+                        if (this.z[i] !== 0 && (world as any)?.heatMap && isHost) {
                             (world as any).heatMap.addHeat(this.x[i], this.y[i], 0.6, 20);
                         }
                         this.z[i] = 0; this.vz[i] = 0; this.vx[i] = 0; this.vy[i] = 0;

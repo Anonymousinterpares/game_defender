@@ -10,23 +10,18 @@ import { SoundManager } from './SoundManager';
 import { Radar } from '../ui/Radar';
 import { Entity } from './Entity';
 import { ConfigManager } from '../config/MasterConfig';
-import { Projectile, ProjectileType } from '../entities/Projectile';
-import { Enemy } from '../entities/Enemy';
-import { Drop, DropType } from '../entities/Drop';
-import { MoltenMetalParticle } from '../entities/Particle';
-import { HeatMap, MaterialType } from './HeatMap';
+import { ProjectileType } from '../entities/Projectile';
 import { WorldClock } from './WorldClock';
 import { LightManager } from './LightManager';
 import { FloorDecalManager } from './FloorDecalManager';
 import { GameplayHUD, HUDParent } from '../ui/GameplayHUD';
-import { WeaponSystem, WeaponParent } from '../systems/WeaponSystem';
-import { CombatSystem, CombatParent } from '../systems/CombatSystem';
 import { LightingRenderer, LightingParent } from './renderers/LightingRenderer';
 import { WeatherManager, WeatherType } from './WeatherManager';
 import { ParticleSystem } from './ParticleSystem';
+import { MoltenMetalParticle } from '../entities/Particle';
 import { PerfMonitor } from '../utils/PerfMonitor';
 import { BenchmarkSystem } from '../utils/BenchmarkSystem';
-import { Quadtree, Rect } from '../utils/Quadtree';
+import { Rect } from '../utils/Quadtree';
 import { Simulation, SimulationRole } from './Simulation';
 import { WorldRenderer } from './renderers/WorldRenderer';
 
@@ -92,7 +87,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
       this.simulation.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
   }
 
-  onEnter(): void {
+  async onEnter(): Promise<void> {
     const seed = ConfigManager.getInstance().get<number>('Debug', 'forcedSeed');
     this.simulation = new Simulation(SimulationRole.SINGLEPLAYER, seed);
     this.simulation.player.inputManager = this.inputManager; // Link input
@@ -101,36 +96,12 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     ParticleSystem.getInstance().clear();
     ParticleSystem.getInstance().initWorker(this.simulation.world);
     
-    const sm = SoundManager.getInstance();
-    sm.init();
-    sm.setWorld(this.simulation.world);
-    
-    let base = import.meta.env.BASE_URL;
-    if (!base.endsWith('/')) base += '/';
-    const getPath = (file: string) => `${base}assets/sounds/${file}`;
-
-    sm.loadSound('ping', getPath('ping.wav'));
-    sm.loadSound('shoot_cannon', getPath('shoot_cannon.wav'));
-    sm.loadSound('shoot_laser', getPath('shoot_laser.wav'));
-    sm.loadSound('shoot_ray', getPath('shoot_ray.wav'));
-    sm.loadSound('shoot_rocket', getPath('shoot_rocket.wav'));
-    sm.loadSound('shoot_missile', getPath('shoot_missile.wav'));
-    sm.loadSound('place_mine', getPath('place_mine.wav'));
-    sm.loadSound('shoot_flamethrower', getPath('shoot_flamethrower.wav'));
-    sm.loadSound('weapon_reload', getPath('weapon_reload.wav'));
-    sm.loadSound('hit_cannon', getPath('hit_cannon.wav'));
-    sm.loadSound('hit_missile', getPath('hit_missile.wav'));
-    sm.loadSound('hit_laser', getPath('hit_laser.wav'));
-    sm.loadSound('hit_ray', getPath('hit_ray.wav'));
-    sm.loadSound('explosion_large', getPath('explosion_large.wav'));
-    sm.loadSound('collect_coin', getPath('collect_coin.wav'));
-    sm.loadSound('ui_click', getPath('ui_click.wav'));
-    sm.loadSound('fire', getPath('fire.wav'));
-
-    sm.discoverMaterialVariants(['wood', 'brick', 'stone', 'metal', 'indestructible']);
-
     this.radar = new Radar();
     this.hud.create();
+
+    const sm = SoundManager.getInstance();
+    await sm.init();
+    sm.setWorld(this.simulation.world);
   }
 
   onExit(): void {

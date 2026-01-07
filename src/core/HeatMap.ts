@@ -660,7 +660,10 @@ export class HeatMap {
             }
             if (!hasActivity) {
                 toRemove.push(key);
-                this.recentlyDeactivated.add(key);
+                const mm = (window as any).MultiplayerManager?.getInstance();
+                if (!mm || mm.isHost) {
+                    this.recentlyDeactivated.add(key);
+                }
             }
         });
 

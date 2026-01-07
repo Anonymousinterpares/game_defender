@@ -58,7 +58,7 @@ export class SoundManager {
     return SoundManager.instance;
   }
 
-  public init(): void {
+  public async init(): Promise<void> {
     if (!this.audioCtx) {
       this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       this.masterGain = this.audioCtx.createGain();
@@ -70,7 +70,7 @@ export class SoundManager {
       this.masterGain.connect(this.audioCtx.destination);
       
       this.subscribeToEvents();
-      this.loadFromRegistry();
+      await this.loadFromRegistry();
     }
   }
 
@@ -84,25 +84,24 @@ export class SoundManager {
         'stone_hit_1', 'ui_click', 'weapon_reload', 'wood_hit_1', 'wood_hit_2', 'wood_hit_3'
     ];
 
-    for (const id of soundIds) {
+    const promises = soundIds.map(async (id) => {
         try {
-            const audio = registry.getAudio(id);
-            const response = await fetch(audio.src);
-            const arrayBuffer = await response.arrayBuffer();
+            const arrayBuffer = registry.getAudioData(id);
             const audioBuffer = await this.audioCtx!.decodeAudioData(arrayBuffer);
             this.sounds.set(id, audioBuffer);
 
-            // Track material variants
             if (id.includes('_hit_')) {
                 const category = id.split('_hit_')[0];
                 if (!this.materialVariants.has(category)) this.materialVariants.set(category, []);
                 this.materialVariants.get(category)!.push(id);
             }
         } catch (e) {
-            console.warn(`[SoundManager] Failed to decode ${id} from registry:`, e);
+            console.warn(`[SoundManager] Failed to decode ${id}:`, e);
         }
-    }
-    console.log(`[SoundManager] Loaded ${this.sounds.size} sounds from registry`);
+    });
+
+    await Promise.all(promises);
+    console.log(`[SoundManager] Decoded ${this.sounds.size} sounds from registry`);
   }
 
   private subscribeToEvents(): void {
@@ -160,9 +159,6 @@ export class SoundManager {
 
   public setWorld(world: World): void {
       this.world = world;
-      if (ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs')) {
-          console.log('[Audio] World reference set');
-      }
   }
 
   public updateAreaSound(name: string, x: number, y: number, intensity: number): void {
@@ -173,7 +169,6 @@ export class SoundManager {
 
     const existing = this.areaSoundQueue.get(key);
     if (existing) {
-        // Weighted centroid position
         const totalIntensity = existing.intensity + intensity;
         existing.x = (existing.x * existing.intensity + x * intensity) / totalIntensity;
         existing.y = (existing.y * existing.intensity + y * intensity) / totalIntensity;
@@ -191,7 +186,6 @@ export class SoundManager {
     const maxClusterVol = ConfigManager.getInstance().get<number>('Fire', 'maxClusterVolume') || 0.8;
     const ttl = ConfigManager.getInstance().get<number>('Fire', 'soundTTL') || 0.2;
 
-    // 1. Update active loops from the queue (new data available)
     this.areaSoundQueue.forEach((data, key) => {
         const soundName = key.split('_')[0];
         let voice = this.activeAreaLoops.get(key);
@@ -229,7 +223,6 @@ export class SoundManager {
             voice = { source, gain, panner, filter, x: data.x, y: data.y, baseVolume, lastSeen: now, intensity: data.intensity };
             this.activeAreaLoops.set(key, voice);
         } else {
-            // New simulation update received
             voice.x = data.x;
             voice.y = data.y;
             voice.intensity = data.intensity;
@@ -237,19 +230,16 @@ export class SoundManager {
         }
     });
 
-    // 2. Process all active loops (even if queue was empty this frame)
     this.activeAreaLoops.forEach((voice, key) => {
         const timeSinceSeen = now - (voice.lastSeen || 0);
 
         if (timeSinceSeen > ttl) {
-            // It's been too long without an update - fire is probably out
             voice.gain.gain.setTargetAtTime(0, now, 0.1);
             if (timeSinceSeen > ttl + 0.5) {
                 voice.source.stop();
                 this.activeAreaLoops.delete(key);
             }
         } else {
-            // Loop is still active (either updated this frame or within TTL window)
             const paths = SoundRaycaster.calculateAudiblePaths(voice.x, voice.y, this.listenerX, this.listenerY, this.world!);
             
             if (paths.length === 0) {
@@ -282,14 +272,12 @@ export class SoundManager {
   }
 
   public queueSoundSpatial(name: string, x: number, y: number): void {
-    // Clustering Logic: Group by Sound Name + Grid Cell
     const gx = Math.floor(x / this.CLUSTER_GRID_SIZE);
     const gy = Math.floor(y / this.CLUSTER_GRID_SIZE);
     const key = `${name}_${gx}_${gy}`;
 
     const existing = this.soundQueue.get(key);
     if (existing) {
-        // Centroid calculation: average positions
         const n = existing.count;
         existing.x = (existing.x * n + x) / (n + 1);
         existing.y = (existing.y * n + y) / (n + 1);
@@ -303,7 +291,6 @@ export class SoundManager {
       if (this.soundQueue.size === 0) return;
 
       this.soundQueue.forEach((q) => {
-          // Calculate volume boost based on count
           const boost = 1 + Math.log10(q.count);
           this.playSoundSpatial(q.name, q.x, q.y, boost);
       });
@@ -315,7 +302,6 @@ export class SoundManager {
     const available = this.materialVariants.get(matLower);
     
     if (available && available.length > 0) {
-        // Pick randomly from only what was actually loaded
         const name = available[Math.floor(Math.random() * available.length)];
         this.queueSoundSpatial(name, x, y);
     }
@@ -326,9 +312,8 @@ export class SoundManager {
       this.listenerY = y;
       
       this.processQueue(); 
-      this.processAreaSounds(); // Process looping area effects (like fire)
+      this.processAreaSounds(); 
 
-      // Update spatial loops
       if (this.world) {
           this.spatialLoops.forEach((voice) => {
               this.updateVoiceSpatial(voice);
@@ -346,10 +331,6 @@ export class SoundManager {
           return;
       }
 
-      // Summation of paths:
-      // Total Volume = sqrt(sum of squares) - energy based
-      // Pan = weighted average based on volume
-      // Filter = lowest cutoff (most muffled)
       let totalEnergy = 0;
       let weightedPan = 0;
       let minCutoff = 20000;
@@ -391,10 +372,8 @@ export class SoundManager {
     const totalVol = paths.reduce((acc, p) => acc + p.volume, 0);
     const finalPan = totalVol > 0 ? weightedPan / totalVol : 0;
 
-    // Load base volume from config
     let baseVol = ConfigManager.getInstance().get<number>('Audio', 'vol_' + name);
     
-    // Fallback for material hits (e.g., wood_hit_1 -> vol_hit_material)
     if (baseVol === undefined) {
         if (name.includes('_hit_')) {
             baseVol = ConfigManager.getInstance().get<number>('Audio', 'vol_hit_material');
@@ -405,13 +384,10 @@ export class SoundManager {
 
     const finalVolume = Math.min(2.0, pathVol * baseVol * volumeScale);
 
-    if (ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs')) {
-        console.log(`[Audio 3D] Playing ${name} at (${Math.round(x)},${Math.round(y)}) | Dist: ${Math.round(paths[0].distance)} | Vol: ${finalVolume.toFixed(2)} | Cutoff: ${minCutoff}`);
-    }
-
     const buffer = this.sounds.get(name);
     if (!buffer) {
-        console.warn(`Sound buffer not found: ${name}. Falling back to synthesis.`);
+        this.synthesizeSpatialFallback(name, x, y, finalVolume, finalPan, minCutoff);
+        return;
     }
 
     const filter = this.audioCtx.createBiquadFilter();
@@ -428,24 +404,28 @@ export class SoundManager {
     panner.connect(gain);
     gain.connect(this.masterGain);
 
-    if (buffer) {
-        const source = this.audioCtx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(filter);
-        source.start();
-    } else {
-        this.synthesizeSpatial(name, filter);
-    }
+    const source = this.audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(filter);
+    source.start();
   }
 
-  private synthesizeSpatial(name: string, destination: AudioNode): void {
-    if (!this.audioCtx) return;
-    // Simplified version of synthesizeShoot that connects to destination
+  private synthesizeSpatialFallback(name: string, x: number, y: number, volume: number, pan: number, cutoff: number): void {
+    if (!this.audioCtx || !this.masterGain) return;
+    const filter = this.audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = cutoff;
+    const panner = this.audioCtx.createStereoPanner();
+    panner.pan.value = pan;
+    const gain = this.audioCtx.createGain();
+    gain.gain.value = volume;
+    filter.connect(panner); panner.connect(gain); gain.connect(this.masterGain);
+    
     const duration = 0.15;
     const osc = this.audioCtx.createOscillator();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(600, this.audioCtx.currentTime);
-    osc.connect(destination);
+    osc.connect(filter);
     osc.start();
     osc.stop(this.audioCtx.currentTime + duration);
   }
@@ -460,18 +440,18 @@ export class SoundManager {
 
     filter.connect(panner);
     panner.connect(gain);
-    gain.connect(this.masterGain);
+    gain.connect(this.masterGain!);
 
     const buffer = this.sounds.get(name);
     let source: AudioBufferSourceNode | OscillatorNode;
 
     if (buffer) {
-        const bSource = this.audioCtx.createBufferSource();
+        const bSource = this.audioCtx!.createBufferSource();
         bSource.buffer = buffer;
         bSource.loop = true;
         source = bSource;
     } else {
-        const osc = this.audioCtx.createOscillator();
+        const osc = this.audioCtx!.createOscillator();
         osc.type = 'sine';
         osc.frequency.value = 440;
         source = osc;
@@ -493,7 +473,6 @@ export class SoundManager {
       if (voice) {
           voice.x = x;
           voice.y = y;
-          // updateVoiceSpatial is called in updateListener, but we can call it here too for immediate update
           this.updateVoiceSpatial(voice);
       }
   }
@@ -531,101 +510,29 @@ export class SoundManager {
     return this.isMuted;
   }
 
-  public async loadSound(name: string, url: string): Promise<boolean> {
-    if (!this.audioCtx) this.init();
-    
-    const tryLoad = async (u: string): Promise<AudioBuffer> => {
-        const response = await fetch(u);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        if (response.headers.get('content-type')?.includes('text/html')) throw new Error('Received HTML instead of Audio');
-        const arrayBuffer = await response.arrayBuffer();
-        return await this.audioCtx!.decodeAudioData(arrayBuffer);
-    };
-
-    try {
-      const buffer = await tryLoad(url);
-      this.sounds.set(name, buffer);
-      
-      // Track material variants
-      if (name.includes('_hit_')) {
-          const category = name.split('_hit_')[0];
-          if (!this.materialVariants.has(category)) this.materialVariants.set(category, []);
-          if (!this.materialVariants.get(category)!.includes(name)) this.materialVariants.get(category)!.push(name);
-      }
-      return true;
-    } catch (e) {
-      // Retry with simple relative path if we used a base-prefixed one
-      // This catches cases where BASE_URL might be interfering with local dev resolving
-      // SKIP for _hit_ sounds as they are likely just probing misses
-      if (!name.includes('_hit_') && (url.startsWith('/') || url.startsWith('http'))) {
-         try {
-             const relativeUrl = 'assets/sounds/' + url.split('assets/sounds/')[1];
-             console.log(`Retrying ${name} with relative path: ${relativeUrl}`);
-             const buffer = await tryLoad(relativeUrl);
-             this.sounds.set(name, buffer);
-             return true;
-         } catch (e2) {
-             // Second attempt failed
-         }
-      }
-
-      // Do not log warning for material hit probing (expected to fail eventually)
-      if (!name.includes('_hit_')) {
-          console.error(`Failed to load sound ${name} from ${url}. Error:`, e);
-      }
-      return false;
-    }
-  }
-
-  /**
-   * Automatically discovers and loads material hit variants by probing 
-   * until a file is not found.
-   */
-  public async discoverMaterialVariants(materials: string[]): Promise<void> {
-      for (const mat of materials) {
-          let i = 1;
-          let found = true;
-          while (found && i < 20) { // Safety cap of 20 variants
-              const name = `${mat}_hit_${i}`;
-              const url = `${import.meta.env.BASE_URL}assets/sounds/${name}.wav`;
-              found = await this.loadSound(name, url);
-              if (found) {
-                  i++;
-              }
-          }
-          console.log(`Discovered ${i-1} variants for material: ${mat}`);
-      }
-  }
-
   public playSound(name: string): void {
     if (this.isMuted || !this.audioCtx || !this.masterGain) return;
-
-    if (this.audioCtx.state === 'suspended') {
-      this.audioCtx.resume();
-    }
-
-    const shouldLog = ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs');
+    if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
 
     const buffer = this.sounds.get(name);
     if (buffer) {
-      // FIX: Use individual volume config for 2D sounds too
       let baseVol = ConfigManager.getInstance().get<number>('Audio', 'vol_' + name);
       if (baseVol === undefined) baseVol = 1.0;
-
       const source = this.audioCtx.createBufferSource();
       source.buffer = buffer;
-      
       const gain = this.audioCtx.createGain();
       gain.gain.value = baseVol;
-      
       source.connect(gain);
       gain.connect(this.masterGain);
       source.start();
-
-      if (shouldLog) console.log(`[Audio 2D] Playing ${name} | Vol: ${baseVol}`);
     } else {
-      if (shouldLog) console.log(`[Audio 2D] Synthesizing ${name}`);
-      // Fallback synthesis based on name
+      // Fallback synthesis
+      this.synthesizeFallback(name);
+    }
+  }
+
+  private synthesizeFallback(name: string): void {
+      if (!this.audioCtx || !this.masterGain) return;
       switch(name) {
           case 'ping': this.synthesizePing(); break;
           case 'shoot_cannon': this.synthesizeShoot(400, 0.15, 'square', 0.1); break;
@@ -641,24 +548,17 @@ export class SoundManager {
           case 'hit_laser': this.synthesizeShoot(2000, 0.04, 'sine', 0.05); break;
           case 'hit_ray': this.synthesizeShoot(150, 0.15, 'sawtooth', 0.1); break;
           case 'ui_click': this.synthesizeShoot(800, 0.05, 'square', 0.1); break;
-          case 'collect_coin': this.synthesizePing(); break; // reuse
+          case 'collect_coin': this.synthesizePing(); break;
           default: this.synthesizeShoot(600, 0.1, 'sine', 0.1); break;
       }
-    }
   }
 
   public startLoop(name: string): void {
       if (this.isMuted || !this.audioCtx || !this.masterGain || this.activeLoops.has(name)) return;
       if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
 
-      if (name === 'shoot_ray') {
-          this.startRayLoop();
-          return;
-      }
-
       const gain = this.audioCtx.createGain();
       gain.connect(this.masterGain);
-      
       const buffer = this.sounds.get(name);
       if (buffer) {
           const source = this.audioCtx.createBufferSource();
@@ -667,83 +567,12 @@ export class SoundManager {
           source.connect(gain);
           source.start();
           this.activeLoops.set(name, { osc: source, gain, startTime: this.audioCtx.currentTime });
-      } else {
-          // Synthesis loop
-          const osc = this.audioCtx.createOscillator();
-          let freq = 440;
-          let type: OscillatorType = 'sine';
-          let vol = 0.05;
-
-          if (name === 'shoot_laser') { freq = 1200; type = 'sine'; vol = 0.05; }
-          else if (name === 'shoot_ray') { freq = 200; type = 'sawtooth'; vol = 0.08; } // Should not be reached now
-          else if (name === 'hit_laser') { freq = 2000; type = 'sine'; vol = 0.03; }
-          else if (name === 'hit_ray') { freq = 150; type = 'sawtooth'; vol = 0.05; }
-
-          osc.type = type;
-          osc.frequency.setValueAtTime(freq, this.audioCtx.currentTime);
-          // Add some modulation for hit sounds
-          if (name.startsWith('hit_')) {
-              osc.frequency.exponentialRampToValueAtTime(freq * 0.8, this.audioCtx.currentTime + 0.1);
-          }
-
-          gain.gain.setValueAtTime(vol, this.audioCtx.currentTime);
-          osc.connect(gain);
-          osc.start();
-          this.activeLoops.set(name, { osc, gain, startTime: this.audioCtx.currentTime });
       }
-  }
-
-  private startRayLoop(): void {
-    if (!this.audioCtx || !this.masterGain) return;
-    
-    const buffer = this.sounds.get('shoot_ray');
-    const gain = this.audioCtx.createGain();
-    gain.connect(this.masterGain);
-
-    if (buffer) {
-        const source = this.audioCtx.createBufferSource();
-        source.buffer = buffer;
-        // Logic: 0-4s then loop 2-4s
-        // WebAudio doesn't support complex loop segments easily on a single source.
-        // We will play the first part (0-4), then schedule the loop (2-4).
-        source.connect(gain);
-        source.start(0, 0, 4);
-        
-        this.activeLoops.set('shoot_ray', { osc: source, gain, startTime: this.audioCtx.currentTime });
-
-        const scheduleLoop = () => {
-            if (!this.activeLoops.has('shoot_ray') || this.activeLoops.get('shoot_ray')?.isEnding) return;
-            const loopSource = this.audioCtx!.createBufferSource();
-            loopSource.buffer = buffer;
-            loopSource.loop = true;
-            loopSource.loopStart = 2;
-            loopSource.loopEnd = 4;
-            loopSource.connect(gain);
-            loopSource.start(0, 2);
-            this.activeLoops.get('shoot_ray')!.osc = loopSource;
-        };
-
-        source.onended = scheduleLoop;
-    } else {
-        // Synthesis fallback for complex ray
-        const osc = this.audioCtx.createOscillator();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(200, this.audioCtx.currentTime);
-        osc.frequency.linearRampToValueAtTime(250, this.audioCtx.currentTime + 4);
-        gain.gain.setValueAtTime(0.08, this.audioCtx.currentTime);
-        osc.connect(gain);
-        osc.start();
-        this.activeLoops.set('shoot_ray', { osc, gain, startTime: this.audioCtx.currentTime });
-    }
   }
 
   public stopLoop(name: string, fadeTime: number = 0.05): void {
       const loop = this.activeLoops.get(name);
       if (loop && this.audioCtx) {
-          if (name === 'shoot_ray' && !loop.isEnding) {
-              this.stopRayLoop(loop);
-              return;
-          }
           const now = this.audioCtx.currentTime;
           loop.gain.gain.cancelScheduledValues(now);
           loop.gain.gain.setValueAtTime(loop.gain.gain.value, now);
@@ -751,38 +580,6 @@ export class SoundManager {
           loop.osc.stop(now + fadeTime);
           this.activeLoops.delete(name);
       }
-  }
-
-  private stopRayLoop(loop: any): void {
-    if (!this.audioCtx || !this.masterGain) return;
-    const buffer = this.sounds.get('shoot_ray');
-    
-    // Stop current source
-    loop.osc.stop();
-    loop.isEnding = true;
-
-    if (buffer) {
-        const tail = this.audioCtx.createBufferSource();
-        tail.buffer = buffer;
-        tail.connect(loop.gain);
-        // Play from 5th second till end
-        tail.start(0, 5);
-        tail.onended = () => {
-            this.activeLoops.delete('shoot_ray');
-        };
-        loop.osc = tail;
-    } else {
-        // Synthesis tail
-        const osc = this.audioCtx.createOscillator();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(250, this.audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(50, this.audioCtx.currentTime + 0.5);
-        loop.gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.5);
-        osc.connect(loop.gain);
-        osc.start();
-        osc.stop(this.audioCtx.currentTime + 0.5);
-        setTimeout(() => this.activeLoops.delete('shoot_ray'), 500);
-    }
   }
 
   private synthesizeShoot(freq: number, duration: number, type: OscillatorType, volume: number = 0.05): void {
@@ -825,7 +622,6 @@ export class SoundManager {
   private synthesizeReload(): void {
       if (!this.audioCtx || !this.masterGain) return;
       const now = this.audioCtx.currentTime;
-      // Three mechanical clicks
       [0, 0.1, 0.2].forEach((offset) => {
           const osc = this.audioCtx!.createOscillator();
           const gain = this.audioCtx!.createGain();
@@ -842,20 +638,15 @@ export class SoundManager {
 
   private synthesizePing(): void {
     if (!this.audioCtx || !this.masterGain) return;
-    
     const osc = this.audioCtx.createOscillator();
     const gain = this.audioCtx.createGain();
-
     osc.type = 'sine';
     osc.frequency.setValueAtTime(800, this.audioCtx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(400, this.audioCtx.currentTime + 0.1);
-
     gain.gain.setValueAtTime(0.1, this.audioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.1);
-
     osc.connect(gain);
     gain.connect(this.masterGain);
-
     osc.start();
     osc.stop(this.audioCtx.currentTime + 0.1);
   }

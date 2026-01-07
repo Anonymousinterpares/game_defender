@@ -3,25 +3,16 @@ import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
 import { RemotePlayer } from '../entities/RemotePlayer';
 import { SceneManager } from './SceneManager';
 import { InputManager } from './InputManager';
-import { World } from './World';
-import { HeatMap } from './HeatMap';
 import { WeatherManager } from './WeatherManager';
 import { WorldClock } from './WorldClock';
-import { LightManager } from './LightManager';
-import { FloorDecalManager } from './FloorDecalManager';
 import { Entity } from './Entity';
-import { Player } from '../entities/Player';
 import { Projectile, ProjectileType } from '../entities/Projectile';
 import { Enemy } from '../entities/Enemy';
 import { Drop } from '../entities/Drop';
 import { ParticleSystem } from './ParticleSystem';
 import { SoundManager } from './SoundManager';
 import { EventBus, GameEvent } from './EventBus';
-import { Quadtree } from '../utils/Quadtree';
 import { ConfigManager } from '../config/MasterConfig';
-import { MaterialType } from './HeatMap';
-import { PerfMonitor } from '../utils/PerfMonitor';
-import { Rect } from '../utils/Quadtree';
 import { Simulation, SimulationRole } from './Simulation';
 import { WorldRenderer } from './renderers/WorldRenderer';
 
@@ -41,8 +32,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
     super(sceneManager, inputManager);
   }
 
-  onEnter(): void {
-    super.onEnter(); // Initialize radar, sound, etc.
+  async onEnter(): Promise<void> {
+    await super.onEnter(); // Initialize radar, sound, etc.
     const mm = MultiplayerManager.getInstance();
     const role = mm.isHost ? SimulationRole.HOST : SimulationRole.CLIENT;
     
@@ -99,7 +90,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
     }
 
     ParticleSystem.getInstance().clear();
-    ParticleSystem.getInstance().initWorker(this.world);
+    const roleStr = mm.isHost ? 'host' : 'client';
+    ParticleSystem.getInstance().initWorker(this.world, roleStr);
     SoundManager.getInstance().init();
     SoundManager.getInstance().setWorld(this.world);
     this.hud.create();
@@ -179,7 +171,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
     if (!this.isSpawned) return;
     
     // 1. Sync remotePlayers array for simulation systems
-    this.simulation.remotePlayers = Array.from(this.remotePlayersMap.values()).filter(rp => rp.active);
+    this.simulation.remotePlayers = Array.from(this.remotePlayersMap.values());
 
     // 2. Run Core Simulation (duplication removed!)
     super.update(dt);
@@ -346,6 +338,9 @@ export class MultiplayerGameplayScene extends GameplayScene {
           }
           this.worldRenderer.invalidateTileCache(tx, ty); this.world.markMeshDirty();
           if (!MultiplayerManager.getInstance().isHost && pt && hx !== undefined && hy !== undefined) {
+              // Clear any local projectile that might have "passed through"
+              this.simulation.removeProjectileAt(hx, hy, 40);
+
               if (pt === ProjectileType.ROCKET || pt === ProjectileType.MISSILE || pt === ProjectileType.MINE) {
                   const cfg = ConfigManager.getInstance();
                   const aoe = (pt === ProjectileType.MINE ? cfg.get<number>('Weapons', 'mineAOE') : (pt === ProjectileType.ROCKET ? cfg.get<number>('Weapons', 'rocketAOE') : cfg.get<number>('Weapons', 'missileAOE'))) * cfg.get<number>('World', 'tileSize');
@@ -369,13 +364,14 @@ export class MultiplayerGameplayScene extends GameplayScene {
         r: Math.round(this.player.rotation * 1000), n: MultiplayerManager.getInstance().myName,
         h: Math.round(this.player.health), l: this.player.segments.length, 
         segs: this.player.segments.map(s => ({ x: Math.round(s.x), y: Math.round(s.y), f: s.isOnFire })),
-        f: this.player.isOnFire, w: ConfigManager.getInstance().get<string>('Player', 'activeWeapon')
+        f: this.player.isOnFire, w: ConfigManager.getInstance().get<string>('Player', 'activeWeapon'),
+        a: this.player.active
       };
       MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_STATE, state);
   }
 
   private handlePlayerState(data: any): void {
-    const { id, x, y, r, n, h, l, segs, f, w } = data;
+    const { id, x, y, r, n, h, l, segs, f, w, a } = data;
     if (id === MultiplayerManager.getInstance().myId) return;
     let rp = this.remotePlayersMap.get(id);
     if (!rp) {
@@ -384,6 +380,11 @@ export class MultiplayerGameplayScene extends GameplayScene {
       this.simulation.remotePlayers.push(rp);
       this.physics.addBody(rp);
     }
+    
+    // Reactivate and Sync active state
+    if (a !== undefined) rp.active = a;
+    else rp.active = true; // Fallback
+
     if (l !== undefined && rp.segments.length !== l) {
         rp.setBodyLength(l);
     }
