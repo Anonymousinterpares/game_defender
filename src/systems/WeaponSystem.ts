@@ -173,88 +173,81 @@ export class WeaponSystem {
         
         const player = this.parent.player;
         const maxDist = type === 'laser' ? 800 : 500;
-        const step = 8;
+        
+        // Use World raycast for consistency
+        const wallHit = this.parent.world.raycast(player.x, player.y, player.rotation, maxDist);
+        
         let dist = 0;
         let hitEnemy: Enemy | null = null;
-        let hitSomething = false;
+        let hitRP: any = null;
+        let hitSomething = !!wallHit;
+        let finalX = wallHit ? wallHit.x : player.x + Math.cos(player.rotation) * maxDist;
+        let finalY = wallHit ? wallHit.y : player.y + Math.sin(player.rotation) * maxDist;
 
-        const mapW = this.parent.world.getWidthPixels();
-        const mapH = this.parent.world.getHeightPixels();
+        // Check Entities along the beam BEFORE it hits a wall
+        const actualMaxDist = wallHit ? Math.sqrt((wallHit.x - player.x)**2 + (wallHit.y - player.y)**2) : maxDist;
         
-        while (dist < maxDist) {
-            const tx = player.x + Math.cos(player.rotation) * dist;
-            const ty = player.y + Math.sin(player.rotation) * dist;
-            
-            if (this.parent.world.isWall(tx, ty) || tx < 0 || tx > mapW || ty < 0 || ty > mapH) {
-                hitSomething = true;
-                break;
-            }
-            
-            // Check Enemies
+        // Entity check (Enemies and Remote Players)
+        const step = 8;
+        for (let d = 0; d < actualMaxDist; d += step) {
+            const tx = player.x + Math.cos(player.rotation) * d;
+            const ty = player.y + Math.sin(player.rotation) * d;
+
+            // Enemies
             for (const e of this.parent.enemies) {
                 const dx = e.x - tx;
                 const dy = e.y - ty;
                 if (Math.sqrt(dx*dx + dy*dy) < e.radius) {
                     hitEnemy = e;
-                    hitSomething = true;
+                    dist = d;
+                    finalX = tx; finalY = ty;
                     break;
                 }
             }
             if (hitEnemy) break;
 
-            // Check Remote Players (Authoritative Hit Detection)
-            let hitRP = null;
+            // Remote Players
             for (const rp of this.parent.remotePlayers) {
                 const dx = rp.x - tx;
                 const dy = rp.y - ty;
                 if (Math.sqrt(dx*dx + dy*dy) < rp.radius) {
                     hitRP = rp;
-                    hitSomething = true;
+                    dist = d;
+                    finalX = tx; finalY = ty;
                     break;
                 }
             }
-
-            if (hitRP) {
-                if (type === 'laser') {
-                    const dmg = ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt;
-                    if (Math.random() < 0.2) { // Rate limit hit broadcast
-                        MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
-                            id: hitRP.id,
-                            damage: dmg,
-                            killerId: this.parent.myId
-                        });
-                    }
-                } else {
-                    const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-                    const distInTiles = dist / tileSize;
-                    const base = ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage');
-                    const dmg = (base / (1 + distInTiles * distInTiles)) * dt;
-                    if (Math.random() < 0.2) {
-                        MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
-                            id: hitRP.id,
-                            damage: dmg,
-                            killerId: this.parent.myId
-                        });
-                    }
-                }
-                break;
-            }
-
-            dist += step;
+            if (hitRP) break;
         }
+
+        if (!hitEnemy && !hitRP && wallHit) {
+            dist = actualMaxDist;
+        } else if (!hitEnemy && !hitRP) {
+            dist = maxDist;
+        }
+
+        this.beamEndPos = { x: finalX, y: finalY };
         
-        this.beamEndPos = {
-            x: player.x + Math.cos(player.rotation) * dist,
-            y: player.y + Math.sin(player.rotation) * dist
-        };
+        if (hitRP) {
+            const dmg = type === 'laser' ? ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt : 
+                        (ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage') / (1 + (dist/32)**2)) * dt;
+            
+            if (Math.random() < 0.2) {
+                MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
+                    id: hitRP.id,
+                    damage: dmg,
+                    killerId: this.parent.myId
+                });
+            }
+        }
         
         const hitSfx = type === 'laser' ? 'hit_laser' : 'hit_ray';
 
-        if (hitSomething) {
+        if (hitSomething || hitEnemy || hitRP) {
             SoundManager.getInstance().startLoopSpatial(hitSfx, this.beamEndPos.x, this.beamEndPos.y);
             SoundManager.getInstance().updateLoopPosition(hitSfx, this.beamEndPos.x, this.beamEndPos.y);
             
-            if (!hitEnemy) {
+            if (!hitEnemy && !hitRP) {
                 const heatAmount = type === 'laser' ? 0.4 : 0.6;
                 this.parent.heatMap.addHeat(this.beamEndPos.x, this.beamEndPos.y, heatAmount * dt * 5, 12);
                 
@@ -264,15 +257,9 @@ export class WeaponSystem {
             }
 
             if (hitEnemy) {
-                if (type === 'laser') {
-                    hitEnemy.takeDamage(ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt);
-                } else {
-                    const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-                    const distInTiles = dist / tileSize;
-                    const base = ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage');
-                    const damage = (base / (1 + distInTiles * distInTiles)) * dt;
-                    hitEnemy.takeDamage(damage);
-                }
+                const dmg = type === 'laser' ? ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt : 
+                            (ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage') / (1 + (dist/32)**2)) * dt;
+                hitEnemy.takeDamage(dmg);
             }
         } else {
             SoundManager.getInstance().stopLoop(hitSfx, 0.5);

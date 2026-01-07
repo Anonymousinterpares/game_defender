@@ -48,6 +48,9 @@ export class HeatMap {
     private frameCount: number = 0;
     private fireAsset: HTMLImageElement | null = null;
     private worldRef: any = null;
+    
+    // Track tiles that became inactive to sync deactivation to clients
+    private recentlyDeactivated: Set<string> = new Set();
 
     private scratchCanvas: HTMLCanvasElement | null = null;
     private scratchCtx: CanvasRenderingContext2D | null = null;
@@ -655,7 +658,10 @@ export class HeatMap {
                 if (hasMolten) this.moltenData.set(key, nextMolten);
                 else this.moltenData.delete(key);
             }
-            if (!hasActivity) toRemove.push(key);
+            if (!hasActivity) {
+                toRemove.push(key);
+                this.recentlyDeactivated.add(key);
+            }
         });
 
         toRemove.forEach(k => this.activeTiles.delete(k));
@@ -874,6 +880,124 @@ export class HeatMap {
 
     public getTileScorch(tx: number, ty: number): Uint8Array | null {
         return this.scorchData.get(`${tx},${ty}`) || null;
+    }
+
+    // --- NETWORK SYNC METHODS ---
+
+    /**
+     * Returns a compressed snapshot of active tiles for network sync.
+     * Only sends tiles that have active Heat, Fire, or Scorch marks.
+     */
+    public getDeltaState(): any[] {
+        const delta: any[] = [];
+        
+        // Add active tiles
+        this.activeTiles.forEach(key => {
+            const h = this.heatData.get(key);
+            const f = this.fireData.get(key);
+            const s = this.scorchData.get(key);
+            const m = this.moltenData.get(key);
+            
+            if (h || f || s || m) {
+                const dObj: any = { k: key };
+                if (h) dObj.h = this.compressFloatArray(h);
+                if (f) dObj.f = this.compressFloatArray(f);
+                if (m) dObj.m = this.compressFloatArray(m);
+                if (s) dObj.s = Array.from(s); 
+                delta.push(dObj);
+            }
+        });
+
+        // Add recently deactivated tiles
+        this.recentlyDeactivated.forEach(key => {
+            delta.push({ k: key, c: 1 }); // c:1 means Clear/Deactivated
+        });
+        this.recentlyDeactivated.clear();
+
+        return delta;
+    }
+
+    public applyDeltaState(delta: any[]): void {
+        // If Host sends a "reset" or we want to track inactive tiles:
+        // For now, Host sends a list of keys that are active.
+        // We might want to remove local tiles that the host didn't send if they are "old".
+        
+        delta.forEach(d => {
+            const key = d.k;
+            const [tx, ty] = key.split(',').map(Number);
+            
+            // Special "Clear" command from Host
+            if (d.c === 1) {
+                this.forceClear(key);
+                return;
+            }
+
+            this.activeTiles.add(key);
+
+            if (d.h !== undefined) {
+                let h = this.heatData.get(key);
+                if (!h) { h = new Float32Array(this.subDiv * this.subDiv); this.heatData.set(key, h); }
+                this.decompressFloatArray(d.h, h);
+            }
+            if (d.f !== undefined) {
+                let f = this.fireData.get(key);
+                if (!f) { f = new Float32Array(this.subDiv * this.subDiv); this.fireData.set(key, f); }
+                this.decompressFloatArray(d.f, f);
+            }
+            if (d.m !== undefined) {
+                let m = this.moltenData.get(key);
+                if (!m) { m = new Float32Array(this.subDiv * this.subDiv); this.moltenData.set(key, m); }
+                this.decompressFloatArray(d.m, m);
+            }
+            if (d.s) {
+                let s = this.scorchData.get(key);
+                if (!s) { 
+                    s = new Uint8Array(this.subDiv * this.subDiv); 
+                    this.scorchData.set(key, s); 
+                }
+                const serverS = d.s;
+                let changed = false;
+                for(let i=0; i<serverS.length; i++) {
+                    if (s[i] !== serverS[i]) {
+                        s[i] = serverS[i];
+                        changed = true;
+                    }
+                }
+                if (changed && this.worldRef) {
+                    this.worldRef.invalidateTileCache(tx, ty);
+                }
+            }
+        });
+    }
+
+    private forceClear(key: string): void {
+        this.heatData.delete(key);
+        this.fireData.delete(key);
+        this.moltenData.delete(key);
+        this.activeTiles.delete(key);
+        const [tx, ty] = key.split(',').map(Number);
+        if (this.worldRef) this.worldRef.invalidateTileCache(tx, ty);
+    }
+
+    private compressFloatArray(arr: Float32Array): number[] {
+        const res: number[] = [];
+        let hasNonZero = false;
+        for(let i=0; i<arr.length; i++) {
+            const v = Math.round(arr[i] * 100) / 100;
+            res.push(v);
+            if (v > 0.01) hasNonZero = true; // Use threshold
+        }
+        return hasNonZero ? res : [];
+    }
+
+    private decompressFloatArray(source: number[], target: Float32Array): void {
+        if (source.length === 0) {
+            target.fill(0);
+            return;
+        }
+        for(let i=0; i<Math.min(source.length, target.length); i++) {
+            target[i] = source[i];
+        }
     }
 }
 

@@ -404,6 +404,37 @@ export class World {
     return true;
   }
 
+  /**
+   * Performs a simple raycast to find the first wall collision.
+   * Returns the intersection point or null if no hit within maxDist.
+   */
+  public raycast(startX: number, startY: number, angle: number, maxDist: number): {x: number, y: number} | null {
+      const step = 2; // Increased precision to 2px
+      const dx = Math.cos(angle) * step;
+      const dy = Math.sin(angle) * step;
+      
+      let curX = startX;
+      let curY = startY;
+      let dist = 0;
+      
+      while (dist < maxDist) {
+          curX += dx;
+          curY += dy;
+          dist += step;
+          
+          if (this.isWall(curX, curY)) {
+              return { x: curX, y: curY };
+          }
+          
+          // Map bounds check
+          if (curX < 0 || curX > this.getWidthPixels() || curY < 0 || curY > this.getHeightPixels()) {
+              return { x: curX, y: curY };
+          }
+      }
+      
+      return null;
+  }
+
   private rebuildMesh(): void {
       const segments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
       const ts = this.tileSize;

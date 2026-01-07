@@ -91,6 +91,9 @@ export class MultiplayerGameplayScene extends GameplayScene {
         case NetworkMessageType.PLAYER_HIT:
           this.handlePlayerHit(msg.d);
           break;
+        case NetworkMessageType.WORLD_HEAT_SYNC:
+          if (this.heatMap) this.heatMap.applyDeltaState(msg.d);
+          break;
       }
     });
 
@@ -302,6 +305,15 @@ export class MultiplayerGameplayScene extends GameplayScene {
           this.envSyncTimer += this.networkTimer;
           if (this.envSyncTimer >= 1.0) {
               this.sendEnvironmentSync();
+              
+              // NEW: Sync Heat/Fire/Scorch Delta
+              if (this.heatMap) {
+                  const delta = this.heatMap.getDeltaState();
+                  if (delta.length > 0) {
+                      MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_HEAT_SYNC, delta);
+                  }
+              }
+              
               this.envSyncTimer = 0;
           }
       }
@@ -351,12 +363,16 @@ export class MultiplayerGameplayScene extends GameplayScene {
             if ((rp as any).remoteFiringTimer > 0) {
                 const type = (rp as any).remoteFiringType;
                 const angle = (rp as any).remoteFiringAngle || rp.rotation;
-                const dist = type === 'laser' ? 800 : (type === 'ray' ? 500 : 180);
+                const maxDist = type === 'laser' ? 800 : (type === 'ray' ? 500 : 180);
                 
+                // Raycast to find actual distance for heat application
+                const hit = this.world?.raycast(rp.x, rp.y, angle, maxDist);
+                const actualDist = hit ? Math.sqrt((hit.x - rp.x)**2 + (hit.y - rp.y)**2) : maxDist;
+
                 // Raycast-like heat application along the line
                 const steps = type === 'flamethrower' ? 5 : 8;
                 for (let i = 1; i <= steps; i++) {
-                    const d = (i / steps) * dist;
+                    const d = (i / steps) * actualDist;
                     const hx = rp.x + Math.cos(angle) * d;
                     const hy = rp.y + Math.sin(angle) * d;
                     
@@ -367,7 +383,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
                         // PARTICLE SPAWNING for remote flamethrower
                         if (Math.random() < 0.3) {
                             const pAngle = angle + (Math.random() - 0.5) * (Math.PI / 4);
-                            const speed = (dist / 0.5) * (0.8 + Math.random() * 0.4); 
+                            const speed = (actualDist / 0.5) * (0.8 + Math.random() * 0.4); 
                             const vx = Math.cos(pAngle) * speed;
                             const vy = Math.sin(pAngle) * speed;
                             const idx = ParticleSystem.getInstance().spawnParticle(
@@ -632,12 +648,15 @@ export class MultiplayerGameplayScene extends GameplayScene {
             const type = (rp as any).remoteFiringType;
             if (type === 'laser' || type === 'ray') {
                 const angle = (rp as any).remoteFiringAngle || rp.rotation;
-                const dist = type === 'laser' ? 800 : 500;
+                const maxDist = type === 'laser' ? 800 : 500;
                 
                 const startX = rp.interpolatedX;
                 const startY = rp.interpolatedY;
-                const endX = startX + Math.cos(angle) * dist;
-                const endY = startY + Math.sin(angle) * dist;
+                
+                // Use raycast to find the actual end point
+                const hit = this.world!.raycast(startX, startY, angle, maxDist);
+                const endX = hit ? hit.x : startX + Math.cos(angle) * maxDist;
+                const endY = hit ? hit.y : startY + Math.sin(angle) * maxDist;
                 
                 ctx.beginPath();
                 ctx.moveTo(startX, startY);
