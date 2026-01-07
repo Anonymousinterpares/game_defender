@@ -72,29 +72,12 @@ export abstract class Entity implements PhysicsBody {
   }
 
   public handleFireLogic(dt: number, fireDPS: number, baseExtinguishChance: number): void {
-      // Update visual feedback timers
+      // NOTE: Gameplay logic (damage/extinguish) moved to ECS FireSystem
+      // This method now only updates visual feedback timers for legacy entities
       if (this.damageFlash > 0) this.damageFlash -= dt;
       if (this.visualScale > 1.0) {
-          this.visualScale -= dt * 1.0; // Return to 1.0 over 200ms
+          this.visualScale -= dt * 1.0;
           if (this.visualScale < 1.0) this.visualScale = 1.0;
-      }
-
-      if (!this.isOnFire) return;
-
-      this.fireTimer += dt;
-      
-      // Apply Damage
-      this.takeDamage(fireDPS * dt);
-
-      // Extinguish logic every 1000ms
-      if (this.fireTimer >= 1.0) {
-          this.fireTimer -= 1.0;
-          if (Math.random() < this.extinguishChance) {
-              this.isOnFire = false;
-              this.extinguishChance = baseExtinguishChance;
-          } else {
-              this.extinguishChance = Math.min(1.0, this.extinguishChance + 0.1);
-          }
       }
   }
 

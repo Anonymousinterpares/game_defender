@@ -15,6 +15,14 @@ import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
 import { ParticleSystem } from './ParticleSystem';
 import { EventBus, GameEvent } from './EventBus';
 
+import { EntityManager } from './ecs/EntityManager';
+import { MovementSystem } from './ecs/systems/MovementSystem';
+import { FireSystem } from './ecs/systems/FireSystem';
+import { TransformComponent } from './ecs/components/TransformComponent';
+import { PhysicsComponent } from './ecs/components/PhysicsComponent';
+import { HealthComponent } from './ecs/components/HealthComponent';
+import { FireComponent } from './ecs/components/FireComponent';
+
 export enum SimulationRole {
     SINGLEPLAYER,
     HOST,
@@ -33,6 +41,11 @@ export class Simulation implements WeaponParent, CombatParent {
     public remotePlayers: RemotePlayer[] = [];
     public drops: Drop[] = [];
     public projectiles: Projectile[] = [];
+    
+    // ECS
+    public entityManager: EntityManager;
+    private movementSystem: MovementSystem;
+    private fireSystem: FireSystem;
     
     public weaponSystem: WeaponSystem;
     public combatSystem: CombatSystem;
@@ -61,6 +74,11 @@ export class Simulation implements WeaponParent, CombatParent {
         
         this.weaponSystem = new WeaponSystem(this);
         this.combatSystem = new CombatSystem(this);
+        
+        // ECS Init
+        this.entityManager = new EntityManager();
+        this.movementSystem = new MovementSystem();
+        this.fireSystem = new FireSystem();
         
         this.spatialGrid = new Quadtree<Entity>({ 
             x: 0, 
@@ -136,11 +154,20 @@ export class Simulation implements WeaponParent, CombatParent {
     }
 
     public update(dt: number, inputManager?: any): void {
+        // ECS Sync (Phase 4 bridge)
+        this.syncEntitiesToECS();
+
         // 1. Systems Update
         if (inputManager) {
             this.weaponSystem.update(dt, inputManager);
         }
         this.combatSystem.update(dt);
+        
+        this.fireSystem.update(dt, this.entityManager);
+        this.movementSystem.update(dt, this.entityManager);
+
+        // Sync BACK to legacy objects
+        this.syncBackFromECS();
 
         // 2. Physics Step
         this.physics.update(dt);
@@ -164,6 +191,60 @@ export class Simulation implements WeaponParent, CombatParent {
         this.updateSpatialGrid();
 
         this.heatMap.update(dt);
+    }
+
+    private syncBackFromECS(): void {
+        const all = [this.player, ...this.player.segments, ...this.enemies, ...this.remotePlayers];
+        all.forEach(e => {
+            const id = e.id;
+            const t = this.entityManager.getComponent<TransformComponent>(id, 'transform');
+            const h = this.entityManager.getComponent<HealthComponent>(id, 'health');
+            const f = this.entityManager.getComponent<FireComponent>(id, 'fire');
+
+            if (t) {
+                e.x = t.x;
+                e.y = t.y;
+                e.rotation = t.rotation;
+                e.prevX = t.prevX;
+                e.prevY = t.prevY;
+            }
+            if (h) {
+                e.health = h.health;
+                e.damageFlash = h.damageFlash;
+                e.visualScale = h.visualScale;
+                e.active = h.active;
+            }
+            if (f) {
+                e.isOnFire = f.isOnFire;
+                (e as any).fireTimer = f.fireTimer;
+                (e as any).extinguishChance = f.extinguishChance;
+            }
+        });
+    }
+
+    private syncEntitiesToECS(): void {
+        const all = [this.player, ...this.player.segments, ...this.enemies, ...this.remotePlayers];
+        all.forEach(e => this.syncLegacyEntity(e));
+    }
+
+    private syncLegacyEntity(e: Entity): void {
+        const id = e.id;
+        if (!this.entityManager.hasComponent(id, 'transform')) {
+            this.entityManager.addComponent(id, new TransformComponent(e.x, e.y, e.rotation, e.prevX, e.prevY));
+            this.entityManager.addComponent(id, new PhysicsComponent(e.vx, e.vy, e.radius, e.isStatic));
+            this.entityManager.addComponent(id, new HealthComponent(e.health, e.maxHealth, e.damageFlash, e.visualScale, e.active));
+            this.entityManager.addComponent(id, new FireComponent(e.isOnFire, (e as any).fireTimer || 0, (e as any).extinguishChance || 0.5));
+        }
+
+        const t = this.entityManager.getComponent<TransformComponent>(id, 'transform')!;
+        const p = this.entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
+        const h = this.entityManager.getComponent<HealthComponent>(id, 'health')!;
+        const f = this.entityManager.getComponent<FireComponent>(id, 'fire')!;
+
+        t.x = e.x; t.y = e.y; t.rotation = e.rotation;
+        p.vx = e.vx; p.vy = e.vy;
+        h.health = e.health; h.active = e.active;
+        f.isOnFire = e.isOnFire;
     }
 
     private updateSpawning(dt: number): void {
