@@ -1,7 +1,7 @@
 import { Entity } from '../core/Entity';
 import { ConfigManager } from '../config/MasterConfig';
 import { MaterialType } from '../core/HeatMap';
-import { SoundManager } from '../core/SoundManager';
+import { EventBus, GameEvent } from '../core/EventBus';
 
 export enum ProjectileType {
     CANNON = 'cannon',
@@ -43,15 +43,15 @@ export class Projectile extends Entity {
               if (mat === MaterialType.WOOD) {
                   // Cannon vs Wood: Star-like irregular shape (0 to 10 sub-tiles deep)
                   heatMap.destroyArea(hitX, hitY, this.radius, true);
-                  SoundManager.getInstance().playMaterialHit('wood', hitX, hitY);
+                  EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'wood' });
               } else if (mat === MaterialType.BRICK) {
                   // 2 layers
                   heatMap.destroyArea(hitX, hitY, subSize * 2);
-                  SoundManager.getInstance().playMaterialHit('brick', hitX, hitY);
+                  EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'brick' });
               } else if (mat === MaterialType.STONE) {
                   // 1 layer
                   heatMap.destroyArea(hitX, hitY, subSize * 1);
-                  SoundManager.getInstance().playMaterialHit('stone', hitX, hitY);
+                  EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'stone' });
               } else if (mat === MaterialType.METAL) {
                   // 1 layer AFTER 2nd hit
                   const key = `${Math.floor(hitX/4)},${Math.floor(hitY/4)}`; // sub-tile key roughly
@@ -59,12 +59,12 @@ export class Projectile extends Entity {
                   if (hits >= 2) {
                       heatMap.destroyArea(hitX, hitY, subSize * 1);
                       Projectile.metalHitTracker.delete(key);
-                      SoundManager.getInstance().playMaterialHit('metal', hitX, hitY);
+                      EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'metal' });
                   } else {
                       Projectile.metalHitTracker.set(key, hits);
                       // Maybe a small "clink" for non-breaking hit? 
                       // For now just metal hit
-                      SoundManager.getInstance().playMaterialHit('metal', hitX, hitY);
+                      EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'metal' });
                   }
               }
               break;
@@ -77,19 +77,19 @@ export class Projectile extends Entity {
               if (mat === MaterialType.WOOD) {
                   // Area of 2 length units (20 sub-tiles) + star-like up to 100% depth
                   heatMap.destroyArea(hitX, hitY, subSize * 20, true);
-                  SoundManager.getInstance().playMaterialHit('wood', hitX, hitY);
+                  EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'wood' });
               } else if (mat === MaterialType.BRICK) {
                   // 10 layers
                   heatMap.destroyArea(hitX, hitY, subSize * 10);
-                  SoundManager.getInstance().playMaterialHit('brick', hitX, hitY);
+                  EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'brick' });
               } else if (mat === MaterialType.STONE) {
                   // 5 layers
                   heatMap.destroyArea(hitX, hitY, subSize * 5);
-                  SoundManager.getInstance().playMaterialHit('stone', hitX, hitY);
+                  EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'stone' });
               } else if (mat === MaterialType.METAL) {
                   // 3 layers
                   heatMap.destroyArea(hitX, hitY, subSize * 3);
-                  SoundManager.getInstance().playMaterialHit('metal', hitX, hitY);
+                  EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'metal' });
               }
               break;
       }

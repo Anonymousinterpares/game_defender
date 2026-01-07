@@ -13,7 +13,7 @@ import { WeaponSystem, WeaponParent } from '../systems/WeaponSystem';
 import { CombatSystem, CombatParent } from '../systems/CombatSystem';
 import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
 import { ParticleSystem } from './ParticleSystem';
-import { SoundManager } from './SoundManager';
+import { EventBus, GameEvent } from './EventBus';
 
 export enum SimulationRole {
     SINGLEPLAYER,
@@ -77,6 +77,9 @@ export class Simulation implements WeaponParent, CombatParent {
         this.player = new Player(centerX, centerY, null as any); 
         this.entities.push(this.player);
         this.physics.addBody(this.player);
+        // Player segments are not added to physics individually by default, 
+        // they are managed by Player class but can be retrieved via getAllBodies() if needed.
+        // For RemotePlayers, we MUST NOT add segments to physics locally.
 
         this.initWeapons();
         this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
@@ -100,6 +103,36 @@ export class Simulation implements WeaponParent, CombatParent {
     public get myId(): string {
         if (this.role === SimulationRole.SINGLEPLAYER) return 'local';
         return MultiplayerManager.getInstance().myId || 'pending';
+    }
+
+    public setRole(role: SimulationRole): void {
+        this.role = role;
+    }
+
+    public reset(seed?: number): void {
+        this.world = new World(seed);
+        this.physics = new PhysicsEngine();
+        this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
+        
+        this.world.setHeatMap(this.heatMap);
+        this.physics.setWorld(this.world);
+        
+        // Re-add players to new physics
+        this.physics.addBody(this.player);
+        this.remotePlayers.forEach(rp => this.physics.addBody(rp));
+        
+        // Clear logic state
+        this.entities = [this.player, ...this.remotePlayers];
+        this.enemies = [];
+        this.drops = [];
+        this.projectiles = [];
+        
+        this.spatialGrid = new Quadtree<Entity>({ 
+            x: 0, 
+            y: 0, 
+            w: this.world.getWidthPixels(), 
+            h: this.world.getHeightPixels() 
+        });
     }
 
     public update(dt: number, inputManager?: any): void {
@@ -185,9 +218,11 @@ export class Simulation implements WeaponParent, CombatParent {
             this.combatSystem.createExplosion(x, y, p.aoeRadius, p.damage, p.shooterId);
         } else {
             p.onWorldHit(this.heatMap, x, y);
-            const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
-            SoundManager.getInstance().playSoundSpatial(sfx, x, y);
-            this.combatSystem.createImpactParticles(x, y, p.color);
+            EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
+                x, y, 
+                projectileType: p.type, 
+                hitType: 'wall' 
+            });
 
             // Sync for Multiplayer
             if (this.role === SimulationRole.CLIENT) {
@@ -320,9 +355,9 @@ export class Simulation implements WeaponParent, CombatParent {
         }
         this.weaponReloading.set(weapon, true);
         this.weaponReloadTimer.set(weapon, reloadTime);
-        SoundManager.getInstance().playSoundSpatial('weapon_reload', this.player.x, this.player.y);
-    }
-    public createImpactParticles(x: number, y: number, color: string): void {
-        this.combatSystem.createImpactParticles(x, y, color);
+        EventBus.getInstance().emit(GameEvent.WEAPON_RELOAD, { 
+            x: this.player.x, y: this.player.y, 
+            ownerId: this.myId 
+        });
     }
 }

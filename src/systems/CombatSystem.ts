@@ -1,7 +1,3 @@
-import { SoundManager } from '../core/SoundManager';
-import { LightManager } from '../core/LightManager';
-import { FloorDecalManager } from '../core/FloorDecalManager';
-import { Particle, MoltenMetalParticle, FlashParticle, ShockwaveParticle } from '../entities/Particle';
 import { MaterialType, HeatMap } from '../core/HeatMap';
 import { Enemy } from '../entities/Enemy';
 import { RemotePlayer } from '../entities/RemotePlayer';
@@ -11,8 +7,8 @@ import { World } from '../core/World';
 import { PhysicsEngine } from '../core/PhysicsEngine';
 import { ConfigManager } from '../config/MasterConfig';
 import { Drop, DropType } from '../entities/Drop';
-import { ParticleSystem } from '../core/ParticleSystem';
 import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
+import { EventBus, GameEvent } from '../core/EventBus';
 
 export interface CombatParent {
     enemies: Enemy[];
@@ -44,7 +40,7 @@ export class CombatSystem {
         for (const d of drops) {
             if (physics.checkCollision(player, d)) {
                 d.active = false;
-                SoundManager.getInstance().playSound('collect_coin');
+                EventBus.getInstance().emit(GameEvent.ITEM_COLLECTED, { x: d.x, y: d.y, itemType: 'coin', collectorId: this.parent.myId || 'local' });
                 if (d.type === DropType.COIN) {
                     this.parent.coinsCollected += 10;
                 }
@@ -76,8 +72,11 @@ export class CombatSystem {
                             this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
                         } else {
                             e.takeDamage(p.damage);
-                            const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
-                            SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
+                            EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
+                                x: p.x, y: p.y, 
+                                projectileType: p.type, 
+                                hitType: 'entity' 
+                            });
                         }
                         p.active = false;
                         hit = true;
@@ -111,19 +110,32 @@ export class CombatSystem {
                                 this.createExplosion(p.x, p.y, p.aoeRadius, p.damage, p.shooterId);
                             } else {
                                 // Visual impact
-                                const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
-                                SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
-                                this.createImpactParticles(p.x, p.y, player.color);
-
-                                // Direct hit from someone else or enemy
-                                if (this.parent.myId === 'local') {
-                                    // Singleplayer: take damage directly
-                                    player.takeDamage(p.damage);
-                                } else if (p.shooterId && p.shooterId !== this.parent.myId) {
-                                    // Multiplayer: shooter broadcasts the hit, but we can also broadcast our own hit for robustness?
-                                    // Actually, standard is authoritative: shooter broadcasts.
+                                EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
+                                    x: p.x, y: p.y, 
+                                    projectileType: p.type, 
+                                    hitType: 'entity' 
+                                });
+                                // color hit handled via ENTITY_HIT or we can emit it here
+                                if (player && player.color) {
+                                    EventBus.getInstance().emit(GameEvent.ENTITY_HIT, {
+                                        x: p.x, y: p.y,
+                                        damage: p.damage,
+                                        targetId: 'local',
+                                        sourceId: p.shooterId || '',
+                                        color: player.color
+                                    });
                                 }
                             }
+
+                            // Direct hit from someone else or enemy
+                            if (this.parent.myId === 'local') {
+                                // Singleplayer: take damage directly
+                                player.takeDamage(p.damage);
+                            } else if (p.shooterId && p.shooterId !== this.parent.myId) {
+                                // Multiplayer: shooter broadcasts the hit, but we can also broadcast our own hit for robustness?
+                                // Actually, standard is authoritative: shooter broadcasts.
+                            }
+
                             p.active = false;
                             hitLocal = true;
                             break;
@@ -155,9 +167,19 @@ export class CombatSystem {
                                     this.createExplosion(p.x, p.y, p.aoeRadius, p.damage, p.shooterId);
                                 } else {
                                     // Visual hit locally
-                                    const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
-                                    SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
-                                    this.createImpactParticles(p.x, p.y, rp.color);
+                                    EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
+                                        x: p.x, y: p.y, 
+                                        projectileType: p.type, 
+                                        hitType: 'entity' 
+                                    });
+                                    
+                                    EventBus.getInstance().emit(GameEvent.ENTITY_HIT, {
+                                        x: p.x, y: p.y,
+                                        damage: p.damage,
+                                        targetId: rp.id,
+                                        sourceId: p.shooterId || '',
+                                        color: rp.color
+                                    });
 
                                     // BROADCAST the hit IF I AM THE SHOOTER
                                     if (p.shooterId === this.parent.myId) {
@@ -189,35 +211,7 @@ export class CombatSystem {
         const mm = MultiplayerManager.getInstance();
         const isMyExplosion = shooterId === this.parent.myId;
 
-        SoundManager.getInstance().playSoundSpatial('explosion_large', x, y);
-        // ... (rest of visual code remains same)
-        LightManager.getInstance().addTransientLight('explosion', x, y);
-        FloorDecalManager.getInstance().addScorchMark(x, y, radius);
-        
-        // 1. Initial Flash
-        ParticleSystem.getInstance().spawnFlash(x, y, radius * 2.5);
-        
-        // 2. Shockwave
-        ParticleSystem.getInstance().spawnShockwave(x, y, radius * 1.8);
-
-        // ... (fireball/smoke logic)
-        const fireCount = 12 + Math.floor(Math.random() * 6);
-        for (let i = 0; i < fireCount; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const speed = 100 + Math.random() * 300;
-            const life = 0.3 + Math.random() * 0.4;
-            const idx = ParticleSystem.getInstance().spawnParticle(x, y, '#fffbe6', Math.cos(angle) * speed, Math.sin(angle) * speed, life);
-            ParticleSystem.getInstance().setFlame(idx, true);
-        }
-
-        const smokeCount = 20 + Math.floor(Math.random() * 10);
-        for (let i = 0; i < smokeCount; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const speed = 40 + Math.random() * 80;
-            const life = 1.0 + Math.random() * 1.5;
-            const color = Math.random() < 0.5 ? '#333' : '#555';
-            ParticleSystem.getInstance().spawnParticle(x, y, color, Math.cos(angle) * speed, Math.sin(angle) * speed, life);
-        }
+        let shrapnelCount = 0;
         
         if (this.parent.heatMap) {
             this.parent.heatMap.addHeat(x, y, 0.8, radius * 1.5);
@@ -230,7 +224,6 @@ export class CombatSystem {
                 this.parent.heatMap.destroyArea(x, y, radius, true);
                 
                 // If Host, we might need to sync the results of this destruction
-                // (Thoughwhs sync might cover it, WORLD_UPDATE is more immediate)
                 if (mm.isHost) {
                     const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
                     const tx = Math.floor(x / tileSize);
@@ -256,16 +249,17 @@ export class CombatSystem {
                 }
             }
 
-            // ... (shrapnel code)
+            // --- MATERIAL & SHRAPNEL LOGIC ---
             const centerMat = this.parent.heatMap.getMaterialAt(x, y);
             if (centerMat !== MaterialType.NONE) {
-                SoundManager.getInstance().playMaterialHit(MaterialType[centerMat].toLowerCase(), x, y);
+                EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { 
+                    x, y, 
+                    material: MaterialType[centerMat].toLowerCase() 
+                });
             }
 
-            let shrapnelCount = 0;
             const scanRadius = Math.max(radius, 32); 
             const step = 8;
-            
             for (let dy = -scanRadius; dy <= scanRadius; dy += step) {
                 for (let dx = -scanRadius; dx <= scanRadius; dx += step) {
                     const distSq = dx*dx + dy*dy;
@@ -282,17 +276,14 @@ export class CombatSystem {
                     }
                 }
             }
-
-            const actualParticles = Math.min(150, shrapnelCount);
-            if (actualParticles > 0) {
-                for (let i = 0; i < actualParticles; i++) {
-                    const angle = Math.random() * Math.PI * 2;
-                    const dist = 64 + Math.random() * 96;
-                    const speed = (dist / 0.75); 
-                    ParticleSystem.getInstance().spawnMoltenMetal(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed);
-                }
-            }
         }
+
+        // Emit Unified Explosion Event
+        EventBus.getInstance().emit(GameEvent.EXPLOSION, { 
+            x, y, radius, 
+            type: 'large', 
+            moltenCount: Math.min(150, shrapnelCount)
+        });
 
         // --- DAMAGE LOGIC (Authoritative) ---
         this.parent.enemies.forEach((e: Enemy) => {
@@ -344,18 +335,6 @@ export class CombatSystem {
                     }
                 }
             });
-        }
-    }
-
-    public createImpactParticles(x: number, y: number, color: string): void {
-        LightManager.getInstance().addTransientLight('impact', x, y);
-        const count = 5 + Math.floor(Math.random() * 5);
-        for (let i = 0; i < count; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const speed = 50 + Math.random() * 150;
-            const vx = Math.cos(angle) * speed;
-            const vy = Math.sin(angle) * speed;
-            ParticleSystem.getInstance().spawnParticle(x, y, color, vx, vy, 0.3 + Math.random() * 0.4);
         }
     }
 }

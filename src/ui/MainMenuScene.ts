@@ -1,6 +1,7 @@
 import { Scene } from '../core/Scene';
 import { SceneManager } from '../core/SceneManager';
 import { SoundManager } from '../core/SoundManager';
+import { EventBus, GameEvent } from '../core/EventBus';
 
 export class MainMenuScene implements Scene {
   private container: HTMLDivElement | null = null;
@@ -72,22 +73,22 @@ export class MainMenuScene implements Scene {
     uiLayer.appendChild(this.container);
 
     document.getElementById('btn-start')?.addEventListener('click', () => {
-      SoundManager.getInstance().playSound('ui_click');
+      EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
       this.sceneManager.switchScene('gameplay');
     });
 
     document.getElementById('btn-multiplayer')?.addEventListener('click', () => {
-        SoundManager.getInstance().playSound('ui_click');
+        EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
         this.sceneManager.switchScene('multiplayer_menu');
     });
 
     document.getElementById('btn-benchmark')?.addEventListener('click', () => {
-      SoundManager.getInstance().playSound('ui_click');
+      EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
       this.sceneManager.switchScene('benchmark');
     });
 
     document.getElementById('btn-settings')?.addEventListener('click', () => {
-      SoundManager.getInstance().playSound('ui_click');
+      EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
       this.sceneManager.switchScene('settings');
     });
   }

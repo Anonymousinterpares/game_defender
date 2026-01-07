@@ -1,4 +1,5 @@
 import { WeatherManager, WeatherType } from './WeatherManager';
+import { EventBus, GameEvent } from './EventBus';
 
 export interface Decal {
     x: number;
@@ -21,13 +22,30 @@ export class FloorDecalManager {
     private needsRedraw: boolean = true;
     private lastWorldSize: { w: number, h: number } = { w: 0, h: 0 };
 
-    private constructor() {}
+    private constructor() {
+        this.subscribeToEvents();
+    }
 
     public static getInstance(): FloorDecalManager {
         if (!FloorDecalManager.instance) {
             FloorDecalManager.instance = new FloorDecalManager();
         }
         return FloorDecalManager.instance;
+    }
+
+    private subscribeToEvents(): void {
+        const eb = EventBus.getInstance();
+
+        eb.on(GameEvent.EXPLOSION, (data) => {
+            this.addScorchMark(data.x, data.y, data.radius);
+        });
+
+        eb.on(GameEvent.PROJECTILE_HIT, (data) => {
+            if (data.projectileType === 'cannon') {
+                // Cannon impacts might leave small marks? 
+                // For now just explosions.
+            }
+        });
     }
 
     private initBuffer(w: number, h: number): void {

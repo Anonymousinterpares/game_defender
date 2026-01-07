@@ -30,6 +30,7 @@ export class RemotePlayer extends Entity {
     this.prevY = y;
     this.targetX = x;
     this.targetY = y;
+    this.isStatic = true; // IMPORTANT: Prevent PhysicsEngine from moving the head
 
     this.initSegments(x, y);
   }
@@ -50,7 +51,7 @@ export class RemotePlayer extends Entity {
           }
           update(dt: number) {}
           render(ctx: CanvasRenderingContext2D) {}
-      }(x - (i + 1) * this.segmentSpacing, y, this.radius);
+      }(x, y, this.radius);
       
       this.segments.push(seg);
     }
@@ -61,14 +62,11 @@ export class RemotePlayer extends Entity {
   }
 
   public updateFromNetwork(x: number, y: number, rotation: number, name?: string, health?: number): void {
-    // Set previous to current for interpolation
-    this.prevX = this.x;
-    this.prevY = this.y;
-    
-    // Set current to the target we just received
+    // Set target for LERP in update()
     this.targetX = x;
     this.targetY = y;
     this.targetRotation = rotation;
+    
     if (name) this.name = name;
     if (health !== undefined) {
         if (health < this.health) {
@@ -80,34 +78,19 @@ export class RemotePlayer extends Entity {
   }
 
   update(dt: number): void {
-    // Smoothly interpolate towards target to handle network jitter
-    const lerpFactor = 0.2; 
+    // Smoother interpolation for the head logical position
+    // Note: PhysicsEngine updates prevX/prevY for interpolation
+    this.x += (this.targetX - this.x) * 0.2;
+    this.y += (this.targetY - this.y) * 0.2;
     
-    // We don't update prevX/prevY here for the head because it's updated in updateFromNetwork
-    // Wait, updateFromNetwork only sets prevX/prevY when a message arrives.
-    // If update() runs multiple times between messages, prevX should be the position from last frame.
-    // Actually, GameplayScene uses physics alpha for interpolation.
-    // Physics engine updates the logical position, and we render with interpolated.
-    // In RemotePlayer, we are LERPING logical position.
-    
-    // To match Player.ts style:
-    this.prevX = this.x;
-    this.prevY = this.y;
-    this.segments.forEach(s => {
-        s.prevX = s.x;
-        s.prevY = s.y;
-    });
-
-    this.x += (this.targetX - this.x) * lerpFactor;
-    this.y += (this.targetY - this.y) * lerpFactor;
-    
-    // Rotation lerp (handling wrap around)
     let diff = this.targetRotation - this.rotation;
     while (diff < -Math.PI) diff += Math.PI * 2;
     while (diff > Math.PI) diff -= Math.PI * 2;
-    this.rotation += diff * lerpFactor;
+    this.rotation += diff * 0.2;
 
-    this.resolveSegmentConstraints();
+    // We DO NOT call resolveSegmentConstraints here anymore because 
+    // segments are strictly updated from network state in MultiplayerGameplayScene.
+    // This prevents "lag-stretching" of the snake body.
   }
 
   private resolveSegmentConstraints(): void {

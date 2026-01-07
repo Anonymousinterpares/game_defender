@@ -41,30 +41,36 @@ export class MultiplayerManager {
   }
 
   public init(id?: string): Promise<string> {
-    console.log('[MP] Init called. ID:', id, 'Peer exists:', !!this.peer);
-    
-    if (this.peer && !this.peer.destroyed && !this.peer.disconnected) {
+    if (this.peer && !this.peer.destroyed && !this.peer.disconnected && this.myId) {
         return Promise.resolve(this.myId);
     }
 
     if (this.peer && this.peer.disconnected && !this.peer.destroyed) {
-        console.log('[MP] Reconnecting peer...');
+        this.peer.reconnect();
         return new Promise((resolve) => {
-            this.peer!.once('open', (id) => resolve(id));
-            this.peer!.reconnect();
+            const onOpen = (id: string) => {
+                this.myId = id;
+                resolve(id);
+            };
+            this.peer!.once('open', onOpen);
         });
     }
 
     return new Promise((resolve, reject) => {
       const peerId = id || 'neon-' + Math.random().toString(36).substr(2, 6);
-      console.log('[MP] Creating Peer with ID:', peerId);
       
-      // Explicitly disable verbose logs
-      this.peer = new Peer(peerId, { debug: 0 });
+      this.peer = new Peer(peerId, { 
+          debug: 1, // Minimal logs
+          config: {
+              iceServers: [
+                  { urls: 'stun:stun.l.google.com:19302' },
+                  { urls: 'stun:stun1.l.google.com:19302' }
+              ]
+          }
+      });
 
       this.peer.on('open', (id) => {
         this.myId = id;
-        console.log('[MP] Peer opened:', id);
         resolve(id);
       });
 

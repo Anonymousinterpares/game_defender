@@ -1,6 +1,7 @@
 import { Entity } from './Entity';
 import { World } from './World';
 import { ParticleType, FLAG_ACTIVE, FLAG_IS_FLAME, MAX_PARTICLES } from './ParticleConstants';
+import { EventBus, GameEvent } from './EventBus';
 
 export class ParticleSystem {
     private static instance: ParticleSystem;
@@ -104,6 +105,89 @@ export class ParticleSystem {
         };
 
         this.generateSprites();
+        this.subscribeToEvents();
+    }
+
+    private subscribeToEvents(): void {
+        const eb = EventBus.getInstance();
+
+        eb.on(GameEvent.EXPLOSION, (data) => {
+            const x = data.x;
+            const y = data.y;
+            const radius = data.radius;
+
+            // 1. Initial Flash
+            this.spawnFlash(x, y, radius * 2.5);
+            
+            // 2. Shockwave
+            this.spawnShockwave(x, y, radius * 1.8);
+
+            // 3. Fireballs
+            const fireCount = 12 + Math.floor(Math.random() * 6);
+            for (let i = 0; i < fireCount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 100 + Math.random() * 300;
+                const life = 0.3 + Math.random() * 0.4;
+                const idx = this.spawnParticle(x, y, '#fffbe6', Math.cos(angle) * speed, Math.sin(angle) * speed, life);
+                this.setFlame(idx, true);
+            }
+
+            // 4. Smoke
+            const smokeCount = 20 + Math.floor(Math.random() * 10);
+            for (let i = 0; i < smokeCount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 40 + Math.random() * 80;
+                const life = 1.0 + Math.random() * 1.5;
+                const color = Math.random() < 0.5 ? '#333' : '#555';
+                this.spawnParticle(x, y, color, Math.cos(angle) * speed, Math.sin(angle) * speed, life);
+            }
+
+            // 5. Molten Metal (Shrapnel)
+            if (data.moltenCount && data.moltenCount > 0) {
+                const actualParticles = Math.min(150, data.moltenCount);
+                for (let i = 0; i < actualParticles; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = 64 + Math.random() * 96;
+                    const speed = (dist / 0.75); 
+                    this.spawnMoltenMetal(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed);
+                }
+            }
+        });
+
+        eb.on(GameEvent.PROJECTILE_HIT, (data) => {
+            // General impact sparks/debris
+            const count = 3 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 30 + Math.random() * 100;
+                this.spawnParticle(data.x, data.y, '#ccc', Math.cos(angle) * speed, Math.sin(angle) * speed, 0.2 + Math.random() * 0.2);
+            }
+        });
+
+        eb.on(GameEvent.ENTITY_HIT, (data) => {
+            if (data.color) {
+                const count = 5 + Math.floor(Math.random() * 5);
+                for (let i = 0; i < count; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = 50 + Math.random() * 150;
+                    const vx = Math.cos(angle) * speed;
+                    const vy = Math.sin(angle) * speed;
+                    this.spawnParticle(data.x, data.y, data.color, vx, vy, 0.3 + Math.random() * 0.4);
+                }
+            }
+        });
+
+        eb.on(GameEvent.WEAPON_FIRED, (data) => {
+            // Muzzle flash / smoke
+            if (data.weaponType === 'cannon' || data.weaponType === 'rocket' || data.weaponType === 'missile') {
+                const count = 5;
+                for (let i = 0; i < count; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = 20 + Math.random() * 50;
+                    this.spawnParticle(data.x, data.y, '#666', Math.cos(angle) * speed, Math.sin(angle) * speed, 0.3);
+                }
+            }
+        });
     }
 
     private generateSprites(): void {

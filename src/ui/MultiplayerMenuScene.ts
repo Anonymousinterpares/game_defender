@@ -1,7 +1,7 @@
 import { Scene } from '../core/Scene';
 import { SceneManager } from '../core/SceneManager';
-import { SoundManager } from '../core/SoundManager';
 import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
+import { EventBus, GameEvent } from '../core/EventBus';
 
 export class MultiplayerMenuScene implements Scene {
   private container: HTMLDivElement | null = null;
@@ -24,32 +24,25 @@ export class MultiplayerMenuScene implements Scene {
   update(dt: number): void {
     const mm = MultiplayerManager.getInstance();
     
-    // Debugging: only log if state changes or every few seconds
-    if ((window as any).lastMPCount !== mm.getConnectedPeersCount()) {
-        console.log(`[MENU] MP State - Peers: ${mm.getConnectedPeersCount()}, IsHost: ${mm.isHost}`);
-        (window as any).lastMPCount = mm.getConnectedPeersCount();
-    }
-
     if (this.statusEl && mm.getConnectedPeersCount() > 0) {
         if (mm.isHost) {
-            // Only show start button if it's not already there
             if (!document.getElementById('btn-start-multi')) {
-                this.statusEl.innerHTML = `
-                    <span style="color: #0f0;">HOSTING ACTIVE</span><br>
-                    Share this ID: <b style="color: #fff; background: #222; padding: 2px 5px;">${mm.myId}</b>
-                    <br><br>
+                this.updateHostingUI(mm.myId);
+                const statusDiv = document.createElement('div');
+                statusDiv.innerHTML = `
                     <span style="color: #0f0;">PEER CONNECTED!</span>
                     <br><br>
                     <button id="btn-start-multi" style="background: #00ff00; color: #000; font-weight: bold; width: 100%; padding: 10px;">START MISSION</button>
                 `;
+                this.statusEl.appendChild(statusDiv);
+                
                 document.getElementById('btn-start-multi')?.addEventListener('click', () => {
-                    SoundManager.getInstance().playSound('ui_click');
+                    EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
                     mm.broadcast(NetworkMessageType.CHAT, { system: 'START_GAME' });
                     this.sceneManager.switchScene('multiplayer_gameplay');
                 });
             }
         } else {
-            // Client connected
             if (!this.statusEl.innerHTML.includes('CONNECTED TO HOST')) {
                 this.statusEl.innerHTML = `
                     <span style="color: #0f0;">CONNECTED TO HOST!</span><br>
@@ -100,45 +93,29 @@ export class MultiplayerMenuScene implements Scene {
     this.statusEl = document.getElementById('mp-status');
     this.joinInput = document.getElementById('join-id') as HTMLInputElement;
 
-    // Check if we have an ID in URL to auto-join
     const urlParams = new URLSearchParams(window.location.search);
     const autoJoinId = urlParams.get('join');
-    if (autoJoinId) {
-        this.joinInput.value = autoJoinId;
-    }
+    if (autoJoinId) this.joinInput.value = autoJoinId;
 
     document.getElementById('btn-host')?.addEventListener('click', async () => {
-      SoundManager.getInstance().playSound('ui_click');
+      EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
       const mm = MultiplayerManager.getInstance();
       const nameInput = document.getElementById('player-name') as HTMLInputElement;
       if (nameInput) mm.myName = nameInput.value.trim() || 'Host';
       
+      if (this.statusEl) this.statusEl.innerHTML = '<span style="color: #ff0;">INITIALIZING PEER...</span>';
+
       try {
         const id = await mm.init();
         mm.host();
-        if (this.statusEl) {
-            this.statusEl.innerHTML = `
-                <span style="color: #0f0;">HOSTING ACTIVE</span><br>
-                Share this ID: <b style="color: #fff; background: #222; padding: 2px 5px;">${id}</b>
-                <br><br>
-                <button id="btn-copy-link" style="font-size: 0.7em; padding: 5px;">Copy Join Link</button>
-            `;
-            
-            document.getElementById('btn-copy-link')?.addEventListener('click', () => {
-                const url = new URL(window.location.href);
-                url.searchParams.set('join', id);
-                navigator.clipboard.writeText(url.toString());
-                const btn = document.getElementById('btn-copy-link');
-                if (btn) btn.innerText = 'COPIED!';
-            });
-        }
+        this.updateHostingUI(id);
       } catch (err) {
         if (this.statusEl) this.statusEl.innerText = 'Error: ' + err;
       }
     });
 
     document.getElementById('btn-join')?.addEventListener('click', async () => {
-      SoundManager.getInstance().playSound('ui_click');
+      EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
       const id = this.joinInput?.value.trim();
       if (!id) return;
 
@@ -147,7 +124,7 @@ export class MultiplayerMenuScene implements Scene {
       if (nameInput) mm.myName = nameInput.value.trim() || 'Player';
 
       try {
-        await mm.init(); // Always try to init/reconnect
+        await mm.init();
         mm.clearMessageCallbacks(); 
         mm.onMessage((msg) => {
             if (msg.t === NetworkMessageType.CHAT && msg.d.system === 'START_GAME') {
@@ -162,9 +139,30 @@ export class MultiplayerMenuScene implements Scene {
     });
 
     document.getElementById('btn-back')?.addEventListener('click', () => {
-      SoundManager.getInstance().playSound('ui_click');
+      EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
       MultiplayerManager.getInstance().disconnect();
       this.sceneManager.switchScene('menu');
     });
+  }
+
+  private updateHostingUI(id: string): void {
+      if (!this.statusEl) return;
+      this.statusEl.innerHTML = `
+          <div id="hosting-info">
+              <span style="color: #0f0;">HOSTING ACTIVE</span><br>
+              Share this ID: <b style="color: #fff; background: #222; padding: 2px 5px;">${id}</b>
+              <br><br>
+              <button id="btn-copy-link" style="font-size: 0.7em; padding: 5px;">Copy Join Link</button>
+          </div>
+      `;
+      
+      document.getElementById('btn-copy-link')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const url = new URL(window.location.href);
+          url.searchParams.set('join', id);
+          navigator.clipboard.writeText(url.toString());
+          const btn = document.getElementById('btn-copy-link');
+          if (btn) btn.innerText = 'COPIED!';
+      });
   }
 }

@@ -1,4 +1,5 @@
 import { ConfigManager } from '../config/MasterConfig';
+import { EventBus, GameEvent } from './EventBus';
 
 export interface LightSource {
     id: string;
@@ -19,13 +20,31 @@ export class LightManager {
     private lights: Map<string, LightSource> = new Map();
     private transientCounter: number = 0;
 
-    private constructor() {}
+    private constructor() {
+        this.subscribeToEvents();
+    }
 
     public static getInstance(): LightManager {
         if (!LightManager.instance) {
             LightManager.instance = new LightManager();
         }
         return LightManager.instance;
+    }
+
+    private subscribeToEvents(): void {
+        const eb = EventBus.getInstance();
+
+        eb.on(GameEvent.EXPLOSION, (data) => {
+            this.addTransientLight('explosion', data.x, data.y);
+        });
+
+        eb.on(GameEvent.PROJECTILE_HIT, (data) => {
+            this.addTransientLight('impact', data.x, data.y);
+        });
+
+        eb.on(GameEvent.WEAPON_FIRED, (data) => {
+            this.addTransientLight('muzzle', data.x, data.y);
+        });
     }
 
     public addLight(light: LightSource): void {

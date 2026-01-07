@@ -2,6 +2,7 @@
 import { World } from './World';
 import { SoundRaycaster, AudiblePath } from '../utils/SoundRaycaster';
 import { ConfigManager } from '../config/MasterConfig';
+import { EventBus, GameEvent } from './EventBus';
 
 interface SpatialVoice {
     source: AudioBufferSourceNode | OscillatorNode;
@@ -66,7 +67,62 @@ export class SoundManager {
 
       this.masterGain.gain.setValueAtTime(this.volume, this.audioCtx.currentTime);
       this.masterGain.connect(this.audioCtx.destination);
+      
+      this.subscribeToEvents();
     }
+  }
+
+  private subscribeToEvents(): void {
+    const eb = EventBus.getInstance();
+
+    eb.on(GameEvent.WEAPON_FIRED, (data) => {
+        this.playSoundSpatial('shoot_' + data.weaponType, data.x, data.y);
+    });
+
+    eb.on(GameEvent.WEAPON_RELOAD, (data) => {
+        this.playSoundSpatial('weapon_reload', data.x, data.y);
+    });
+
+    eb.on(GameEvent.PROJECTILE_HIT, (data) => {
+        const sfx = data.projectileType === 'missile' ? 'hit_missile' : 'hit_cannon';
+        this.playSoundSpatial(sfx, data.x, data.y);
+    });
+
+    eb.on(GameEvent.EXPLOSION, (data) => {
+        this.playSoundSpatial('explosion_large', data.x, data.y);
+    });
+
+    eb.on(GameEvent.MATERIAL_HIT, (data) => {
+        this.playMaterialHit(data.material, data.x, data.y);
+    });
+
+    eb.on(GameEvent.ITEM_COLLECTED, () => {
+        this.playSound('collect_coin');
+    });
+
+    eb.on(GameEvent.UI_CLICK, () => {
+        this.playSound('ui_click');
+    });
+
+    eb.on(GameEvent.SOUND_PLAY, (data) => {
+        this.playSound(data.soundId);
+    });
+
+    eb.on(GameEvent.SOUND_PLAY_SPATIAL, (data) => {
+        this.playSoundSpatial(data.soundId, data.x, data.y, data.volume);
+    });
+
+    eb.on(GameEvent.SOUND_LOOP_START, (data) => {
+        this.startLoopSpatial(data.soundId, data.x, data.y);
+    });
+
+    eb.on(GameEvent.SOUND_LOOP_STOP, (data) => {
+        this.stopLoopSpatial(data.soundId);
+    });
+
+    eb.on(GameEvent.SOUND_LOOP_MOVE, (data) => {
+        this.updateLoopPosition(data.soundId, data.x, data.y);
+    });
   }
 
   public setWorld(world: World): void {

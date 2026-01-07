@@ -1,9 +1,10 @@
 import { Scene } from '../core/Scene';
 import { SceneManager } from '../core/SceneManager';
 import { ConfigManager, ConfigItem } from '../config/MasterConfig';
-import { SoundManager } from '../core/SoundManager';
+import { EventBus, GameEvent } from '../core/EventBus';
 import { InputManager } from '../core/InputManager';
 import { WeatherManager, WeatherType } from '../core/WeatherManager';
+import { SoundManager } from '../core/SoundManager';
 
 interface RecordingState {
     action: string;
@@ -86,7 +87,7 @@ export class SettingsScene implements Scene {
     closeBtn.textContent = 'CLOSE [ESC]';
     closeBtn.className = 'hud-btn';
     closeBtn.onclick = () => {
-        SoundManager.getInstance().playSound('ui_click');
+        EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
         this.sceneManager.switchScene('menu');
     };
     header.appendChild(closeBtn);
@@ -124,7 +125,7 @@ export class SettingsScene implements Scene {
         
         btn.onclick = () => {
             if (this.recording) return;
-            SoundManager.getInstance().playSound('ui_click');
+            EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
             this.currentTab = cat;
             
             sidebar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -233,7 +234,7 @@ export class SettingsScene implements Scene {
               swatch.onclick = () => {
                   picker.value = color;
                   this.applySetting(category, key, color);
-                  SoundManager.getInstance().playSound('ui_click');
+                  EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
               };
               palette.appendChild(swatch);
           });
@@ -307,7 +308,7 @@ export class SettingsScene implements Scene {
   private startRecording(action: string, isSecondary: boolean, element: HTMLElement): void {
       if (this.recording) this.cancelRecording();
       
-      SoundManager.getInstance().playSound('ui_click');
+      EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
       this.recording = { action, isSecondary, element };
       element.classList.add('recording');
       element.textContent = '...PRESS ANY KEY...';
@@ -386,7 +387,7 @@ export class SettingsScene implements Scene {
       element.textContent = code;
       element.classList.remove('recording');
       element.classList.remove('empty');
-      SoundManager.getInstance().playSound('ui_click');
+      EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
       
       // Refresh UI to show cleared conflicts if any
       if (this.currentTab === 'Keybindings') {
@@ -426,13 +427,13 @@ export class SettingsScene implements Scene {
       };
 
       confirmBtn.onclick = () => {
-          SoundManager.getInstance().playSound('ui_click');
+          EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
           onConfirm();
           cleanup();
       };
 
       cancelBtn.onclick = () => {
-          SoundManager.getInstance().playSound('ui_click');
+          EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
           this.cancelRecording();
           cleanup();
       };

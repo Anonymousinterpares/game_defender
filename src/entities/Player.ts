@@ -92,7 +92,13 @@ export class Player extends Entity {
     const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
     const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
     this.handleFireLogic(dt, fireDPS, baseExtinguish);
-    this.segments.forEach(seg => seg.handleFireLogic(dt, fireDPS, baseExtinguish));
+    
+    // Track previous positions for all segments for smooth interpolation
+    this.segments.forEach(seg => {
+        seg.prevX = seg.x;
+        seg.prevY = seg.y;
+        seg.handleFireLogic(dt, fireDPS, baseExtinguish);
+    });
 
     if (!this.active || !this.inputManager) return;
 

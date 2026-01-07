@@ -3,11 +3,11 @@ import { Player } from '../entities/Player';
 import { Projectile, ProjectileType } from '../entities/Projectile';
 import { Enemy } from '../entities/Enemy';
 import { Entity } from '../core/Entity';
-import { SoundManager } from '../core/SoundManager';
 import { World } from '../core/World';
 import { HeatMap, MaterialType } from '../core/HeatMap';
 import { ParticleSystem } from '../core/ParticleSystem';
 import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
+import { EventBus, GameEvent } from '../core/EventBus';
 
 export interface WeaponParent {
     myId: string;
@@ -25,7 +25,6 @@ export interface WeaponParent {
     lastShotTime: number;
     setLastShotTime(time: number): void;
     startReload(weapon: string): void;
-    createImpactParticles(x: number, y: number, color: string): void;
 }
 
 export class WeaponSystem {
@@ -88,8 +87,8 @@ export class WeaponSystem {
                     }
 
                     const loopSfx = weapon === 'laser' ? 'shoot_laser' : (weapon === 'ray' ? 'shoot_ray' : 'shoot_flamethrower');
-                    SoundManager.getInstance().startLoopSpatial(loopSfx, this.parent.player.x, this.parent.player.y);
-                    SoundManager.getInstance().updateLoopPosition(loopSfx, this.parent.player.x, this.parent.player.y);
+                    EventBus.getInstance().emit(GameEvent.SOUND_LOOP_START, { soundId: loopSfx, x: this.parent.player.x, y: this.parent.player.y });
+                    EventBus.getInstance().emit(GameEvent.SOUND_LOOP_MOVE, { soundId: loopSfx, x: this.parent.player.x, y: this.parent.player.y });
                     
                     const depletion = ConfigManager.getInstance().get<number>('Weapons', weapon + 'DepletionRate');
                     const newAmmo = Math.max(0, currentAmmo - depletion * dt);
@@ -105,14 +104,15 @@ export class WeaponSystem {
         }
 
         if (!this.isFiringBeam) {
-            SoundManager.getInstance().stopLoopSpatial('shoot_laser');
-            SoundManager.getInstance().stopLoopSpatial('shoot_ray');
-            SoundManager.getInstance().stopLoopSpatial('hit_laser');
-            SoundManager.getInstance().stopLoopSpatial('hit_ray');
+            const eb = EventBus.getInstance();
+            eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'shoot_laser' });
+            eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'shoot_ray' });
+            eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'hit_laser' });
+            eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'hit_ray' });
         }
         
         if (!this.isFiringFlamethrower) {
-            SoundManager.getInstance().stopLoopSpatial('shoot_flamethrower');
+            EventBus.getInstance().emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'shoot_flamethrower' });
         }
     }
 
@@ -160,8 +160,11 @@ export class WeaponSystem {
         this.parent.projectiles.push(p);
         this.parent.weaponAmmo.set(weapon, currentAmmo - 1);
         
-        const sfx = 'shoot_' + weapon;
-        SoundManager.getInstance().playSoundSpatial(sfx, player.x, player.y);
+        EventBus.getInstance().emit(GameEvent.WEAPON_FIRED, { 
+            x: player.x, y: player.y, 
+            weaponType: weapon, 
+            ownerId: this.parent.myId 
+        });
 
         if (this.parent.weaponAmmo.get(weapon)! <= 0 && weapon !== 'cannon') {
             this.parent.startReload(weapon);
@@ -244,15 +247,20 @@ export class WeaponSystem {
         const hitSfx = type === 'laser' ? 'hit_laser' : 'hit_ray';
 
         if (hitSomething || hitEnemy || hitRP) {
-            SoundManager.getInstance().startLoopSpatial(hitSfx, this.beamEndPos.x, this.beamEndPos.y);
-            SoundManager.getInstance().updateLoopPosition(hitSfx, this.beamEndPos.x, this.beamEndPos.y);
+            const eb = EventBus.getInstance();
+            eb.emit(GameEvent.SOUND_LOOP_START, { soundId: hitSfx, x: this.beamEndPos.x, y: this.beamEndPos.y });
+            eb.emit(GameEvent.SOUND_LOOP_MOVE, { soundId: hitSfx, x: this.beamEndPos.x, y: this.beamEndPos.y });
             
             if (!hitEnemy && !hitRP) {
                 const heatAmount = type === 'laser' ? 0.4 : 0.6;
                 this.parent.heatMap.addHeat(this.beamEndPos.x, this.beamEndPos.y, heatAmount * dt * 5, 12);
                 
                 if (this.parent.heatMap.getIntensityAt(this.beamEndPos.x, this.beamEndPos.y) > 0.8 && Math.random() < 0.3) {
-                    this.parent.createImpactParticles(this.beamEndPos.x, this.beamEndPos.y, '#fff');
+                    EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, {
+                        x: this.beamEndPos.x, y: this.beamEndPos.y,
+                        projectileType: type,
+                        hitType: 'wall'
+                    });
                 }
             }
 
@@ -262,7 +270,7 @@ export class WeaponSystem {
                 hitEnemy.takeDamage(dmg);
             }
         } else {
-            SoundManager.getInstance().stopLoop(hitSfx, 0.5);
+            EventBus.getInstance().emit(GameEvent.SOUND_LOOP_STOP, { soundId: hitSfx });
         }
     }
 

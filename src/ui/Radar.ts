@@ -1,7 +1,7 @@
 import { Entity } from '../core/Entity';
 import { Player } from '../entities/Player';
 import { RemotePlayer } from '../entities/RemotePlayer';
-import { SoundManager } from '../core/SoundManager';
+import { EventBus, GameEvent } from '../core/EventBus';
 
 interface RadarBlip {
     x: number;
@@ -120,7 +120,11 @@ export class Radar {
     });
 
     if (pingTriggered) {
-        SoundManager.getInstance().playSoundSpatial('ping', player.x, player.y);
+        EventBus.getInstance().emit(GameEvent.SOUND_PLAY_SPATIAL, {
+            soundId: 'ping',
+            x: player.x,
+            y: player.y
+        });
     }
 
     // 3. Render Blips

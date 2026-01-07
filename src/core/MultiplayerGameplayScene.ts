@@ -16,6 +16,7 @@ import { Enemy } from '../entities/Enemy';
 import { Drop } from '../entities/Drop';
 import { ParticleSystem } from './ParticleSystem';
 import { SoundManager } from './SoundManager';
+import { EventBus, GameEvent } from './EventBus';
 import { Quadtree } from '../utils/Quadtree';
 import { ConfigManager } from '../config/MasterConfig';
 import { MaterialType } from './HeatMap';
@@ -40,11 +41,12 @@ export class MultiplayerGameplayScene extends GameplayScene {
   }
 
   onEnter(): void {
+    super.onEnter(); // Initialize radar, sound, etc.
     const mm = MultiplayerManager.getInstance();
     const role = mm.isHost ? SimulationRole.HOST : SimulationRole.CLIENT;
     
-    // We'll re-init simulation with the correct role
-    this.simulation = new Simulation(role);
+    // Set the correct role for simulation
+    this.simulation.setRole(role);
     this.simulation.player.inputManager = this.inputManager;
     
     mm.clearMessageCallbacks();
@@ -156,11 +158,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
   }
 
   private recreateWorld(seed: number): void {
-      const mm = MultiplayerManager.getInstance();
-      const role = mm.isHost ? SimulationRole.HOST : SimulationRole.CLIENT;
-      const input = this.inputManager;
-      this.simulation = new Simulation(role, seed);
-      if (input) this.simulation.player.inputManager = input;
+      this.simulation.reset(seed);
+      this.simulation.player.inputManager = this.inputManager;
       this.lightingRenderer.clearCache();
   }
 
@@ -350,8 +349,11 @@ export class MultiplayerGameplayScene extends GameplayScene {
                   const aoe = (pt === ProjectileType.MINE ? cfg.get<number>('Weapons', 'mineAOE') : (pt === ProjectileType.ROCKET ? cfg.get<number>('Weapons', 'rocketAOE') : cfg.get<number>('Weapons', 'missileAOE'))) * cfg.get<number>('World', 'tileSize');
                   this.simulation.combatSystem.createExplosion(hx, hy, aoe, 0);
               } else {
-                  SoundManager.getInstance().playSoundSpatial(pt === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon', hx, hy);
-                  this.simulation.combatSystem.createImpactParticles(hx, hy, pt === ProjectileType.CANNON ? '#ffff00' : '#ff6600');
+                  EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, {
+                      x: hx, y: hy,
+                      projectileType: pt === ProjectileType.CANNON ? 'cannon' : 'rocket',
+                      hitType: 'wall'
+                  });
               }
           }
       }
@@ -377,18 +379,18 @@ export class MultiplayerGameplayScene extends GameplayScene {
     if (!rp) {
       rp = new RemotePlayer(id, x, y);
       this.remotePlayersMap.set(id, rp);
+      this.simulation.remotePlayers.push(rp);
       this.physics.addBody(rp);
-      rp.segments.forEach(s => this.physics.addBody(s));
     }
     if (l !== undefined && rp.segments.length !== l) {
-        rp.segments.forEach(s => this.physics.removeBody(s));
         rp.setBodyLength(l);
-        rp.segments.forEach(s => this.physics.addBody(s));
     }
     if (segs && segs.length === rp.segments.length) {
         for (let i = 0; i < segs.length; i++) {
-            rp.segments[i].x = segs[i].x; rp.segments[i].y = segs[i].y;
-            if (segs[i].f !== undefined) rp.segments[i].isOnFire = segs[i].f;
+            const s = rp.segments[i];
+            s.prevX = s.x; s.prevY = s.y; // Prepare for interpolation
+            s.x = segs[i].x; s.y = segs[i].y;
+            if (segs[i].f !== undefined) s.isOnFire = segs[i].f;
         }
     }
     if (w) (rp as any).activeWeapon = w;

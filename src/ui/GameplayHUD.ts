@@ -1,10 +1,11 @@
 import { SceneManager } from '../core/SceneManager';
-import { SoundManager } from '../core/SoundManager';
 import { ConfigManager } from '../config/MasterConfig';
 import { Player } from '../entities/Player';
 import { WorldClock } from '../core/WorldClock';
 import { TurretUpgrade, ShieldUpgrade } from '../entities/upgrades/Upgrade';
 import { PhysicsEngine } from '../core/PhysicsEngine';
+import { EventBus, GameEvent } from '../core/EventBus';
+import { SoundManager } from '../core/SoundManager';
 
 export interface HUDParent {
     sceneManager: SceneManager;
@@ -42,7 +43,7 @@ export class GameplayHUD {
         this.backButton.style.top = '10px';
         this.backButton.style.right = '10px';
         this.backButton.addEventListener('click', () => {
-            SoundManager.getInstance().playSound('ui_click');
+            EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
             this.parent.sceneManager.switchScene('menu');
         });
         uiLayer.appendChild(this.backButton);
@@ -54,7 +55,7 @@ export class GameplayHUD {
         this.muteButton.style.top = '10px';
         this.muteButton.style.right = '100px';
         this.muteButton.addEventListener('click', () => {
-            SoundManager.getInstance().playSound('ui_click');
+            EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
             SoundManager.getInstance().toggleMute();
             this.updateMuteButtonText();
         });
@@ -99,7 +100,7 @@ export class GameplayHUD {
         this.dockButton.style.top = '10px';
         this.dockButton.style.right = '280px';
         this.dockButton.addEventListener('click', () => {
-            SoundManager.getInstance().playSound('ui_click');
+            EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
             this.toggleDock();
         });
         uiLayer.appendChild(this.dockButton);
@@ -183,14 +184,14 @@ export class GameplayHUD {
 
         this.dockContainer.querySelector('#buy-repair')?.addEventListener('click', () => {
             if (this.parent.subtractCoins(repairCost)) {
-                SoundManager.getInstance().playSound('ui_click');
+                EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
                 this.updateDockContent();
             }
         });
 
         this.dockContainer.querySelector('#buy-speed')?.addEventListener('click', () => {
             if (this.parent.subtractCoins(speedCost)) {
-                SoundManager.getInstance().playSound('ui_click');
+                EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
                 const currentSpeed = ConfigManager.getInstance().get<number>('Player', 'baseSpeed');
                 ConfigManager.getInstance().set('Player', 'baseSpeed', currentSpeed + 1);
                 if (this.parent.player) this.parent.player.refreshConfig();
@@ -200,7 +201,7 @@ export class GameplayHUD {
 
         this.dockContainer.querySelector('#buy-fire')?.addEventListener('click', () => {
             if (this.parent.subtractCoins(fireRateCost)) {
-                SoundManager.getInstance().playSound('ui_click');
+                EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
                 const currentRate = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
                 ConfigManager.getInstance().set('Player', 'shootCooldown', Math.max(0.05, currentRate - 0.02));
                 this.parent.refreshHUD();
@@ -210,7 +211,7 @@ export class GameplayHUD {
 
         this.dockContainer.querySelector('#buy-slot')?.addEventListener('click', () => {
             if (this.parent.subtractCoins(slotCost) && this.parent.player) {
-                SoundManager.getInstance().playSound('ui_click');
+                EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
                 this.parent.player.addSlot();
                 const allBodies = this.parent.player.getAllBodies();
                 this.parent.physics.addBody(allBodies[allBodies.length - 1]);
@@ -221,7 +222,7 @@ export class GameplayHUD {
         this.dockContainer.querySelector('#buy-turret')?.addEventListener('click', () => {
             const freeSlotIdx = this.findFreeSlot();
             if (freeSlotIdx !== -1 && this.parent.subtractCoins(turretCost) && this.parent.player) {
-                SoundManager.getInstance().playSound('ui_click');
+                EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
                 const slot = this.parent.player.segments[freeSlotIdx];
                 this.parent.player.upgrades.set(freeSlotIdx, new TurretUpgrade(slot));
                 this.updateDockContent();
@@ -233,7 +234,7 @@ export class GameplayHUD {
         this.dockContainer.querySelector('#buy-shield')?.addEventListener('click', () => {
             const freeSlotIdx = this.findFreeSlot();
             if (freeSlotIdx !== -1 && this.parent.subtractCoins(shieldCost) && this.parent.player) {
-                SoundManager.getInstance().playSound('ui_click');
+                EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
                 const slot = this.parent.player.segments[freeSlotIdx];
                 this.parent.player.upgrades.set(freeSlotIdx, new ShieldUpgrade(slot));
                 this.updateDockContent();
@@ -243,7 +244,7 @@ export class GameplayHUD {
         });
 
         this.dockContainer.querySelector('#btn-close-dock')?.addEventListener('click', () => {
-            SoundManager.getInstance().playSound('ui_click');
+            EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
             this.toggleDock();
         });
     }
