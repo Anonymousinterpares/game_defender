@@ -18,11 +18,15 @@ import { EventBus, GameEvent } from './EventBus';
 import { EntityManager } from './ecs/EntityManager';
 import { MovementSystem } from './ecs/systems/MovementSystem';
 import { FireSystem } from './ecs/systems/FireSystem';
+import { InputSystem } from './ecs/systems/InputSystem';
+import { AISystem } from './ecs/systems/AISystem';
+import { RenderSystem } from './ecs/systems/RenderSystem';
 import { System } from './ecs/System';
 import { TransformComponent } from './ecs/components/TransformComponent';
 import { PhysicsComponent } from './ecs/components/PhysicsComponent';
 import { HealthComponent } from './ecs/components/HealthComponent';
 import { FireComponent } from './ecs/components/FireComponent';
+import { EntityFactory } from './ecs/EntityFactory';
 
 import { PluginManager } from './plugins/PluginManager';
 
@@ -36,7 +40,8 @@ export class Simulation implements WeaponParent, CombatParent {
     public world: World;
     public physics: PhysicsEngine;
     public heatMap: HeatMap;
-    public player: Player;
+    public player: Player; // KEEPING for compatibility for now, but will transition
+    public playerEntityId: string = '';
     public spatialGrid: Quadtree<Entity>;
     
     public entities: Entity[] = [];
@@ -49,6 +54,9 @@ export class Simulation implements WeaponParent, CombatParent {
     public entityManager: EntityManager;
     private movementSystem: MovementSystem;
     private fireSystem: FireSystem;
+    private inputSystem: InputSystem;
+    private aiSystem: AISystem;
+    private renderSystem: RenderSystem;
     private customSystems: System[] = [];
 
     public pluginManager: PluginManager;
@@ -85,6 +93,9 @@ export class Simulation implements WeaponParent, CombatParent {
         this.entityManager = new EntityManager();
         this.movementSystem = new MovementSystem();
         this.fireSystem = new FireSystem();
+        this.inputSystem = new InputSystem();
+        this.aiSystem = new AISystem();
+        this.renderSystem = new RenderSystem();
         this.pluginManager = new PluginManager(this);
         
         this.spatialGrid = new Quadtree<Entity>({ 
@@ -97,14 +108,14 @@ export class Simulation implements WeaponParent, CombatParent {
         // Initialize Player at center
         const centerX = this.world.getWidthPixels() / 2;
         const centerY = this.world.getHeightPixels() / 2;
-        // We'll let the Scene pass the InputManager to the player later or here
-        // For now, we just need a player instance.
+        
+        // LEGACY PLAYER (Still needed for some parts)
         this.player = new Player(centerX, centerY, null as any); 
         this.entities.push(this.player);
         this.physics.addBody(this.player);
-        // Player segments are not added to physics individually by default, 
-        // they are managed by Player class but can be retrieved via getAllBodies() if needed.
-        // For RemotePlayers, we MUST NOT add segments to physics locally.
+
+        // ECS PLAYER
+        this.playerEntityId = EntityFactory.createPlayer(this.entityManager, centerX, centerY);
 
         this.initWeapons();
         this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
@@ -172,13 +183,16 @@ export class Simulation implements WeaponParent, CombatParent {
         // Plugin Update
         this.pluginManager.update(dt);
 
-        // ECS Sync (Phase 4 bridge)
-        this.syncEntitiesToECS();
-
         // 1. Systems Update
         if (inputManager) {
+            this.inputSystem.update(dt, this.entityManager, inputManager);
             this.weaponSystem.update(dt, inputManager);
         }
+        
+        if (this.role !== SimulationRole.CLIENT) {
+            this.aiSystem.update(dt, this.entityManager);
+        }
+
         this.combatSystem.update(dt);
         
         this.fireSystem.update(dt, this.entityManager);
@@ -187,7 +201,7 @@ export class Simulation implements WeaponParent, CombatParent {
         // Update Custom Systems
         this.customSystems.forEach(s => s.update(dt, this.entityManager));
 
-        // Sync BACK to legacy objects
+        // Sync BACK to legacy objects for compatibility (UI, Camera, etc)
         this.syncBackFromECS();
 
         // 2. Physics Step
@@ -212,6 +226,10 @@ export class Simulation implements WeaponParent, CombatParent {
         this.updateSpatialGrid();
 
         this.heatMap.update(dt);
+    }
+
+    public render(ctx: CanvasRenderingContext2D): void {
+        this.renderSystem.update(0, this.entityManager, ctx);
     }
 
     private syncBackFromECS(): void {
@@ -448,7 +466,12 @@ export class Simulation implements WeaponParent, CombatParent {
             const ex = this.player.x + Math.cos(angle) * dist;
             const ey = this.player.y + Math.sin(angle) * dist;
             if (!this.world.isWall(ex, ey)) {
+                const id = EntityFactory.createEnemy(this.entityManager, ex, ey);
+                
+                // For now we still need to add to physics. In pure ECS, PhysicsSystem will do this.
+                // But our PhysicsEngine is still legacy.
                 const e = new Enemy(ex, ey);
+                e.id = id; 
                 this.enemies.push(e);
                 this.physics.addBody(e);
                 break;

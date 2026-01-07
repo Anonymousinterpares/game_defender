@@ -5,6 +5,8 @@ import { HealthComponent } from '../components/HealthComponent';
 import { ConfigManager } from '../../../config/MasterConfig';
 
 export class FireSystem implements System {
+    public readonly id = 'fire';
+
     update(dt: number, entityManager: EntityManager): void {
         const entityIds = entityManager.query(['fire', 'health']);
         const config = ConfigManager.getInstance();

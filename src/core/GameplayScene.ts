@@ -233,6 +233,9 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY);
     this.drops.forEach(d => d.render(ctx));
     
+    // ECS Rendering
+    this.simulation.render(ctx);
+    
     const viewport: Rect = { x: this.cameraX, y: this.cameraY, w: window.innerWidth, h: window.innerHeight };
     const visibleEntities = this.simulation.spatialGrid.retrieve(viewport);
     visibleEntities.forEach(e => e.render(ctx));
