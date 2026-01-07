@@ -155,10 +155,18 @@ export class RemotePlayer extends Entity {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 1;
         ctx.stroke();
+
+        // Render fire on segment if burning
+        if (s.isOnFire) {
+            s.renderFire(ctx);
+        }
     }
 
     const ix = this.interpolatedX;
     const iy = this.interpolatedY;
+
+    // Render fire on head if burning
+    this.renderFire(ctx);
 
     // Head
     ctx.save();

@@ -363,6 +363,22 @@ export class MultiplayerGameplayScene extends GameplayScene {
                     if (type === 'flamethrower') {
                         this.heatMap!.addHeat(hx, hy, 0.8 * dt * 10, 25);
                         if (Math.random() < 0.2 * dt * 10) this.heatMap!.forceIgniteArea(hx, hy, 15);
+                        
+                        // PARTICLE SPAWNING for remote flamethrower
+                        if (Math.random() < 0.3) {
+                            const pAngle = angle + (Math.random() - 0.5) * (Math.PI / 4);
+                            const speed = (dist / 0.5) * (0.8 + Math.random() * 0.4); 
+                            const vx = Math.cos(pAngle) * speed;
+                            const vy = Math.sin(pAngle) * speed;
+                            const idx = ParticleSystem.getInstance().spawnParticle(
+                                rp.x + Math.cos(angle) * 15,
+                                rp.y + Math.sin(angle) * 15,
+                                Math.random() < 0.3 ? '#ffcc00' : '#ff4400',
+                                vx, vy,
+                                0.4 + Math.random() * 0.2
+                            );
+                            ParticleSystem.getInstance().setFlame(idx, true);
+                        }
                     } else {
                         const heatAmount = type === 'laser' ? 0.3 : 0.5;
                         this.heatMap!.addHeat(hx, hy, heatAmount * dt * 10, 10);
@@ -609,6 +625,35 @@ export class MultiplayerGameplayScene extends GameplayScene {
             ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)'; ctx.lineWidth = 15; ctx.stroke(); 
         }
     }
+
+    // Render Remote Beams
+    this.remotePlayersMap.forEach(rp => {
+        if ((rp as any).remoteFiringTimer > 0) {
+            const type = (rp as any).remoteFiringType;
+            if (type === 'laser' || type === 'ray') {
+                const angle = (rp as any).remoteFiringAngle || rp.rotation;
+                const dist = type === 'laser' ? 800 : 500;
+                
+                const startX = rp.interpolatedX;
+                const startY = rp.interpolatedY;
+                const endX = startX + Math.cos(angle) * dist;
+                const endY = startY + Math.sin(angle) * dist;
+                
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(endX, endY);
+                
+                if (type === 'laser') {
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 2;
+                } else {
+                    ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+                    ctx.lineWidth = 15;
+                }
+                ctx.stroke(); // CRITICAL FIX
+            }
+        }
+    });
     
     ctx.restore();
     PerfMonitor.getInstance().end('render_world');
@@ -667,7 +712,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
           if (rp) {
               // We store firing state on the RemotePlayer entity
               (rp as any).remoteFiringType = data.type;
-              (rp as any).remoteFiringTimer = 0.25; // Keep alive for a few frames
+              (rp as any).remoteFiringTimer = 0.5; // Increased for smoothness
               (rp as any).remoteFiringAngle = data.a;
               
               SoundManager.getInstance().playSoundSpatial('shoot_' + data.type, data.x, data.y);
