@@ -28,9 +28,11 @@ import { PerfMonitor } from '../utils/PerfMonitor';
 import { BenchmarkSystem } from '../utils/BenchmarkSystem';
 import { Quadtree, Rect } from '../utils/Quadtree';
 import { Simulation, SimulationRole } from './Simulation';
+import { WorldRenderer } from './renderers/WorldRenderer';
 
 export class GameplayScene implements Scene, HUDParent, LightingParent {
   public simulation: Simulation;
+  public worldRenderer: WorldRenderer;
   protected radar: Radar | null = null;
   protected hud: GameplayHUD;
   protected lightingRenderer: LightingRenderer;
@@ -72,6 +74,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
   constructor(public sceneManager: SceneManager, inputManager: InputManager) {
     this.inputManager = inputManager;
     this.simulation = new Simulation(SimulationRole.SINGLEPLAYER);
+    this.worldRenderer = new WorldRenderer(this.simulation.world);
     this.hud = new GameplayHUD(this);
     this.lightingRenderer = new LightingRenderer(this);
     this.benchmark = new BenchmarkSystem(this);
@@ -93,6 +96,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     const seed = ConfigManager.getInstance().get<number>('Debug', 'forcedSeed');
     this.simulation = new Simulation(SimulationRole.SINGLEPLAYER, seed);
     this.simulation.player.inputManager = this.inputManager; // Link input
+    this.worldRenderer = new WorldRenderer(this.simulation.world);
 
     ParticleSystem.getInstance().clear();
     ParticleSystem.getInstance().initWorker(this.simulation.world);
@@ -251,7 +255,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     PerfMonitor.getInstance().begin('render_world');
     ctx.save();
     ctx.translate(-this.cameraX, -this.cameraY);
-    this.world.render(ctx, this.cameraX, this.cameraY);
+    this.worldRenderer.render(ctx, this.cameraX, this.cameraY);
     FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY, this.world.getWidthPixels(), this.world.getHeightPixels());
     if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY);
     this.drops.forEach(d => d.render(ctx));

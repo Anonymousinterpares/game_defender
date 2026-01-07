@@ -291,7 +291,7 @@ export class HeatMap {
         }
         if (sData[idx] === 0) {
             sData[idx] = 1;
-            if (this.worldRef) this.worldRef.invalidateTileCache(tx, ty);
+            if (this.worldRef) this.worldRef.notifyTileChange(tx, ty);
         }
     }
 
@@ -426,7 +426,7 @@ export class HeatMap {
                 hData[i] = 0;
                 if (this.worldRef) {
                     this.worldRef.markMeshDirty();
-                    this.worldRef.invalidateTileCache(tx, ty);
+                    this.worldRef.notifyTileChange(tx, ty);
                     this.worldRef.checkTileDestruction(tx, ty);
                 }
                 // Removed clearing of heat/fire here. 
@@ -496,7 +496,7 @@ export class HeatMap {
                                 if (hData) hData[idx] = 0;
                                 if (this.worldRef) {
                                     this.worldRef.markMeshDirty();
-                                    this.worldRef.invalidateTileCache(tx, ty);
+                                    this.worldRef.notifyTileChange(tx, ty);
                                     this.worldRef.checkTileDestruction(tx, ty);
                                 }
                                 // If metal vaporizes, it IMMEDIATELY turns into a full molten puddle
@@ -632,7 +632,7 @@ export class HeatMap {
                             if (hData && hData[idx] <= 0) {
                                 if (this.worldRef) {
                                     this.worldRef.markMeshDirty();
-                                    this.worldRef.invalidateTileCache(tx, ty);
+                                    this.worldRef.notifyTileChange(tx, ty);
                                 }
                                 nextFire[idx] = 0;
                                 nextData[idx] = 0;
@@ -964,7 +964,7 @@ export class HeatMap {
                     }
                 }
                 if (changed && this.worldRef) {
-                    this.worldRef.invalidateTileCache(tx, ty);
+                    this.worldRef.notifyTileChange(tx, ty);
                 }
             }
         });
@@ -976,7 +976,7 @@ export class HeatMap {
         this.moltenData.delete(key);
         this.activeTiles.delete(key);
         const [tx, ty] = key.split(',').map(Number);
-        if (this.worldRef) this.worldRef.invalidateTileCache(tx, ty);
+        if (this.worldRef) this.worldRef.notifyTileChange(tx, ty);
     }
 
     private compressFloatArray(arr: Float32Array): number[] {

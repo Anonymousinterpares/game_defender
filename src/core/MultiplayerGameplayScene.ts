@@ -23,6 +23,7 @@ import { MaterialType } from './HeatMap';
 import { PerfMonitor } from '../utils/PerfMonitor';
 import { Rect } from '../utils/Quadtree';
 import { Simulation, SimulationRole } from './Simulation';
+import { WorldRenderer } from './renderers/WorldRenderer';
 
 export class MultiplayerGameplayScene extends GameplayScene {
   private remotePlayersMap: Map<string, RemotePlayer> = new Map();
@@ -120,7 +121,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
       if (!mm.isHost || !this.world || !this.heatMap) return;
       const { tx, ty, m, pt, hx, hy } = data;
       (this.world as any).tiles[ty][tx] = m;
-      this.world.invalidateTileCache(tx, ty);
+      this.worldRenderer.invalidateTileCache(tx, ty);
       this.world.markMeshDirty();
       const hpData = this.heatMap.getTileHP(tx, ty);
       mm.broadcast(NetworkMessageType.WORLD_UPDATE, { tx, ty, m, hp: hpData ? Array.from(hpData) : null, pt, hx, hy });
@@ -160,6 +161,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
   private recreateWorld(seed: number): void {
       this.simulation.reset(seed);
       this.simulation.player.inputManager = this.inputManager;
+      this.worldRenderer = new WorldRenderer(this.simulation.world);
       this.lightingRenderer.clearCache();
   }
 
@@ -342,7 +344,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
                   if (newHP) for (let i = 0; i < hp.length; i++) newHP[i] = hp[i];
               }
           }
-          this.world.invalidateTileCache(tx, ty); this.world.markMeshDirty();
+          this.worldRenderer.invalidateTileCache(tx, ty); this.world.markMeshDirty();
           if (!MultiplayerManager.getInstance().isHost && pt && hx !== undefined && hy !== undefined) {
               if (pt === ProjectileType.ROCKET || pt === ProjectileType.MISSILE || pt === ProjectileType.MINE) {
                   const cfg = ConfigManager.getInstance();

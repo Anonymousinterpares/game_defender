@@ -1,4 +1,5 @@
 import { World } from '../World';
+import { WorldRenderer } from './WorldRenderer';
 import { Player } from '../../entities/Player';
 import { Enemy } from '../../entities/Enemy';
 import { Projectile } from '../../entities/Projectile';
@@ -13,6 +14,7 @@ import { PerfMonitor } from '../../utils/PerfMonitor';
 
 export interface LightingParent {
     world: World | null;
+    worldRenderer: WorldRenderer;
     player: Player | null;
     enemies: Enemy[];
     projectiles: Projectile[];
@@ -220,8 +222,8 @@ export class LightingRenderer {
         const worldX = gx * this.chunkSize;
         const worldY = gy * this.chunkSize;
         
-        if (this.parent.world) {
-            this.parent.world.renderAsSilhouette(ctx, worldX, worldY, '#ffffff');
+        if (this.parent.worldRenderer) {
+            this.parent.worldRenderer.renderAsSilhouette(ctx, worldX, worldY, '#ffffff');
         }
     }
 
@@ -653,7 +655,7 @@ export class LightingRenderer {
 
         // Erase object footprints from shadow mask
         mctx.globalCompositeOperation = 'destination-out';
-        if (this.parent.world) this.parent.world.renderAsSilhouette(mctx, this.parent.cameraX, this.parent.cameraY);
+        if (this.parent.worldRenderer) this.parent.worldRenderer.renderAsSilhouette(mctx, this.parent.cameraX, this.parent.cameraY);
         if (this.parent.player) this.parent.player.renderAsSilhouette(mctx, '#ffffff');
         this.parent.enemies.forEach(e => e.renderAsSilhouette(mctx, '#ffffff'));
 

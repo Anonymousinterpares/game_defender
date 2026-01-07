@@ -1,6 +1,5 @@
 import { ConfigManager } from '../config/MasterConfig';
 import { MaterialType } from './HeatMap';
-import { WeatherManager } from './WeatherManager';
 
 export class World {
   private width: number;
@@ -19,15 +18,8 @@ export class World {
   private isMeshDirty: boolean = true;
   private meshVersion: number = 0;
 
-  // Render Caching
-  private tileCanvasCache: Map<string, HTMLCanvasElement> = new Map();
-  private wallChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, dirty: boolean }> = new Map();
-  private chunkSize: number = 512;
-  private lastSnowAccumulation: number = 0;
   private sharedTiles: Uint8Array | null = null;
-
-  private scratchCanvas: HTMLCanvasElement;
-  private scratchCtx: CanvasRenderingContext2D;
+  private onTileChangeCallback: ((tx: number, ty: number) => void) | null = null;
 
   constructor(seed?: number) {
     this.width = ConfigManager.getInstance().get('World', 'width');
@@ -40,20 +32,27 @@ export class World {
     this.rngState = this.seed;
     console.log(`World initialized with Seed: ${this.seed}`);
 
-    this.scratchCanvas = document.createElement('canvas');
-    this.scratchCanvas.width = this.chunkSize;
-    this.scratchCanvas.height = this.chunkSize + 32;
-    this.scratchCtx = this.scratchCanvas.getContext('2d')!;
-
     this.generate();
   }
 
+  public getWidth(): number { return this.width; }
+  public getHeight(): number { return this.height; }
+  public getTileSize(): number { return this.tileSize; }
+  public getTile(x: number, y: number): MaterialType { return this.tiles[y][x]; }
+  public getHeatMap(): any { return this.heatMapRef; }
+
+  public onTileChange(cb: (tx: number, ty: number) => void): void {
+      this.onTileChangeCallback = cb;
+  }
+
+  public notifyTileChange(tx: number, ty: number): void {
+      if (this.onTileChangeCallback) this.onTileChangeCallback(tx, ty);
+  }
+
   private seededRandom(): number {
-      // Simple LCG (Linear Congruential Generator)
-      // Mulberry32 is also good, but LCG is standard enough for this
       const a = 1664525;
       const c = 1013904223;
-      const m = 4294967296; // 2^32
+      const m = 4294967296; 
       this.rngState = (a * this.rngState + c) % m;
       return this.rngState / m;
   }
@@ -61,7 +60,6 @@ export class World {
   public setHeatMap(hm: any): void {
       this.heatMapRef = hm;
       this.heatMapRef.setWorldRef(this);
-      // Initialize HeatMap materials from world
       for (let y = 0; y < this.height; y++) {
           for (let x = 0; x < this.width; x++) {
               if (this.tiles[y][x] !== MaterialType.NONE) {
@@ -114,24 +112,12 @@ export class World {
       }
   }
 
-  public invalidateTileCache(tx: number, ty: number): void {
-      this.tileCanvasCache.delete(`${tx},${ty}`);
-      
-      const gx = Math.floor((tx * this.tileSize) / this.chunkSize);
-      const gy = Math.floor((ty * this.tileSize) / this.chunkSize);
-      const chunk = this.wallChunks.get(`${gx},${gy}`);
-      if (chunk) {
-          chunk.dirty = true;
-      }
-  }
-
   private generate(): void {
     const materials = [MaterialType.WOOD, MaterialType.BRICK, MaterialType.STONE, MaterialType.METAL];
     
     for (let y = 0; y < this.height; y++) {
       const row: MaterialType[] = [];
       for (let x = 0; x < this.width; x++) {
-        // Border walls
         if (x === 0 || x === this.width - 1 || y === 0 || y === this.height - 1) {
           row.push(MaterialType.INDESTRUCTIBLE);
         } else {
@@ -155,230 +141,7 @@ export class World {
     return this.height * this.tileSize;
   }
 
-  private renderTileToCache(tx: number, ty: number, tileType: MaterialType): HTMLCanvasElement {
-      const canvas = document.createElement('canvas');
-      canvas.width = this.tileSize;
-      canvas.height = this.tileSize + 16; // Extra space for 3D height
-      const ctx = canvas.getContext('2d')!;
-      
-      let color = '#2a2a2a';
-      let sideColor = '#1a1a1a';
-      let topColor = '#444';
-      
-      switch(tileType) {
-          case MaterialType.WOOD: color = '#5d4037'; sideColor = '#3e2723'; topColor = '#795548'; break;
-          case MaterialType.BRICK: color = '#a52a2a'; sideColor = '#800000'; topColor = '#c62828'; break;
-          case MaterialType.STONE: color = '#616161'; sideColor = '#424242'; topColor = '#9e9e9e'; break;
-          case MaterialType.METAL: color = '#37474f'; sideColor = '#263238'; topColor = '#546e7a'; break;
-          case MaterialType.INDESTRUCTIBLE: color = '#1a1a1a'; sideColor = '#000000'; topColor = '#333333'; break;
-      }
-
-      const h = 8;
-      const subDiv = 10;
-      const subSize = this.tileSize / subDiv;
-      const hData = this.heatMapRef ? this.heatMapRef.getTileHP(tx, ty) : null;
-      const heatData = this.heatMapRef ? this.heatMapRef.getTileHeat(tx, ty) : null;
-      const sData = this.heatMapRef ? this.heatMapRef.getTileScorch(tx, ty) : null;
-
-      if (hData) {
-          for (let sy = 0; sy < subDiv; sy++) {
-              for (let sx = 0; sx < subDiv; sx++) {
-                  const idx = sy * subDiv + sx;
-                  if (hData[idx] > 0) {
-                      const lx = sx * subSize;
-                      const ly = sy * subSize + h;
-                      
-                      // 1. Render Side & Top
-                      ctx.fillStyle = sideColor;
-                      ctx.fillRect(lx, ly, subSize, subSize);
-                      ctx.fillStyle = color;
-                      ctx.fillRect(lx, ly - h, subSize, subSize);
-                      
-                      // 2. Render Scorch Marks (Cached)
-                      if (sData && sData[idx]) {
-                          ctx.fillStyle = tileType === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
-                          ctx.fillRect(lx, ly - h, subSize, subSize);
-                      }
-
-                      // 3. Render Static Heat Glow (Low intensity heat bakes into cache)
-                      if (heatData && heatData[idx] > 0.05) {
-                          const heat = heatData[idx];
-                          // Only bake if not "white hot" (animated heat stays in real-time)
-                          if (heat < 0.6) {
-                              const r = Math.floor(100 + 155 * (heat / 0.4));
-                              ctx.fillStyle = `rgba(${r}, 0, 0, ${0.2 + heat * 0.4})`;
-                              ctx.fillRect(lx, ly - h, subSize, subSize);
-                          }
-                      }
-
-                      // 4. Highlights
-                      if (sy === 0 || sx === 0) {
-                          ctx.fillStyle = topColor;
-                          if (sy === 0) ctx.fillRect(lx, ly - h, subSize, 1);
-                          if (sx === 0) ctx.fillRect(lx, ly - h, 1, subSize);
-                      }
-                  }
-              }
-          }
-      } else {
-          ctx.fillStyle = sideColor;
-          ctx.fillRect(0, h, this.tileSize, this.tileSize);
-          ctx.fillStyle = color;
-          ctx.fillRect(0, 0, this.tileSize, this.tileSize);
-
-          // Snow on top
-          const snow = WeatherManager.getInstance().getSnowAccumulation();
-          if (snow > 0.1) {
-              ctx.fillStyle = `rgba(240, 245, 255, ${snow})`;
-              ctx.fillRect(0, 0, this.tileSize, 2 + snow * 4);
-          }
-
-          ctx.fillStyle = topColor;
-          ctx.fillRect(0, 0, this.tileSize, 2);
-          ctx.fillRect(0, 0, 2, this.tileSize);
-      }
-
-      this.tileCanvasCache.set(`${tx},${ty}`, canvas);
-      return canvas;
-  }
-
-  public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
-      this.renderInternal(ctx, cameraX, cameraY, false);
-  }
-
-  public renderAsSilhouette(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, color?: string): void {
-      this.renderInternal(ctx, cameraX, cameraY, true, color);
-  }
-
-  private renderInternal(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, silhouette: boolean, silColor?: string): void {
-    const viewWidth = ctx.canvas.width;
-    const viewHeight = ctx.canvas.height;
-    
-    // Check if snow changed enough to invalidate cache
-    const currentSnow = WeatherManager.getInstance().getSnowAccumulation();
-    if (Math.abs(currentSnow - this.lastSnowAccumulation) > 0.05) {
-        this.tileCanvasCache.clear();
-        this.wallChunks.forEach(c => c.dirty = true);
-        this.lastSnowAccumulation = currentSnow;
-    }
-
-    if (!silhouette) {
-        // Procedural background instead of massive canvas
-        let groundColor = '#1c1c1c';
-        if (currentSnow > 0) {
-            const r = Math.floor(28 + (200 - 28) * currentSnow);
-            const g = Math.floor(28 + (210 - 28) * currentSnow);
-            const b = Math.floor(28 + (230 - 28) * currentSnow);
-            groundColor = `rgb(${r},${g},${b})`;
-        }
-
-        ctx.fillStyle = groundColor;
-        ctx.fillRect(cameraX, cameraY, viewWidth, viewHeight);
-
-        // Draw Grid Lines for visible area
-        ctx.beginPath();
-        ctx.strokeStyle = currentSnow > 0.5 ? 'rgba(255,255,255,0.1)' : '#222222';
-        ctx.lineWidth = 1;
-
-        const startX = Math.floor(cameraX / this.tileSize) * this.tileSize;
-        const endX = cameraX + viewWidth;
-        const startY = Math.floor(cameraY / this.tileSize) * this.tileSize;
-        const endY = cameraY + viewHeight;
-
-        for (let x = startX; x <= endX; x += this.tileSize) {
-            ctx.moveTo(x, cameraY);
-            ctx.lineTo(x, endY);
-        }
-        for (let y = startY; y <= endY; y += this.tileSize) {
-            ctx.moveTo(cameraX, y);
-            ctx.lineTo(endX, y);
-        }
-        ctx.stroke();
-    }
-
-    // 2. Render Walls via Chunks
-    const startGX = Math.floor(cameraX / this.chunkSize);
-    const endGX = Math.floor((cameraX + viewWidth) / this.chunkSize);
-    const startGY = Math.floor(cameraY / this.chunkSize);
-    const endGY = Math.floor((cameraY + viewHeight) / this.chunkSize);
-
-    for (let gy = startGY; gy <= endGY; gy++) {
-        for (let gx = startGX; gx <= endGX; gx++) {
-            if (gx < 0 || gx >= Math.ceil(this.getWidthPixels() / this.chunkSize) ||
-                gy < 0 || gy >= Math.ceil(this.getHeightPixels() / this.chunkSize)) continue;
-
-            const key = `${gx},${gy}`;
-            let chunk = this.wallChunks.get(key);
-            
-            if (!chunk) {
-                const canvas = document.createElement('canvas');
-                canvas.width = this.chunkSize;
-                canvas.height = this.chunkSize + 32;
-                chunk = { canvas, ctx: canvas.getContext('2d')!, dirty: true };
-                this.wallChunks.set(key, chunk);
-            }
-
-            if (chunk.dirty) {
-                this.rebuildWallChunk(chunk, gx, gy);
-                chunk.dirty = false;
-            }
-
-            if (silhouette) {
-                // When rendering silhouette for shadows, we must draw at absolute world coords
-                // to match the shadow volume coordinate space.
-                ctx.save();
-                if (silColor) {
-                    // Use shared scratch canvas to tint
-                    const sctx = this.scratchCtx;
-                    sctx.clearRect(0, 0, this.chunkSize, this.chunkSize + 32);
-                    sctx.drawImage(chunk.canvas, 0, 0);
-                    sctx.globalCompositeOperation = 'source-in';
-                    sctx.fillStyle = silColor;
-                    sctx.fillRect(0, 0, this.chunkSize, this.chunkSize + 32);
-                    sctx.globalCompositeOperation = 'source-over'; // Reset
-                    
-                    ctx.drawImage(this.scratchCanvas, gx * this.chunkSize, gy * this.chunkSize - 8);
-                } else {
-                    ctx.drawImage(chunk.canvas, gx * this.chunkSize, gy * this.chunkSize - 8);
-                }
-                ctx.restore();
-            } else {
-                ctx.drawImage(chunk.canvas, gx * this.chunkSize, gy * this.chunkSize - 8);
-            }
-        }
-    }
-  }
-
-  private rebuildWallChunk(chunk: any, gx: number, gy: number): void {
-      const ctx = chunk.ctx;
-      ctx.clearRect(0, 0, this.chunkSize, this.chunkSize + 32);
-      
-      const startCol = Math.floor((gx * this.chunkSize) / this.tileSize);
-      const endCol = Math.ceil(((gx + 1) * this.chunkSize) / this.tileSize);
-      const startRow = Math.floor((gy * this.chunkSize) / this.tileSize);
-      const endRow = Math.ceil(((gy + 1) * this.chunkSize) / this.tileSize);
-
-      for (let y = startRow; y < endRow; y++) {
-          if (y < 0 || y >= this.height) continue;
-          for (let x = startCol; x < endCol; x++) {
-              if (x < 0 || x >= this.width) continue;
-
-              const tileType = this.tiles[y][x];
-              if (tileType === MaterialType.NONE) continue;
-
-              const cacheKey = `${x},${y}`;
-              let cached = this.tileCanvasCache.get(cacheKey);
-              if (!cached) {
-                  cached = this.renderTileToCache(x, y, tileType);
-              }
-              // Draw relative to chunk origin
-              ctx.drawImage(cached, (x * this.tileSize) - (gx * this.chunkSize), (y * this.tileSize) - (gy * this.chunkSize));
-          }
-      }
-  }
-
   public checkWallCollision(x: number, y: number, radius: number): {x: number, y: number} | null {
-      // Check center and 8 points on circle
       const points = [
           {x, y},
           {x: x - radius, y}, {x: x + radius, y},
@@ -404,12 +167,8 @@ export class World {
     return true;
   }
 
-  /**
-   * Performs a simple raycast to find the first wall collision.
-   * Returns the intersection point or null if no hit within maxDist.
-   */
   public raycast(startX: number, startY: number, angle: number, maxDist: number): {x: number, y: number} | null {
-      const step = 2; // Increased precision to 2px
+      const step = 2; 
       const dx = Math.cos(angle) * step;
       const dy = Math.sin(angle) * step;
       
@@ -426,7 +185,6 @@ export class World {
               return { x: curX, y: curY };
           }
           
-          // Map bounds check
           if (curX < 0 || curX > this.getWidthPixels() || curY < 0 || curY > this.getHeightPixels()) {
               return { x: curX, y: curY };
           }
@@ -439,13 +197,11 @@ export class World {
       const segments: {a: {x: number, y: number}, b: {x: number, y: number}}[] = [];
       const ts = this.tileSize;
 
-      // 1. Horizontal exposed edges (Top and Bottom of Footprint)
       for (let y = 0; y < this.height; y++) {
           let topStart: number | null = null;
           let botStart: number | null = null;
           
           for (let x = 0; x < this.width; x++) {
-              // Only use full-tile logic if tile exists AND has no sub-tile damage data
               const hasDamageData = this.heatMapRef && this.heatMapRef.hasTileData(x, y);
               const active = this.tiles[y][x] !== MaterialType.NONE && !hasDamageData;
               
@@ -470,7 +226,6 @@ export class World {
           if (botStart !== null) segments.push({ a: { x: botStart * ts, y: (y + 1) * ts }, b: { x: this.width * ts, y: (y + 1) * ts } });
       }
 
-      // 2. Vertical exposed edges (Left and Right of Footprint)
       for (let x = 0; x < this.width; x++) {
           let leftStart: number | null = null;
           let rightStart: number | null = null;
@@ -500,7 +255,6 @@ export class World {
           if (rightStart !== null) segments.push({ a: { x: (x + 1) * ts, y: rightStart * ts }, b: { x: (x + 1) * ts, y: this.height * ts } });
       }
 
-      // 3. Damaged Tiles
       for (let y = 0; y < this.height; y++) {
           for (let x = 0; x < this.width; x++) {
               if (this.tiles[y][x] === MaterialType.NONE) continue;
@@ -550,7 +304,6 @@ export class World {
 
       this.cachedSegments = segments;
       
-      // Update Spatial Grid
       this.spatialGrid.clear();
       segments.forEach(seg => {
           const gx1 = Math.floor(Math.min(seg.a.x, seg.b.x) / this.gridCellSize);
