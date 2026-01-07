@@ -117,10 +117,16 @@ export class MultiplayerManager {
           markAsOpen();
       }
       const msg = data as NetworkMessage;
-      // Log only infrequent messages or sample freq ones
-      if (Math.random() < 0.05 || (msg.t !== 'ps' && msg.t !== 'wu')) {
-          console.log(`[MP] RX ${msg.t} from ${conn.peer}`);
+      // Log critical combat messages
+      if (msg.t === 'ph' || msg.t === 'pj') {
+          console.log(`[MP] RX ${msg.t} from ${conn.peer} | Data:`, msg.d);
       }
+      
+      // Temporary: Log PS to see if coords change
+      if (msg.t === 'ps' && Math.random() < 0.05) {
+           console.log(`[MP] RX PS sample:`, msg.d);
+      }
+
       this.onMessageCallbacks.forEach(cb => cb(msg, conn));
     });
 
@@ -141,9 +147,14 @@ export class MultiplayerManager {
   }
 
   public broadcast(type: NetworkMessageType, data: any): void {
+    if (type === NetworkMessageType.PLAYER_HIT) {
+        console.log(`[MP] BROADCASTING PLAYER_HIT`, data);
+    }
     const msg: NetworkMessage = { t: type, d: data };
     this.connections.forEach(conn => {
-      if (conn.open) conn.send(msg);
+      if (conn.open) {
+          conn.send(msg);
+      }
     });
   }
 

@@ -240,11 +240,14 @@ export class LightingRenderer {
         const weather = WeatherManager.getInstance().getWeatherState();
         const isWeatherActive = weather.precipitationIntensity > 0.05 || weather.fogDensity > 0.05 || weather.cloudType !== CloudType.NONE;
 
-        // Skip entirely if static AND no active weather
+        const { sun, moon, baseAmbient, isDaylight, totalSeconds } = WorldClock.getInstance().getTimeState();
+        
+        // Skip entirely if static AND no active weather AND time hasn't changed much
         const camMoved = Math.abs(this.parent.cameraX - this.lastCameraPos.x) > 0.5 || 
                          Math.abs(this.parent.cameraY - this.lastCameraPos.y) > 0.5;
+        const timeChanged = Math.abs(totalSeconds - ((this as any)._lastTotalSeconds || 0)) > 0.1;
         
-        if (!camMoved && !isWeatherActive && worldMeshVersion === this.meshVersion && (this as any)._lastLightsCount === lightsCount && !this.parent.isFiringBeam && !this.parent.isFiringFlamethrower) {
+        if (!camMoved && !timeChanged && !isWeatherActive && worldMeshVersion === this.meshVersion && (this as any)._lastLightsCount === lightsCount && !this.parent.isFiringBeam && !this.parent.isFiringFlamethrower) {
             ctx.save();
             ctx.globalCompositeOperation = 'multiply';
             ctx.drawImage(this.lightCanvas, 0, 0, fullW, fullH);
@@ -254,6 +257,7 @@ export class LightingRenderer {
 
         this.lastCameraPos.x = this.parent.cameraX;
         this.lastCameraPos.y = this.parent.cameraY;
+        (this as any)._lastTotalSeconds = totalSeconds;
         (this as any)._lastLightsCount = lightsCount;
 
         PerfMonitor.getInstance().begin('lighting_setup');
@@ -266,7 +270,6 @@ export class LightingRenderer {
             this.fogCanvas.width = fullW; this.fogCanvas.height = fullH;
         }
 
-        const { sun, moon, baseAmbient, isDaylight } = WorldClock.getInstance().getTimeState();
         const lctx = this.lightCtx;
 
         // Scale for internal lighting coordinates

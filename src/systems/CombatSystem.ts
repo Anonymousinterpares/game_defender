@@ -93,56 +93,78 @@ export class CombatSystem {
                     let hitLocal = false;
                     for (const b of bodies) {
                         if (physics.checkCollision(p, b)) {
-                            // Only take damage if it's AOE or from someone else
-                            const isRemote = p.shooterId && this.parent.myId && p.shooterId !== this.parent.myId;
-                            if (isRemote || p.aoeRadius > 0) {
-                                if (p.type === ProjectileType.MINE && !p.isArmed) continue;
+                            // IGNORE direct hits from self
+                            const isSelf = p.shooterId === this.parent.myId;
+                            
+                            // Safety: If shooterId is null/empty, we assume it's NOT self for hits, 
+                            // but we also check if it's very close to muzzle to prevent suicide
+                            const distToMuzzle = Math.sqrt((p.x - player.x)**2 + (p.y - player.y)**2);
+                            if ((isSelf || !p.shooterId) && distToMuzzle < 32 && p.aoeRadius <= 0) continue; 
 
-                                if (p.aoeRadius > 0) {
-                                    this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
-                                } else {
-                                    player.takeDamage(p.damage);
-                                    if (player.health <= 0 && p.shooterId) {
-                                        this.parent.lastKilledBy = p.shooterId;
-                                    }
+                            if (isSelf && p.aoeRadius <= 0) continue; 
+
+                            if (p.type === ProjectileType.MINE && !p.isArmed) continue;
+
+                            console.log(`[CMBT] Hit LOCAL Player! Shooter: ${p.shooterId || 'NULL'} | MyID: ${this.parent.myId}`);
+
+                            if (p.aoeRadius > 0) {
+                                this.createExplosion(p.x, p.y, p.aoeRadius, p.damage, p.shooterId);
+                            } else {
+                                // Direct hit from someone else - BROADCAST (Authoritative)
+                                if (p.shooterId && p.shooterId !== this.parent.myId) {
+                                    // Visual impact only locally
                                     const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
                                     SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
                                     this.createImpactParticles(p.x, p.y, player.color);
+                                    
+                                    // We don't call player.takeDamage here anymore!
+                                    // The shooter will broadcast the hit, or we could broadcast our own hit.
+                                    // For consistency: Shooter broadcasts hits they observe.
                                 }
-                                p.active = false;
-                                hitLocal = true;
-                                break;
                             }
+                            p.active = false;
+                            hitLocal = true;
+                            break;
                         }
                     }
                     if (hitLocal) continue;
                 }
 
                 // Check RemotePlayers
-                // We check against getAllBodies() which includes head + segments
                 if (remotePlayers) {
                     for (const rp of remotePlayers) {
-                        // Optimization: Simple distance check to head first
+                        // IGNORE if this remote player is the shooter
+                        if (p.shooterId === rp.id && p.aoeRadius <= 0) continue;
+
                         const distToHead = Math.sqrt((p.x - rp.x)**2 + (p.y - rp.y)**2);
-                        if (distToHead > 300) continue; // Too far
+                        if (distToHead < 64 && Math.random() < 0.1) {
+                            console.log(`[CMBT] Proj near RP ${rp.id} | Dist: ${Math.round(distToHead)} | P: ${Math.round(p.x)},${Math.round(p.y)} | RP: ${Math.round(rp.x)},${Math.round(rp.y)}`);
+                        }
+                        if (distToHead > 300) continue; 
 
                         const bodies = rp.getAllBodies();
                         for (const b of bodies) {
                             if (physics.checkCollision(p, b)) {
                                 if (p.type === ProjectileType.MINE && !p.isArmed) continue;
 
+                                console.log(`[CMBT] Hit REMOTE Player ${rp.id}! Shooter: ${p.shooterId}`);
+
                                 if (p.aoeRadius > 0) {
-                                    this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
+                                    this.createExplosion(p.x, p.y, p.aoeRadius, p.damage, p.shooterId);
                                 } else {
-                                    // Visual hit only locally
+                                    // Visual hit locally
                                     const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
                                     SoundManager.getInstance().playSoundSpatial(sfx, p.x, p.y);
                                     this.createImpactParticles(p.x, p.y, rp.color);
 
-                                    // BROADCAST the hit so the remote player takes damage
+                                    // BROADCAST the hit IF I AM THE SHOOTER
                                     if (p.shooterId === this.parent.myId) {
                                         const mm = MultiplayerManager.getInstance();
-                                        mm.broadcast(NetworkMessageType.PLAYER_HIT, { id: rp.id, damage: p.damage, killerId: this.parent.myId });
+                                        mm.broadcast(NetworkMessageType.PLAYER_HIT, { 
+                                            id: rp.id, 
+                                            damage: p.damage, 
+                                            killerId: this.parent.myId 
+                                        });
                                     }
                                 }
                                 p.active = false;
@@ -157,12 +179,16 @@ export class CombatSystem {
         }
     }
 
-    public createExplosion(x: number, y: number, radius: number, damage: number): void {
+    public createExplosion(x: number, y: number, radius: number, damage: number, shooterId: string | null = null): void {
         if (this.parent.onExplosion) {
             this.parent.onExplosion(x, y, radius, damage);
         }
 
+        const mm = MultiplayerManager.getInstance();
+        const isMyExplosion = shooterId === this.parent.myId;
+
         SoundManager.getInstance().playSoundSpatial('explosion_large', x, y);
+        // ... (rest of visual code remains same)
         LightManager.getInstance().addTransientLight('explosion', x, y);
         FloorDecalManager.getInstance().addScorchMark(x, y, radius);
         
@@ -172,7 +198,7 @@ export class CombatSystem {
         // 2. Shockwave
         ParticleSystem.getInstance().spawnShockwave(x, y, radius * 1.8);
 
-        // 3. Fireball
+        // ... (fireball/smoke logic)
         const fireCount = 12 + Math.floor(Math.random() * 6);
         for (let i = 0; i < fireCount; i++) {
             const angle = Math.random() * Math.PI * 2;
@@ -182,7 +208,6 @@ export class CombatSystem {
             ParticleSystem.getInstance().setFlame(idx, true);
         }
 
-        // 4. Lingering Smoke
         const smokeCount = 20 + Math.floor(Math.random() * 10);
         for (let i = 0; i < smokeCount; i++) {
             const angle = Math.random() * Math.PI * 2;
@@ -194,7 +219,7 @@ export class CombatSystem {
         
         if (this.parent.heatMap) {
             this.parent.heatMap.addHeat(x, y, 0.8, radius * 1.5);
-
+            // ... (shrapnel code)
             const centerMat = this.parent.heatMap.getMaterialAt(x, y);
             if (centerMat !== MaterialType.NONE) {
                 SoundManager.getInstance().playMaterialHit(MaterialType[centerMat].toLowerCase(), x, y);
@@ -232,6 +257,7 @@ export class CombatSystem {
             }
         }
 
+        // --- DAMAGE LOGIC (Authoritative) ---
         this.parent.enemies.forEach((e: Enemy) => {
             const dx = e.x - x;
             const dy = e.y - y;
@@ -248,7 +274,14 @@ export class CombatSystem {
             const dist = Math.sqrt(dx*dx + dy*dy);
             if (dist < radius) {
                 const falloff = 1 - (dist / radius);
-                this.parent.player.takeDamage(damage * falloff);
+                // IF I OWN THE EXPLOSION, broadcast hit to myself
+                if (isMyExplosion) {
+                    mm.broadcast(NetworkMessageType.PLAYER_HIT, { 
+                        id: this.parent.myId, 
+                        damage: damage * falloff, 
+                        killerId: shooterId 
+                    });
+                }
             }
         }
 
@@ -259,7 +292,14 @@ export class CombatSystem {
                 const dist = Math.sqrt(dx*dx + dy*dy);
                 if (dist < radius) {
                     const falloff = 1 - (dist / radius);
-                    rp.takeDamage(damage * falloff);
+                    // IF I OWN THE EXPLOSION, broadcast hit to this remote player
+                    if (isMyExplosion) {
+                        mm.broadcast(NetworkMessageType.PLAYER_HIT, { 
+                            id: rp.id, 
+                            damage: damage * falloff, 
+                            killerId: shooterId 
+                        });
+                    }
                 }
             });
         }

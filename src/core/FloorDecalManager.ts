@@ -234,7 +234,8 @@ export class FloorDecalManager {
         ctx.rotate(d.rotation);
         ctx.globalAlpha = d.opacity;
 
-        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, d.radius);
+        const r = Math.max(0.1, d.radius);
+        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
         grad.addColorStop(0, '#111');
         grad.addColorStop(0.3, d.color);
         grad.addColorStop(0.7, '#555');

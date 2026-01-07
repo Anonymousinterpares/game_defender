@@ -19,6 +19,8 @@ import { SoundManager } from './SoundManager';
 import { Quadtree } from '../utils/Quadtree';
 import { ConfigManager } from '../config/MasterConfig';
 import { MaterialType } from './HeatMap';
+import { PerfMonitor } from '../utils/PerfMonitor';
+import { Rect } from '../utils/Quadtree';
 
 export class MultiplayerGameplayScene extends GameplayScene {
   // remotePlayers is already defined here, but as a Map. 
@@ -39,7 +41,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
   }
 
   public get myId(): string {
-      return MultiplayerManager.getInstance().myId;
+      return MultiplayerManager.getInstance().myId || 'pending';
   }
 
   private updateRemotePlayersArray(): void {
@@ -239,6 +241,14 @@ export class MultiplayerGameplayScene extends GameplayScene {
     
     const mm = MultiplayerManager.getInstance();
 
+    // Ensure remotePlayers array is in sync for CombatSystem
+    this.updateRemotePlayersArray();
+    
+    // Debug log for array population (increased frequency)
+    if (this.remotePlayersMap.size > 0 && Math.random() < 0.2) {
+        console.log(`[VIS] Sync check: MapSize=${this.remotePlayersMap.size}, ArraySize=${this.remotePlayers.length}`);
+    }
+
     // 1. Update Core Gameplay (with custom logic for client/host)
     this.updateMultiplayerCore(dt);
 
@@ -251,12 +261,6 @@ export class MultiplayerGameplayScene extends GameplayScene {
         }
     });
 
-    // Debug Log for Visibility
-    if (this.remotePlayers.length > 0 && Math.random() < 0.01) {
-        const rp = this.remotePlayers[0];
-        console.log(`[VIS] RP ${rp.id} | Pos: ${Math.round(rp.x)},${Math.round(rp.y)} | Active: ${rp.active} | InGrid: ?`);
-    }
-    
     // 3. Radar update
     if (this.radar && this.player) this.radar.update(dt);
 
@@ -310,7 +314,6 @@ export class MultiplayerGameplayScene extends GameplayScene {
         }
     }
 
-    this.updateRemotePlayersArray();
     this.weaponSystem.update(dt, this.inputManager);
     this.combatSystem.update(dt);
 
@@ -324,24 +327,9 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
     // Update local entities
     this.entities.forEach(e => {
-        if (e instanceof Player) {
-            e.update(dt, this.enemies, (x: number, y: number, angle: number) => {
-                // LOCAL SPAWN
-                const p = new Projectile(x, y, angle);
-                p.shooterId = this.myId;
-                // Add weapon type to the projectile
-                const activeWeapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon') as ProjectileType;
-                p.type = activeWeapon;
-                this.projectiles.push(p);
-                
-                // NETWORK BROADCAST
-                mm.broadcast(NetworkMessageType.PROJECTILE, { 
-                    x, y, a: angle, type: p.type, 
-                    sid: this.myId 
-                });
-            });
-        }
-        else e.update(dt);
+        // We only call e.update(dt) here. 
+        // Weapon firing is handled exclusively by WeaponSystem for the player.
+        e.update(dt);
     });
 
     // Clients don't process enemy AI/Physics, they just follow Host data
@@ -366,6 +354,11 @@ export class MultiplayerGameplayScene extends GameplayScene {
                     const sfx = p.type === ProjectileType.MISSILE ? 'hit_missile' : 'hit_cannon';
                     SoundManager.getInstance().playSoundSpatial(sfx, hitPoint.x, hitPoint.y);
                     this.combatSystem.createImpactParticles(hitPoint.x, hitPoint.y, p.color);
+
+                    // LOCAL WORLD DAMAGE (Visual/Immediate for Client)
+                    if (!mm.isHost) {
+                        p.onWorldHit(this.heatMap, hitPoint.x, hitPoint.y);
+                    }
                 }
 
                 if (mm.isHost && hitPoint) {
@@ -446,8 +439,68 @@ export class MultiplayerGameplayScene extends GameplayScene {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
-      if (!this.isSpawned) return;
-      super.render(ctx);
+    if (!this.isSpawned || !this.world || !this.player) return;
+
+    PerfMonitor.getInstance().begin('render_world');
+    ctx.save();
+    ctx.translate(-this.cameraX, -this.cameraY);
+    
+    // 1. Render World & Decals
+    this.world.render(ctx, this.cameraX, this.cameraY);
+    FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY, this.world!.getWidthPixels(), this.world!.getHeightPixels());
+    if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY);
+    this.drops.forEach(d => d.render(ctx));
+    
+    // 2. Render Entities (Spatial Grid for most, Direct for Remote Players)
+    const viewport: Rect = { x: this.cameraX, y: this.cameraY, w: window.innerWidth, h: window.innerHeight };
+    const visibleEntities = this.spatialGrid.retrieve(viewport);
+    
+    // NUCLEAR OPTION: Direct render remote players to bypass grid bugs
+    this.remotePlayersMap.forEach(rp => {
+        if (rp.active) rp.render(ctx);
+    });
+
+    visibleEntities.forEach(e => {
+        // Skip RemotePlayer to avoid double-rendering if the grid works
+        if (e instanceof RemotePlayer) return;
+        e.render(ctx);
+    });
+    
+    // 3. Render Particles
+    PerfMonitor.getInstance().begin('render_particles');
+    ParticleSystem.getInstance().render(ctx, this.cameraX, this.cameraY);
+    PerfMonitor.getInstance().end('render_particles');
+
+    // 4. Render Beam Effects (if firing)
+    if (this.isFiringBeam && this.player) {
+        const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+        ctx.beginPath(); 
+        ctx.moveTo(this.player.x, this.player.y); 
+        ctx.lineTo(this.beamEndPos.x, this.beamEndPos.y);
+        if (weapon === 'laser') { 
+            ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 2; ctx.stroke(); 
+        } else { 
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)'; ctx.lineWidth = 15; ctx.stroke(); 
+        }
+    }
+    
+    ctx.restore();
+    PerfMonitor.getInstance().end('render_world');
+
+    // 5. Post-processing (Lighting, Radar, HUD)
+    this.lightingRenderer.render(ctx);
+    if (this.radar && this.player) {
+        this.radar.render(this.player, this.getRadarEntities());
+    }
+    this.hud.render(ctx);
+
+    // Improved Debug Log
+    if (this.remotePlayersMap.size > 0 && Math.random() < 0.05) {
+        const rps = Array.from(this.remotePlayersMap.values());
+        const rp = rps[0];
+        const inGrid = visibleEntities.some(e => e instanceof RemotePlayer && (e as any).id === rp.id);
+        console.log(`[VIS] RP ${rp.id} | Pos: ${Math.round(rp.x)},${Math.round(rp.y)} | Active: ${rp.active} | InGridRetrieve: ${inGrid}`);
+    }
   }
 
   protected getRadarEntities(): Entity[] {

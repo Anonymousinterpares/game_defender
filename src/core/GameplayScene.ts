@@ -50,6 +50,7 @@ export class GameplayScene implements Scene, HUDParent, WeaponParent, CombatPare
   public cameraX: number = 0;
   public cameraY: number = 0;
   public coinsCollected: number = 0;
+  public get myId(): string { return 'local'; }
   
   public lastShotTime: number = 0;
   public shootCooldown: number = 0.2;

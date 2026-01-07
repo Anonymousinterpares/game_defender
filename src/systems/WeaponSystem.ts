@@ -7,8 +7,10 @@ import { SoundManager } from '../core/SoundManager';
 import { World } from '../core/World';
 import { HeatMap, MaterialType } from '../core/HeatMap';
 import { ParticleSystem } from '../core/ParticleSystem';
+import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
 
 export interface WeaponParent {
+    myId: string;
     player: Player | null;
     world: World | null;
     heatMap: HeatMap | null;
@@ -117,6 +119,17 @@ export class WeaponSystem {
             player.rotation,
             pType
         );
+        p.shooterId = this.parent.myId;
+
+        // BROADCAST to network
+        const mm = MultiplayerManager.getInstance();
+        mm.broadcast(NetworkMessageType.PROJECTILE, {
+            x: p.x,
+            y: p.y,
+            a: p.rotation,
+            type: p.type,
+            sid: this.parent.myId
+        });
 
         if (pType === ProjectileType.MISSILE) {
             let nearest = null;
