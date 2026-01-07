@@ -12,7 +12,8 @@ export enum NetworkMessageType {
   EXPLOSION = 'ex',
   PLAYER_DEATH = 'pd',
   WORLD_DAMAGE_REQUEST = 'wdr',
-  WORLD_HEAT_SYNC = 'whs'
+  WORLD_HEAT_SYNC = 'whs',
+  PLUGIN_SYNC = 'pls'
 }
 
 export interface NetworkMessage {

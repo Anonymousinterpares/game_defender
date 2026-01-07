@@ -24,6 +24,8 @@ import { BenchmarkSystem } from '../utils/BenchmarkSystem';
 import { Rect } from '../utils/Quadtree';
 import { Simulation, SimulationRole } from './Simulation';
 import { WorldRenderer } from './renderers/WorldRenderer';
+import { WeatherTimePlugin } from './plugins/WeatherTimePlugin';
+import { ChaosPlugin } from './plugins/ChaosPlugin';
 
 export class GameplayScene implements Scene, HUDParent, LightingParent {
   public simulation: Simulation;
@@ -90,6 +92,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
   async onEnter(): Promise<void> {
     const seed = ConfigManager.getInstance().get<number>('Debug', 'forcedSeed');
     this.simulation = new Simulation(SimulationRole.SINGLEPLAYER, seed);
+    this.simulation.pluginManager.install(new WeatherTimePlugin());
     this.simulation.player.inputManager = this.inputManager; // Link input
     this.worldRenderer = new WorldRenderer(this.simulation.world);
 
@@ -123,7 +126,6 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     }
 
     this.benchmark.update(dt);
-    WorldClock.getInstance().update(dt);
     LightManager.getInstance().update(dt);
     FloorDecalManager.getInstance().update(dt);
     this.lightUpdateCounter++;
@@ -235,6 +237,9 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     const visibleEntities = this.simulation.spatialGrid.retrieve(viewport);
     visibleEntities.forEach(e => e.render(ctx));
     
+    // Plugin Rendering
+    this.simulation.pluginManager.render(ctx);
+
     PerfMonitor.getInstance().begin('render_particles');
     ParticleSystem.getInstance().render(ctx, this.cameraX, this.cameraY);
     PerfMonitor.getInstance().end('render_particles');
@@ -298,6 +303,15 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     if (cleanCmd === 'set_weather_fog') { WeatherManager.getInstance().setWeather(WeatherType.FOG); return true; }
     if (cleanCmd === 'set_weather_rain') { WeatherManager.getInstance().setWeather(WeatherType.RAIN); return true; }
     if (cleanCmd === 'set_weather_snow') { WeatherManager.getInstance().setWeather(WeatherType.SNOW); return true; }
+
+    if (cleanCmd === 'chaos_on') {
+        this.simulation.pluginManager.install(new ChaosPlugin());
+        return true;
+    }
+    if (cleanCmd === 'chaos_off') {
+        this.simulation.pluginManager.uninstall('debug-chaos');
+        return true;
+    }
 
     if (cleanCmd.startsWith('set_time_speed ')) {
         const val = parseFloat(cleanCmd.split(' ')[1]);

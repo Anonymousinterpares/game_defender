@@ -18,10 +18,13 @@ import { EventBus, GameEvent } from './EventBus';
 import { EntityManager } from './ecs/EntityManager';
 import { MovementSystem } from './ecs/systems/MovementSystem';
 import { FireSystem } from './ecs/systems/FireSystem';
+import { System } from './ecs/System';
 import { TransformComponent } from './ecs/components/TransformComponent';
 import { PhysicsComponent } from './ecs/components/PhysicsComponent';
 import { HealthComponent } from './ecs/components/HealthComponent';
 import { FireComponent } from './ecs/components/FireComponent';
+
+import { PluginManager } from './plugins/PluginManager';
 
 export enum SimulationRole {
     SINGLEPLAYER,
@@ -46,6 +49,9 @@ export class Simulation implements WeaponParent, CombatParent {
     public entityManager: EntityManager;
     private movementSystem: MovementSystem;
     private fireSystem: FireSystem;
+    private customSystems: System[] = [];
+
+    public pluginManager: PluginManager;
     
     public weaponSystem: WeaponSystem;
     public combatSystem: CombatSystem;
@@ -79,6 +85,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.entityManager = new EntityManager();
         this.movementSystem = new MovementSystem();
         this.fireSystem = new FireSystem();
+        this.pluginManager = new PluginManager(this);
         
         this.spatialGrid = new Quadtree<Entity>({ 
             x: 0, 
@@ -127,6 +134,14 @@ export class Simulation implements WeaponParent, CombatParent {
         this.role = role;
     }
 
+    public registerSystem(system: System): void {
+        this.customSystems.push(system);
+    }
+
+    public unregisterSystem(systemId: string): void {
+        this.customSystems = this.customSystems.filter(s => (s as any).id !== systemId);
+    }
+
     public reset(seed?: number): void {
         this.world = new World(seed);
         this.physics = new PhysicsEngine();
@@ -154,6 +169,9 @@ export class Simulation implements WeaponParent, CombatParent {
     }
 
     public update(dt: number, inputManager?: any): void {
+        // Plugin Update
+        this.pluginManager.update(dt);
+
         // ECS Sync (Phase 4 bridge)
         this.syncEntitiesToECS();
 
@@ -165,6 +183,9 @@ export class Simulation implements WeaponParent, CombatParent {
         
         this.fireSystem.update(dt, this.entityManager);
         this.movementSystem.update(dt, this.entityManager);
+
+        // Update Custom Systems
+        this.customSystems.forEach(s => s.update(dt, this.entityManager));
 
         // Sync BACK to legacy objects
         this.syncBackFromECS();

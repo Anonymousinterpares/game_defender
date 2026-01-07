@@ -56,6 +56,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
         case NetworkMessageType.PLAYER_DEATH: this.handleRemoteDeath(msg.d); break;
         case NetworkMessageType.PLAYER_HIT: this.handlePlayerHit(msg.d); break;
         case NetworkMessageType.WORLD_HEAT_SYNC: if (this.heatMap) this.heatMap.applyDeltaState(msg.d); break;
+        case NetworkMessageType.PLUGIN_SYNC: this.simulation.pluginManager.applySyncStates(msg.d); break;
       }
     });
 
@@ -187,7 +188,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
           this.sendWorldSync();
           this.envSyncTimer += this.networkTimer;
           if (this.envSyncTimer >= 1.0) {
-              this.sendEnvironmentSync();
+              this.sendPluginSync();
               if (this.heatMap) {
                   const delta = this.heatMap.getDeltaState();
                   if (delta.length > 0) MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_HEAT_SYNC, delta);
@@ -270,10 +271,9 @@ export class MultiplayerGameplayScene extends GameplayScene {
       MultiplayerManager.getInstance().broadcast(NetworkMessageType.ENTITY_SPAWN, { enemies: enemyData, drops: dropData });
   }
 
-  private sendEnvironmentSync(): void {
-      MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_UPDATE, { 
-          env: { t: WorldClock.getInstance().getTimeState().totalSeconds, w: WeatherManager.getInstance().getWeatherState().type }
-      });
+  private sendPluginSync(): void {
+      const states = this.simulation.pluginManager.getSyncStates();
+      MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLUGIN_SYNC, states);
   }
 
   private handleRemoteProjectile(data: any): void {
@@ -319,11 +319,6 @@ export class MultiplayerGameplayScene extends GameplayScene {
   }
 
   private handleWorldUpdate(data: any): void {
-      if (data.env) {
-          (WorldClock.getInstance() as any).gameSeconds = data.env.t;
-          if (data.env.w !== undefined) WeatherManager.getInstance().setWeather(data.env.w);
-          return;
-      }
       if (this.world && this.heatMap) {
           const { tx, ty, m, hp, pt, hx, hy } = data;
           (this.world as any).tiles[ty][tx] = m;
