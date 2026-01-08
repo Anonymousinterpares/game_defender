@@ -15,6 +15,11 @@ import { EventBus, GameEvent } from './EventBus';
 import { ConfigManager } from '../config/MasterConfig';
 import { Simulation, SimulationRole } from './Simulation';
 import { WorldRenderer } from './renderers/WorldRenderer';
+import { TransformComponent } from './ecs/components/TransformComponent';
+import { PhysicsComponent } from './ecs/components/PhysicsComponent';
+import { HealthComponent } from './ecs/components/HealthComponent';
+import { FireComponent } from './ecs/components/FireComponent';
+import { RenderComponent } from './ecs/components/RenderComponent';
 
 export class MultiplayerGameplayScene extends GameplayScene {
   private remotePlayersMap: Map<string, RemotePlayer> = new Map();
@@ -374,6 +379,14 @@ export class MultiplayerGameplayScene extends GameplayScene {
       this.remotePlayersMap.set(id, rp);
       this.simulation.remotePlayers.push(rp);
       this.physics.addBody(rp);
+      
+      // ECS Link for Remote Player
+      rp.setEntityManager(this.simulation.entityManager);
+      this.simulation.entityManager.addComponent(rp.id, new TransformComponent(x, y, r / 1000));
+      this.simulation.entityManager.addComponent(rp.id, new PhysicsComponent(0, 0, rp.radius));
+      this.simulation.entityManager.addComponent(rp.id, new HealthComponent(h, 100));
+      this.simulation.entityManager.addComponent(rp.id, new FireComponent());
+      this.simulation.entityManager.addComponent(rp.id, new RenderComponent('custom', rp.color, rp.radius));
     }
     
     // Reactivate and Sync active state
@@ -383,6 +396,21 @@ export class MultiplayerGameplayScene extends GameplayScene {
     if (l !== undefined && rp.segments.length !== l) {
         rp.setBodyLength(l);
     }
+
+    // Ensure segments are also in ECS
+    rp.segments.forEach((seg, i) => {
+        if (!this.simulation.entityManager.getComponent(seg.id, 'transform')) {
+            seg.setEntityManager(this.simulation.entityManager);
+            const sx = segs && segs[i] ? segs[i].x : seg.x;
+            const sy = segs && segs[i] ? segs[i].y : seg.y;
+            this.simulation.entityManager.addComponent(seg.id, new TransformComponent(sx, sy, 0));
+            this.simulation.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
+            this.simulation.entityManager.addComponent(seg.id, new HealthComponent(100, 100));
+            this.simulation.entityManager.addComponent(seg.id, new FireComponent());
+            this.simulation.entityManager.addComponent(seg.id, new RenderComponent('custom', rp.color, seg.radius));
+        }
+    });
+
     if (segs && segs.length === rp.segments.length) {
         for (let i = 0; i < segs.length; i++) {
             const s = rp.segments[i];

@@ -8,7 +8,6 @@ export enum DropType {
 
 export class Drop extends Entity {
   public type: DropType;
-  public active: boolean = true;
   private bobTime: number = Math.random() * Math.PI * 2;
 
   constructor(x: number, y: number, type: DropType) {

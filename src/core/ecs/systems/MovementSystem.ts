@@ -5,6 +5,8 @@ import { PhysicsComponent } from '../components/PhysicsComponent';
 import { InputComponent } from '../components/InputComponent';
 import { ConfigManager } from '../../../config/MasterConfig';
 
+import { TagComponent } from '../components/TagComponent';
+
 export class MovementSystem implements System {
     public readonly id = 'movement';
 
@@ -21,13 +23,17 @@ export class MovementSystem implements System {
             const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
             const physics = entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
             const input = entityManager.getComponent<InputComponent>(id, 'input');
+            const tag = entityManager.getComponent<TagComponent>(id, 'tag');
 
             if (physics.isStatic) continue;
 
             // Handle Input-based movement (Player)
             if (input) {
-                // Rotation
-                transform.rotation += input.turn * turnSpeed * dt;
+                // Only use keyboard turn if NOT player (e.g. maybe other controllable entities)
+                // For player, we let the Mouse logic in Player.update() handle rotation
+                if (tag?.tag !== 'player') {
+                    transform.rotation += input.turn * turnSpeed * dt;
+                }
 
                 // Acceleration
                 if (input.throttle !== 0) {

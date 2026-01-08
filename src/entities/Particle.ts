@@ -1,7 +1,6 @@
 import { Entity } from '../core/Entity';
 
 export class Particle extends Entity {
-    public active: boolean = true;
     public isFlame: boolean = false;
     public life: number = 1.0;
     private maxLife: number = 1.0;
@@ -95,7 +94,6 @@ export class Particle extends Entity {
 }
 
 export class ShockwaveParticle extends Entity {
-    public active: boolean = true;
     public id: string = Math.random().toString(36).substr(2, 9);
     private life: number = 0.4;
     private maxLife: number = 0.4;
@@ -141,7 +139,6 @@ export class ShockwaveParticle extends Entity {
 }
 
 export class FlashParticle extends Entity {
-    public active: boolean = true;
     public id: string = Math.random().toString(36).substr(2, 9);
     private life: number = 0.15; // Slightly longer flash
     private maxLife: number = 0.15;

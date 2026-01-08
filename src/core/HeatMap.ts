@@ -447,7 +447,7 @@ export class HeatMap {
         const soundMgr = SoundManager.getInstance();
 
         this.activeTiles.forEach(key => {
-            const data = this.heatData.get(key)!;
+            const data = this.heatData.get(key);
             const fData = this.fireData.get(key);
             const mlData = this.moltenData.get(key);
             const mData = this.materialData.get(key);
@@ -458,7 +458,7 @@ export class HeatMap {
             let hasActivity = false;
             let burningSubTiles = 0;
 
-            const nextData = new Float32Array(data);
+            const nextData = data ? new Float32Array(data) : new Float32Array(this.subDiv * this.subDiv);
             const nextFire = fData ? new Float32Array(fData) : null;
             const nextMolten = mlData ? new Float32Array(mlData) : (this.hasMetal(mData) ? new Float32Array(this.subDiv * this.subDiv) : null);
 
@@ -471,7 +471,7 @@ export class HeatMap {
                     const material = mData ? mData[idx] : MaterialType.NONE;
 
                     // --- HEAT LOGIC ---
-                    const val = data[idx];
+                    const val = nextData[idx];
                     if (val > 0) {
                         let sum = val;
                         let count = 1;
@@ -479,7 +479,7 @@ export class HeatMap {
                         for (const [nx, ny] of neighbors) {
                             const nIdx = (y + ny) * this.subDiv + (x + nx);
                             if (x+nx >= 0 && x+nx < this.subDiv && y+ny >= 0 && y+ny < this.subDiv) {
-                                sum += data[nIdx];
+                                sum += data![nIdx];
                                 count++;
                             }
                         }
@@ -649,7 +649,7 @@ export class HeatMap {
                 soundMgr.updateAreaSound('fire', worldX, worldY, burningSubTiles);
             }
             
-            data.set(nextData);
+            if (data) data.set(nextData);
             if (fData && nextFire) fData.set(nextFire);
             if (nextMolten) {
                 // Only save if there's actual molten metal

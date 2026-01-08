@@ -18,6 +18,9 @@ export class RenderSystem implements System {
             const health = entityManager.getComponent<HealthComponent>(id, 'health');
             const fire = entityManager.getComponent<FireComponent>(id, 'fire');
 
+            // Skip 'custom' type as they are handled by legacy .render() calls
+            if (render.renderType === 'custom') continue;
+
             const ix = transform.x; // Simplified, no interpolation yet in ECS
             const iy = transform.y;
             const rotation = transform.rotation;

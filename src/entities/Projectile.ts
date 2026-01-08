@@ -11,7 +11,6 @@ export enum ProjectileType {
 }
 
 export class Projectile extends Entity {
-  public active: boolean = true;
   protected lifeTime: number = 2.0; 
   protected speed: number = 800;
   public type: ProjectileType;

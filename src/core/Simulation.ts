@@ -26,6 +26,8 @@ import { TransformComponent } from './ecs/components/TransformComponent';
 import { PhysicsComponent } from './ecs/components/PhysicsComponent';
 import { HealthComponent } from './ecs/components/HealthComponent';
 import { FireComponent } from './ecs/components/FireComponent';
+import { TagComponent } from './ecs/components/TagComponent';
+import { RenderComponent } from './ecs/components/RenderComponent';
 import { EntityFactory } from './ecs/EntityFactory';
 
 import { PluginManager } from './plugins/PluginManager';
@@ -111,11 +113,27 @@ export class Simulation implements WeaponParent, CombatParent {
         
         // LEGACY PLAYER (Still needed for some parts)
         this.player = new Player(centerX, centerY, null as any); 
+        this.player.setEntityManager(this.entityManager); // LINKING
         this.entities.push(this.player);
         this.physics.addBody(this.player);
 
-        // ECS PLAYER
+        // ECS PLAYER (Created for all roles, as every simulation has a 'local' player)
         this.playerEntityId = EntityFactory.createPlayer(this.entityManager, centerX, centerY);
+        const ecsPlayer = this.entityManager.query(['tag']).find(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'player');
+        if (ecsPlayer && ecsPlayer !== this.player.id) {
+            this.reassignEntityId(ecsPlayer, this.player.id);
+            this.playerEntityId = this.player.id;
+        }
+
+        // Link segments
+        this.player.segments.forEach(seg => {
+            seg.setEntityManager(this.entityManager);
+            this.entityManager.addComponent(seg.id, new TransformComponent(seg.x, seg.y, seg.rotation));
+            this.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
+            this.entityManager.addComponent(seg.id, new HealthComponent(seg.health, seg.maxHealth));
+            this.entityManager.addComponent(seg.id, new FireComponent());
+            this.entityManager.addComponent(seg.id, new RenderComponent('custom', '#cfaa6e', seg.radius));
+        });
 
         this.initWeapons();
         this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
@@ -153,6 +171,18 @@ export class Simulation implements WeaponParent, CombatParent {
         this.customSystems = this.customSystems.filter(s => (s as any).id !== systemId);
     }
 
+    private reassignEntityId(oldId: string, newId: string): void {
+        const comps = ['transform', 'physics', 'health', 'fire', 'render', 'tag', 'input', 'ai'];
+        comps.forEach(type => {
+            const c = this.entityManager.getComponent(oldId, type);
+            if (c) {
+                this.entityManager.addComponent(newId, c);
+                this.entityManager.removeComponent(oldId, type);
+            }
+        });
+        this.entityManager.removeEntity(oldId);
+    }
+
     public reset(seed?: number): void {
         this.world = new World(seed);
         this.physics = new PhysicsEngine();
@@ -160,6 +190,29 @@ export class Simulation implements WeaponParent, CombatParent {
         
         this.world.setHeatMap(this.heatMap);
         this.physics.setWorld(this.world);
+
+        // ECS Reset
+        this.entityManager.clear();
+        const centerX = this.world.getWidthPixels() / 2;
+        const centerY = this.world.getHeightPixels() / 2;
+        
+        // Re-init local player ECS components
+        this.playerEntityId = EntityFactory.createPlayer(this.entityManager, centerX, centerY);
+        const ecsPlayer = this.entityManager.query(['tag']).find(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'player');
+        if (ecsPlayer && ecsPlayer !== this.player.id) {
+            this.reassignEntityId(ecsPlayer, this.player.id);
+            this.playerEntityId = this.player.id;
+        }
+
+        // Link segments
+        this.player.segments.forEach(seg => {
+            seg.setEntityManager(this.entityManager);
+            this.entityManager.addComponent(seg.id, new TransformComponent(seg.x, seg.y, seg.rotation));
+            this.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
+            this.entityManager.addComponent(seg.id, new HealthComponent(seg.health, seg.maxHealth));
+            this.entityManager.addComponent(seg.id, new FireComponent());
+            this.entityManager.addComponent(seg.id, new RenderComponent('custom', '#cfaa6e', seg.radius));
+        });
         
         // Re-add players to new physics
         this.physics.addBody(this.player);
@@ -201,9 +254,6 @@ export class Simulation implements WeaponParent, CombatParent {
         // Update Custom Systems
         this.customSystems.forEach(s => s.update(dt, this.entityManager));
 
-        // Sync BACK to legacy objects for compatibility (UI, Camera, etc)
-        this.syncBackFromECS();
-
         // 2. Physics Step
         this.physics.update(dt);
         Entity.setInterpolationAlpha(this.physics.alpha);
@@ -214,15 +264,26 @@ export class Simulation implements WeaponParent, CombatParent {
         }
 
         // 4. Entity Updates
-        this.updateEntities(dt);
+        this.player.update(dt);
+        this.enemies.forEach(e => e.update(dt, this.player));
 
-        // 5. Fire & Heat Logic
-        this.updateEnvironmentLogic(dt);
+        // 5. Entity Visual Updates (legacy cleanup/flash timers only)
+        const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
+        const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
+        [this.player, ...this.enemies, ...this.remotePlayers].forEach(e => {
+            e.handleFireLogic(dt, fireDPS, baseExtinguish);
+        });
 
-        // 6. Cleanup
+        this.drops.forEach(d => d.update(dt));
+        this.remotePlayers.forEach(rp => rp.update(dt));
+
+        // Projectile world hits
+        this.updateProjectiles(dt);
+
+        // 5. Cleanup
         this.cleanupEntities();
 
-        // 7. Spatial Grid Update
+        // 6. Spatial Grid Update
         this.updateSpatialGrid();
 
         this.heatMap.update(dt);
@@ -232,100 +293,17 @@ export class Simulation implements WeaponParent, CombatParent {
         this.renderSystem.update(0, this.entityManager, ctx);
     }
 
-    private syncBackFromECS(): void {
-        const all = [this.player, ...this.player.segments, ...this.enemies, ...this.remotePlayers];
-        all.forEach(e => {
-            const id = e.id;
-            const t = this.entityManager.getComponent<TransformComponent>(id, 'transform');
-            const h = this.entityManager.getComponent<HealthComponent>(id, 'health');
-            const f = this.entityManager.getComponent<FireComponent>(id, 'fire');
-
-            if (t) {
-                e.x = t.x;
-                e.y = t.y;
-                e.rotation = t.rotation;
-                e.prevX = t.prevX;
-                e.prevY = t.prevY;
-            }
-            if (h) {
-                e.health = h.health;
-                e.damageFlash = h.damageFlash;
-                e.visualScale = h.visualScale;
-                e.active = h.active;
-            }
-            if (f) {
-                e.isOnFire = f.isOnFire;
-                (e as any).fireTimer = f.fireTimer;
-                (e as any).extinguishChance = f.extinguishChance;
-            }
-        });
-    }
-
-    private syncEntitiesToECS(): void {
-        const all = [this.player, ...this.player.segments, ...this.enemies, ...this.remotePlayers];
-        all.forEach(e => this.syncLegacyEntity(e));
-    }
-
-    private syncLegacyEntity(e: Entity): void {
-        const id = e.id;
-        if (!this.entityManager.hasComponent(id, 'transform')) {
-            this.entityManager.addComponent(id, new TransformComponent(e.x, e.y, e.rotation, e.prevX, e.prevY));
-            this.entityManager.addComponent(id, new PhysicsComponent(e.vx, e.vy, e.radius, e.isStatic));
-            this.entityManager.addComponent(id, new HealthComponent(e.health, e.maxHealth, e.damageFlash, e.visualScale, e.active));
-            this.entityManager.addComponent(id, new FireComponent(e.isOnFire, (e as any).fireTimer || 0, (e as any).extinguishChance || 0.5));
-        }
-
-        const t = this.entityManager.getComponent<TransformComponent>(id, 'transform')!;
-        const p = this.entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
-        const h = this.entityManager.getComponent<HealthComponent>(id, 'health')!;
-        const f = this.entityManager.getComponent<FireComponent>(id, 'fire')!;
-
-        t.x = e.x; t.y = e.y; t.rotation = e.rotation;
-        p.vx = e.vx; p.vy = e.vy;
-        h.health = e.health; h.active = e.active;
-        f.isOnFire = e.isOnFire;
-    }
-
-    private updateSpawning(dt: number): void {
-        this.nextDropSpawn -= dt;
-        if (this.nextDropSpawn <= 0) {
-            this.spawnDrop();
-            this.nextDropSpawn = 5 + Math.random() * 10;
-        }
-
-        this.nextEnemySpawn -= dt;
-        if (this.nextEnemySpawn <= 0) {
-            if (ConfigManager.getInstance().get<boolean>('Debug', 'enableEnemySpawning')) {
-                this.spawnEnemy();
-            }
-            this.nextEnemySpawn = 4 + Math.random() * 4;
-        }
-    }
-
-    private updateEntities(dt: number): void {
-        this.player.update(dt);
-        
-        // Host/SP updates enemies AI
-        if (this.role !== SimulationRole.CLIENT) {
-            this.enemies.forEach(e => e.update(dt, this.player));
-        }
-
-        this.drops.forEach(d => d.update(dt));
-        this.remotePlayers.forEach(rp => rp.update(dt));
-
+    private updateProjectiles(dt: number): void {
         this.projectiles = this.projectiles.filter(p => {
             const oldX = p.x;
             const oldY = p.y;
             p.update(dt);
 
             if (p.active && this.world) {
-                // RAYCAST CCD
                 const dx = p.x - oldX;
                 const dy = p.y - oldY;
                 const dist = Math.sqrt(dx*dx + dy*dy);
                 const angle = Math.atan2(dy, dx);
-                
-                // Only raycast if moving significantly
                 const hit = dist > 1 ? this.world.raycast(oldX, oldY, angle, dist) : null;
                 const hitPoint = hit || this.world.checkWallCollision(p.x, p.y, p.radius);
                 const hitBorder = p.x < 0 || p.x > this.world.getWidthPixels() || p.y < 0 || p.y > this.world.getHeightPixels();
@@ -333,11 +311,7 @@ export class Simulation implements WeaponParent, CombatParent {
                 if (hitPoint || hitBorder) {
                     const cx = hitPoint ? hitPoint.x : p.x;
                     const cy = hitPoint ? hitPoint.y : p.y;
-                    
-                    // Stop visually for everyone immediately
                     p.active = false;
-
-                    // Authoritative logic: Only Host/SP or local owner (for request) handles damage
                     if (this.role !== SimulationRole.CLIENT || p.shooterId === this.myId) {
                         this.handleProjectileWorldHit(p, cx, cy);
                     }
@@ -363,9 +337,6 @@ export class Simulation implements WeaponParent, CombatParent {
                 const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
                 const tx = Math.floor(x / tileSize);
                 const ty = Math.floor(y / tileSize);
-                // We need to know who the host is. In this phase, we'll assume there is a way to get it or just broadcast.
-                // Actually, sendTo host is better. We'll use a hack or just broadcast for now as MultiplayerManager.broadcast 
-                // from a client sends to the host in a 1:1 connection.
                 MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_DAMAGE_REQUEST, {
                     tx, ty, m: (this.world as any).tiles[ty][tx], pt: p.type, hx: x, hy: y
                 });
@@ -383,44 +354,20 @@ export class Simulation implements WeaponParent, CombatParent {
         }
     }
 
-    private updateEnvironmentLogic(dt: number): void {
-        const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
-        const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
-        const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
+    private updateSpawning(dt: number): void {
+        this.nextDropSpawn -= dt;
+        if (this.nextDropSpawn <= 0) {
+            this.spawnDrop();
+            this.nextDropSpawn = 5 + Math.random() * 10;
+        }
 
-        const allPotential = [this.player, ...this.player.segments, ...this.enemies, ...this.remotePlayers];
-        
-        allPotential.forEach(e => {
-            if (!e.active) return;
-            
-            // Heat damage & Ignition
-            const maxIntensity = this.heatMap.getMaxIntensityArea(e.x, e.y, e.radius);
-            if (!e.isOnFire && maxIntensity > 0.05) {
-                if (Math.random() < (10 + 90 * maxIntensity) / 100 * dt) e.isOnFire = true;
+        this.nextEnemySpawn -= dt;
+        if (this.nextEnemySpawn <= 0) {
+            if (ConfigManager.getInstance().get<boolean>('Debug', 'enableEnemySpawning')) {
+                this.spawnEnemy();
             }
-            if (maxIntensity > 0.05) e.takeDamage(Math.ceil(20 * maxIntensity) * dt);
-            
-            if (!e.isOnFire && this.heatMap.checkFireArea(e.x, e.y, e.radius)) {
-                if (Math.random() < catchChance * dt * 5) e.isOnFire = true;
-            }
-
-            e.handleFireLogic(dt, fireDPS, baseExtinguish);
-        });
-
-        // Fire spread
-        const allActive = allPotential.filter(e => e.active);
-        const allBurning = allActive.filter(e => e.isOnFire);
-        allBurning.forEach(source => {
-            allActive.forEach(target => {
-                if (source !== target && !target.isOnFire) {
-                    const dx = source.x - target.x;
-                    const dy = source.y - target.y;
-                    if (dx*dx + dy*dy < (source.radius + target.radius)**2) {
-                        if (Math.random() < catchChance * dt) target.isOnFire = true;
-                    }
-                }
-            });
-        });
+            this.nextEnemySpawn = 4 + Math.random() * 4;
+        }
     }
 
     private cleanupEntities(): void {
@@ -468,10 +415,9 @@ export class Simulation implements WeaponParent, CombatParent {
             if (!this.world.isWall(ex, ey)) {
                 const id = EntityFactory.createEnemy(this.entityManager, ex, ey);
                 
-                // For now we still need to add to physics. In pure ECS, PhysicsSystem will do this.
-                // But our PhysicsEngine is still legacy.
                 const e = new Enemy(ex, ey);
                 e.id = id; 
+                e.setEntityManager(this.entityManager); // LINKING
                 this.enemies.push(e);
                 this.physics.addBody(e);
                 break;
