@@ -32,6 +32,8 @@ export class WeaponSystem {
     public isFiringFlamethrower: boolean = false;
     public beamEndPos: { x: number, y: number } = { x: 0, y: 0 };
     private lastActiveWeapon: string = '';
+    private netDamageAccumulator: Map<string, number> = new Map(); // targetId -> damage
+    private netBroadcastTimer: number = 0;
 
     constructor(private parent: WeaponParent) {}
 
@@ -75,13 +77,13 @@ export class WeaponSystem {
                         this.handleBeamFiring(weapon, dt);
                     }
 
-                    // BROADCAST firing state
-                    if (Math.random() < 0.15) { 
+                    // BROADCAST visual state
+                    if (Math.random() < 0.3) { 
                         MultiplayerManager.getInstance().broadcast(NetworkMessageType.PROJECTILE, {
                             type: weapon, 
                             x: this.parent.player.x,
                             y: this.parent.player.y,
-                            a: this.parent.player.rotation, // Crucial for heat simulation
+                            a: this.parent.player.rotation, 
                             sid: this.parent.myId
                         });
                     }
@@ -113,6 +115,22 @@ export class WeaponSystem {
         
         if (!this.isFiringFlamethrower) {
             EventBus.getInstance().emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'shoot_flamethrower' });
+        }
+
+        // --- Network Damage Broadcast ---
+        this.netBroadcastTimer += dt;
+        if (this.netBroadcastTimer >= 0.1) {
+            this.netDamageAccumulator.forEach((dmg, targetId) => {
+                if (dmg > 0.1) {
+                    MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
+                        id: targetId,
+                        damage: dmg,
+                        killerId: this.parent.myId
+                    });
+                }
+            });
+            this.netDamageAccumulator.clear();
+            this.netBroadcastTimer = 0;
         }
     }
 
@@ -235,13 +253,8 @@ export class WeaponSystem {
             const dmg = type === 'laser' ? ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt : 
                         (ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage') / (1 + (dist/32)**2)) * dt;
             
-            if (Math.random() < 0.2) {
-                MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
-                    id: hitRP.id,
-                    damage: dmg,
-                    killerId: this.parent.myId
-                });
-            }
+            const current = this.netDamageAccumulator.get(hitRP.id) || 0;
+            this.netDamageAccumulator.set(hitRP.id, current + dmg);
         }
         
         const hitSfx = type === 'laser' ? 'hit_laser' : 'hit_ray';
@@ -299,13 +312,8 @@ export class WeaponSystem {
                 if (Math.abs(diff) < coneAngle / 2) {
                     // If it's a remote player, we must broadcast the hit
                     if ((e as any).id && (e as any).id !== this.parent.myId && !(e instanceof Enemy)) {
-                        if (Math.random() < 0.2) {
-                             MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
-                                id: (e as any).id,
-                                damage: damage * dt,
-                                killerId: this.parent.myId
-                            });
-                        }
+                        const current = this.netDamageAccumulator.get((e as any).id) || 0;
+                        this.netDamageAccumulator.set((e as any).id, current + damage * dt);
                     } else {
                         e.takeDamage(damage * dt);
                     }

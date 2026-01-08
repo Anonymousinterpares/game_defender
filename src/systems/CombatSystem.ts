@@ -284,21 +284,25 @@ export class CombatSystem {
         });
 
         if (this.parent.player) {
-            const dx = this.parent.player.x - x;
-            const dy = this.parent.player.y - y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            if (dist < radius) {
-                const falloff = 1 - (dist / radius);
-                const dmg = damage * falloff;
-                
+            const bodies = this.parent.player.getAllBodies();
+            let maxDmg = 0;
+            for (const b of bodies) {
+                const dx = b.x - x;
+                const dy = b.y - y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist < radius) {
+                    const falloff = 1 - (dist / radius);
+                    maxDmg = Math.max(maxDmg, damage * falloff);
+                }
+            }
+
+            if (maxDmg > 0) {
                 if (this.parent.myId === 'local') {
-                    // Singleplayer: damage directly
-                    this.parent.player.takeDamage(dmg);
+                    this.parent.player.takeDamage(maxDmg);
                 } else if (isMyExplosion) {
-                    // Multiplayer: broadcast hit to myself
                     mm.broadcast(NetworkMessageType.PLAYER_HIT, { 
                         id: this.parent.myId, 
-                        damage: dmg, 
+                        damage: maxDmg, 
                         killerId: shooterId 
                     });
                 }
@@ -308,16 +312,24 @@ export class CombatSystem {
         if (this.parent.remotePlayers) {
             this.parent.remotePlayers.forEach((rp: RemotePlayer) => {
                 if (!rp.active) return;
-                const dx = rp.x - x;
-                const dy = rp.y - y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                if (dist < radius) {
-                    const falloff = 1 - (dist / radius);
-                    // IF I OWN THE EXPLOSION, broadcast hit to this remote player
+                
+                const bodies = rp.getAllBodies();
+                let maxDmg = 0;
+                for (const b of bodies) {
+                    const dx = b.x - x;
+                    const dy = b.y - y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist < radius) {
+                        const falloff = 1 - (dist / radius);
+                        maxDmg = Math.max(maxDmg, damage * falloff);
+                    }
+                }
+
+                if (maxDmg > 0) {
                     if (isMyExplosion) {
                         mm.broadcast(NetworkMessageType.PLAYER_HIT, { 
                             id: rp.id, 
-                            damage: damage * falloff, 
+                            damage: maxDmg, 
                             killerId: shooterId 
                         });
                     }

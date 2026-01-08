@@ -55,6 +55,7 @@ export const MasterConfig: GameConfigSchema = {
     missileDamage: { value: 30, type: 'number', min: 5, max: 300, step: 5, description: 'Missile Damage' },
     missileMaxAmmo: { value: 60, type: 'number', min: 1, max: 200, step: 1, description: 'Missile Mag Size' },
     missileReloadTime: { value: 4.0, type: 'number', min: 1, max: 20, step: 1, description: 'Missile Reload (s)' },
+    missileAOE: { value: 2.5, type: 'number', min: 1, max: 10, step: 0.5, description: 'Missile AOE Radius' },
     missileSpeed: { value: 8, type: 'number', min: 2, max: 20, step: 1, description: 'Missile Speed' },
     missileTurnSpeed: { value: 0.1, type: 'number', min: 0.01, max: 0.5, step: 0.01, description: 'Missile Agility' },
 
