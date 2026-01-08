@@ -5,7 +5,6 @@ import { InputManager } from './InputManager';
 import { World } from './World';
 import { Player } from '../entities/Player';
 import { RemotePlayer } from '../entities/RemotePlayer';
-import { PhysicsEngine } from './PhysicsEngine';
 import { SoundManager } from './SoundManager';
 import { Radar } from '../ui/Radar';
 import { Entity } from './Entity';
@@ -42,7 +41,6 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
   // Getters to bridge to simulation for HUD/Renderer compatibility
   public get world() { return this.simulation.world; }
   public get player() { return this.simulation.player; }
-  public get physics() { return this.simulation.physics; }
   public get heatMap() { return this.simulation.heatMap; }
   public get enemies() { return this.simulation.enemies; }
   public get remotePlayers() { return this.simulation.remotePlayers; }

@@ -4,7 +4,6 @@ import { RemotePlayer } from '../entities/RemotePlayer';
 import { Player } from '../entities/Player';
 import { Projectile, ProjectileType } from '../entities/Projectile';
 import { World } from '../core/World';
-import { PhysicsEngine } from '../core/PhysicsEngine';
 import { ConfigManager } from '../config/MasterConfig';
 import { Drop, DropType } from '../entities/Drop';
 import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
@@ -19,26 +18,33 @@ export interface CombatParent {
     drops: Drop[];
     coinsCollected: number;
     world: World | null;
-    physics: PhysicsEngine;
     myId?: string;
     onExplosion?: (x: number, y: number, radius: number, damage: number) => void;
     lastKilledBy?: string | null;
 }
 
 export class CombatSystem {
-    constructor(private parent: any) {} // Using any temporarily to avoid strict circular dependency issues during refactor
+    constructor(private parent: any) {} 
 
     public update(dt: number): void {
         this.resolveProjectileCollisions();
         this.resolveDropCollection();
     }
 
+    private checkCollision(a: {x: number, y: number, radius: number}, b: {x: number, y: number, radius: number}): boolean {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const distSq = dx * dx + dy * dy;
+        const radSum = a.radius + b.radius;
+        return distSq < radSum * radSum;
+    }
+
     private resolveDropCollection(): void {
-        const { player, drops, physics } = this.parent;
+        const { player, drops } = this.parent;
         if (!player) return;
 
         for (const d of drops) {
-            if (physics.checkCollision(player, d)) {
+            if (this.checkCollision(player, d)) {
                 d.active = false;
                 EventBus.getInstance().emit(GameEvent.ITEM_COLLECTED, { x: d.x, y: d.y, itemType: 'coin', collectorId: this.parent.myId || 'local' });
                 if (d.type === DropType.COIN) {
@@ -53,19 +59,17 @@ export class CombatSystem {
     }
 
     private resolveProjectileCollisions(): void {
-        const { world, projectiles, enemies, remotePlayers, physics, player } = this.parent;
+        const { world, projectiles, enemies, remotePlayers, player } = this.parent;
         if (!world || !player) return;
 
         for (const p of projectiles) {
-            // Projectile vs World - REMOVED (Handled in Scene for better network sync)
-
             // Projectile vs Entities (Enemies & RemotePlayers)
             if (p.active) {
                 let hit = false;
                 
                 // Check Enemies
                 for (const e of enemies) {
-                    if (physics.checkCollision(p, e)) {
+                    if (this.checkCollision(p, e)) {
                         if (p.type === ProjectileType.MINE && !p.isArmed) continue;
                         
                         if (p.aoeRadius > 0) {
@@ -91,12 +95,10 @@ export class CombatSystem {
                     const bodies = player.getAllBodies();
                     let hitLocal = false;
                     for (const b of bodies) {
-                        if (physics.checkCollision(p, b)) {
+                        if (this.checkCollision(p, b)) {
                             // IGNORE direct hits from self
                             const isSelf = p.shooterId === this.parent.myId;
                             
-                            // Safety: If shooterId is null/empty, we assume it's NOT self for hits, 
-                            // but we also check if it's very close to muzzle to prevent suicide
                             const distToMuzzle = Math.sqrt((p.x - player.x)**2 + (p.y - player.y)**2);
                             if ((isSelf || !p.shooterId) && distToMuzzle < 32 && p.aoeRadius <= 0) continue; 
 
@@ -104,18 +106,14 @@ export class CombatSystem {
 
                             if (p.type === ProjectileType.MINE && !p.isArmed) continue;
 
-                            console.log(`[CMBT] Hit LOCAL Player! Shooter: ${p.shooterId || 'NULL'} | MyID: ${this.parent.myId}`);
-
                             if (p.aoeRadius > 0) {
                                 this.createExplosion(p.x, p.y, p.aoeRadius, p.damage, p.shooterId);
                             } else {
-                                // Visual impact
                                 EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
                                     x: p.x, y: p.y, 
                                     projectileType: p.type, 
                                     hitType: 'entity' 
                                 });
-                                // color hit handled via ENTITY_HIT or we can emit it here
                                 if (player && player.color) {
                                     EventBus.getInstance().emit(GameEvent.ENTITY_HIT, {
                                         x: p.x, y: p.y,
@@ -127,14 +125,9 @@ export class CombatSystem {
                                 }
                             }
 
-                            // Direct hit from someone else or enemy
                             if (this.parent.myId === 'local') {
-                                // Singleplayer: take damage directly
                                 player.takeDamage(p.damage);
-                            } else if (p.shooterId && p.shooterId !== this.parent.myId) {
-                                // Multiplayer: shooter broadcasts the hit, but we can also broadcast our own hit for robustness?
-                                // Actually, standard is authoritative: shooter broadcasts.
-                            }
+                            } 
 
                             p.active = false;
                             hitLocal = true;
@@ -148,26 +141,19 @@ export class CombatSystem {
                 if (remotePlayers) {
                     for (const rp of remotePlayers) {
                         if (!rp.active) continue;
-                        // IGNORE if this remote player is the shooter
                         if (p.shooterId === rp.id && p.aoeRadius <= 0) continue;
 
                         const distToHead = Math.sqrt((p.x - rp.x)**2 + (p.y - rp.y)**2);
-                        if (distToHead < 64 && Math.random() < 0.1) {
-                            console.log(`[CMBT] Proj near RP ${rp.id} | Dist: ${Math.round(distToHead)} | P: ${Math.round(p.x)},${Math.round(p.y)} | RP: ${Math.round(rp.x)},${Math.round(rp.y)}`);
-                        }
                         if (distToHead > 300) continue; 
 
                         const bodies = rp.getAllBodies();
                         for (const b of bodies) {
-                            if (physics.checkCollision(p, b)) {
+                            if (this.checkCollision(p, b)) {
                                 if (p.type === ProjectileType.MINE && !p.isArmed) continue;
-
-                                console.log(`[CMBT] Hit REMOTE Player ${rp.id}! Shooter: ${p.shooterId}`);
 
                                 if (p.aoeRadius > 0) {
                                     this.createExplosion(p.x, p.y, p.aoeRadius, p.damage, p.shooterId);
                                 } else {
-                                    // Visual hit locally
                                     EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
                                         x: p.x, y: p.y, 
                                         projectileType: p.type, 
@@ -182,7 +168,6 @@ export class CombatSystem {
                                         color: rp.color
                                     });
 
-                                    // BROADCAST the hit IF I AM THE SHOOTER
                                     if (p.shooterId === this.parent.myId) {
                                         const mm = MultiplayerManager.getInstance();
                                         mm.broadcast(NetworkMessageType.PLAYER_HIT, { 

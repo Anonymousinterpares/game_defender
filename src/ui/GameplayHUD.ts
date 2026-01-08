@@ -3,14 +3,12 @@ import { ConfigManager } from '../config/MasterConfig';
 import { Player } from '../entities/Player';
 import { WorldClock } from '../core/WorldClock';
 import { TurretUpgrade, ShieldUpgrade } from '../entities/upgrades/Upgrade';
-import { PhysicsEngine } from '../core/PhysicsEngine';
 import { EventBus, GameEvent } from '../core/EventBus';
 import { SoundManager } from '../core/SoundManager';
 
 export interface HUDParent {
     sceneManager: SceneManager;
     player: Player | null;
-    physics: PhysicsEngine;
     coinsCollected: number;
     unlockedWeapons: Set<string>;
     weaponSlots: { [key: string]: string };
@@ -213,8 +211,6 @@ export class GameplayHUD {
             if (this.parent.subtractCoins(slotCost) && this.parent.player) {
                 EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
                 this.parent.player.addSlot();
-                const allBodies = this.parent.player.getAllBodies();
-                this.parent.physics.addBody(allBodies[allBodies.length - 1]);
                 this.updateDockContent();
             }
         });

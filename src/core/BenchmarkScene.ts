@@ -130,7 +130,6 @@ export class BenchmarkScene extends GameplayScene {
         PerfMonitor.getInstance().begin('update_total');
         WorldClock.getInstance().update(dt);
         this.hud.update(dt);
-        this.physics.update(dt);
         ParticleSystem.getInstance().update(dt, this.world, this.player, this.enemies);
         this.heatMap?.update(dt);
         this.enemies.forEach(e => e.update(dt, this.player || undefined));
@@ -156,7 +155,6 @@ export class BenchmarkScene extends GameplayScene {
         const e = new Enemy(ex, ey);
         e.takeDamage = () => {}; // Invincible
         this.simulation.enemies.push(e);
-        this.simulation.physics.addBody(e);
     }
 
     private finishBenchmark(): void {

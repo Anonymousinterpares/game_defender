@@ -1,11 +1,21 @@
 /// <reference types="vite/client" />
-import { PhysicsBody, PhysicsEngine } from './PhysicsEngine';
 import { ConfigManager } from '../config/MasterConfig';
 import { EntityManager } from './ecs/EntityManager';
 import { TransformComponent } from './ecs/components/TransformComponent';
 import { PhysicsComponent } from './ecs/components/PhysicsComponent';
 import { HealthComponent } from './ecs/components/HealthComponent';
 import { FireComponent } from './ecs/components/FireComponent';
+
+export interface PhysicsBody {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    prevX: number;
+    prevY: number;
+    radius: number;
+    isStatic: boolean;
+}
 
 export abstract class Entity implements PhysicsBody {
   public id: string = Math.random().toString(36).substr(2, 9);

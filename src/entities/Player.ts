@@ -1,5 +1,4 @@
-import { Entity } from '../core/Entity';
-import { PhysicsBody } from '../core/PhysicsEngine';
+import { Entity, PhysicsBody } from '../core/Entity';
 import { ConfigManager } from '../config/MasterConfig';
 import { InputManager } from '../core/InputManager';
 import { Upgrade } from './upgrades/Upgrade';

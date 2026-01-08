@@ -167,6 +167,11 @@ export class World {
     return true;
   }
 
+  public isWallByTile(tx: number, ty: number): boolean {
+    if (tx < 0 || tx >= this.width || ty < 0 || ty >= this.height) return true;
+    return this.tiles[ty][tx] !== MaterialType.NONE;
+  }
+
   public raycast(startX: number, startY: number, angle: number, maxDist: number): {x: number, y: number} | null {
       const step = 2; 
       const dx = Math.cos(angle) * step;

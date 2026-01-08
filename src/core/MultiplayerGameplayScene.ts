@@ -378,7 +378,6 @@ export class MultiplayerGameplayScene extends GameplayScene {
       rp = new RemotePlayer(id, x, y);
       this.remotePlayersMap.set(id, rp);
       this.simulation.remotePlayers.push(rp);
-      this.physics.addBody(rp);
       
       // ECS Link for Remote Player
       rp.setEntityManager(this.simulation.entityManager);

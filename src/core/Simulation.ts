@@ -1,7 +1,6 @@
 import { World } from './World';
 import { Player } from '../entities/Player';
 import { RemotePlayer } from '../entities/RemotePlayer';
-import { PhysicsEngine } from './PhysicsEngine';
 import { Entity } from './Entity';
 import { Projectile, ProjectileType } from '../entities/Projectile';
 import { Enemy } from '../entities/Enemy';
@@ -16,7 +15,7 @@ import { ParticleSystem } from './ParticleSystem';
 import { EventBus, GameEvent } from './EventBus';
 
 import { EntityManager } from './ecs/EntityManager';
-import { MovementSystem } from './ecs/systems/MovementSystem';
+import { PhysicsSystem } from './ecs/systems/PhysicsSystem';
 import { FireSystem } from './ecs/systems/FireSystem';
 import { InputSystem } from './ecs/systems/InputSystem';
 import { AISystem } from './ecs/systems/AISystem';
@@ -40,7 +39,6 @@ export enum SimulationRole {
 
 export class Simulation implements WeaponParent, CombatParent {
     public world: World;
-    public physics: PhysicsEngine;
     public heatMap: HeatMap;
     public player: Player; // KEEPING for compatibility for now, but will transition
     public playerEntityId: string = '';
@@ -54,7 +52,7 @@ export class Simulation implements WeaponParent, CombatParent {
     
     // ECS
     public entityManager: EntityManager;
-    private movementSystem: MovementSystem;
+    public physicsSystem: PhysicsSystem;
     private fireSystem: FireSystem;
     private inputSystem: InputSystem;
     private aiSystem: AISystem;
@@ -82,18 +80,16 @@ export class Simulation implements WeaponParent, CombatParent {
     constructor(role: SimulationRole, seed?: number) {
         this.role = role;
         this.world = new World(seed);
-        this.physics = new PhysicsEngine();
         this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
         
         this.world.setHeatMap(this.heatMap);
-        this.physics.setWorld(this.world);
         
         this.weaponSystem = new WeaponSystem(this);
         this.combatSystem = new CombatSystem(this);
         
         // ECS Init
         this.entityManager = new EntityManager();
-        this.movementSystem = new MovementSystem();
+        this.physicsSystem = new PhysicsSystem(this.world);
         this.fireSystem = new FireSystem();
         this.inputSystem = new InputSystem();
         this.aiSystem = new AISystem();
@@ -115,7 +111,6 @@ export class Simulation implements WeaponParent, CombatParent {
         this.player = new Player(centerX, centerY, null as any); 
         this.player.setEntityManager(this.entityManager); // LINKING
         this.entities.push(this.player);
-        this.physics.addBody(this.player);
 
         // ECS PLAYER (Created for all roles, as every simulation has a 'local' player)
         this.playerEntityId = EntityFactory.createPlayer(this.entityManager, centerX, centerY);
@@ -184,14 +179,13 @@ export class Simulation implements WeaponParent, CombatParent {
 
     public reset(seed?: number): void {
         this.world = new World(seed);
-        this.physics = new PhysicsEngine();
         this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
-        
         this.world.setHeatMap(this.heatMap);
-        this.physics.setWorld(this.world);
 
         // ECS Reset
         this.entityManager.clear();
+        this.physicsSystem = new PhysicsSystem(this.world);
+        
         const centerX = this.world.getWidthPixels() / 2;
         const centerY = this.world.getHeightPixels() / 2;
         
@@ -210,12 +204,7 @@ export class Simulation implements WeaponParent, CombatParent {
             this.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
             this.entityManager.addComponent(seg.id, new HealthComponent(seg.health, seg.maxHealth));
             this.entityManager.addComponent(seg.id, new FireComponent());
-            this.entityManager.addComponent(seg.id, new RenderComponent('custom', '#cfaa6e', seg.radius));
         });
-        
-        // Re-add players to new physics
-        this.physics.addBody(this.player);
-        this.remotePlayers.forEach(rp => this.physics.addBody(rp));
         
         // Clear logic state
         this.entities = [this.player, ...this.remotePlayers];
@@ -248,14 +237,13 @@ export class Simulation implements WeaponParent, CombatParent {
         this.combatSystem.update(dt);
         
         this.fireSystem.update(dt, this.entityManager);
-        this.movementSystem.update(dt, this.entityManager);
+        
+        // 2. Physics & Movement (Consolidated)
+        this.physicsSystem.update(dt, this.entityManager);
+        Entity.setInterpolationAlpha(this.physicsSystem.alpha);
 
         // Update Custom Systems
         this.customSystems.forEach(s => s.update(dt, this.entityManager));
-
-        // 2. Physics Step
-        this.physics.update(dt);
-        Entity.setInterpolationAlpha(this.physics.alpha);
 
         // 3. Spawning (Only SP or Host)
         if (this.role !== SimulationRole.CLIENT) {
@@ -372,7 +360,6 @@ export class Simulation implements WeaponParent, CombatParent {
     private cleanupEntities(): void {
         this.enemies = this.enemies.filter(e => {
             if (!e.active) {
-                this.physics.removeBody(e);
                 if (this.role === SimulationRole.HOST) {
                     MultiplayerManager.getInstance().broadcast(NetworkMessageType.ENTITY_DESTROY, { type: 'enemy', id: e.id });
                 }
@@ -418,7 +405,6 @@ export class Simulation implements WeaponParent, CombatParent {
                 e.id = id; 
                 e.setEntityManager(this.entityManager); // LINKING
                 this.enemies.push(e);
-                this.physics.addBody(e);
                 break;
             }
         }

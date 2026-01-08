@@ -1,6 +1,6 @@
-import { Entity } from '../core/Entity';
-import { PhysicsBody } from '../core/PhysicsEngine';
+import { Entity, PhysicsBody } from '../core/Entity';
 import { ConfigManager } from '../config/MasterConfig';
+import { NetworkMessageType } from '../core/MultiplayerManager';
 
 export class RemotePlayer extends Entity {
   public targetX: number = 0;
