@@ -2,6 +2,7 @@ import { Entity } from './Entity';
 import { World } from './World';
 import { ParticleType, FLAG_ACTIVE, FLAG_IS_FLAME, MAX_PARTICLES } from './ParticleConstants';
 import { EventBus, GameEvent } from './EventBus';
+import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
 
 export class ParticleSystem {
     private static instance: ParticleSystem;
@@ -391,7 +392,36 @@ export class ParticleSystem {
     }
 
     private processWorkerEvents(player: Entity | null, enemies: Entity[], world: World | null): void {
-        // ... (existing code)
+        while (this.pendingDamage.length > 0) {
+            const ev = this.pendingDamage.shift()!;
+            if (ev.targetIdx === -1 && player) {
+                player.takeDamage(ev.damage);
+                
+                if (Math.random() < 0.2) {
+                    player.isOnFire = true;
+                    const mm = MultiplayerManager.getInstance();
+                    if (mm && mm.myId && mm.myId !== 'pending') {
+                         mm.broadcast(NetworkMessageType.PLAYER_HIT, {
+                            id: mm.myId,
+                            damage: 0,
+                            killerId: 'molten_particle',
+                            ignite: true
+                        });
+                    }
+                }
+            } else if (enemies[ev.targetIdx]) {
+                const target = enemies[ev.targetIdx];
+                target.takeDamage(ev.damage);
+                if (Math.random() < 0.2) target.isOnFire = true;
+            }
+        }
+
+        while (this.pendingHeat.length > 0) {
+            const ev = this.pendingHeat.shift()!;
+            if (world && (world as any).heatMap) {
+                (world as any).heatMap.addHeat(ev.x, ev.y, ev.intensity, ev.radius);
+            }
+        }
     }
 
     private updateMainThread(dt: number, world: World | null, player: Entity | null, enemies: Entity[]): void {

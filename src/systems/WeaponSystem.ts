@@ -33,6 +33,7 @@ export class WeaponSystem {
     public beamEndPos: { x: number, y: number } = { x: 0, y: 0 };
     private lastActiveWeapon: string = '';
     private netDamageAccumulator: Map<string, number> = new Map(); // targetId -> damage
+    private netIgniteAccumulator: Map<string, boolean> = new Map(); // targetId -> ignite
     private netBroadcastTimer: number = 0;
 
     constructor(private parent: WeaponParent) {}
@@ -120,16 +121,25 @@ export class WeaponSystem {
         // --- Network Damage Broadcast ---
         this.netBroadcastTimer += dt;
         if (this.netBroadcastTimer >= 0.1) {
-            this.netDamageAccumulator.forEach((dmg, targetId) => {
-                if (dmg > 0.01) {
+            // Combine damage and ignite for all targets that have either
+            const allTargets = new Set([...this.netDamageAccumulator.keys(), ...this.netIgniteAccumulator.keys()]);
+            
+            allTargets.forEach(targetId => {
+                const dmg = this.netDamageAccumulator.get(targetId) || 0;
+                const ignite = this.netIgniteAccumulator.get(targetId) || false;
+
+                if (dmg > 0.01 || ignite) {
                     MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
                         id: targetId,
                         damage: dmg,
-                        killerId: this.parent.myId
+                        killerId: this.parent.myId,
+                        ignite: ignite
                     });
                 }
             });
+
             this.netDamageAccumulator.clear();
+            this.netIgniteAccumulator.clear();
             this.netBroadcastTimer = 0;
         }
     }
@@ -306,8 +316,16 @@ export class WeaponSystem {
                 if ((e as any).id && (e as any).id !== this.parent.myId && !(e instanceof Enemy)) {
                     const current = this.netDamageAccumulator.get((e as any).id) || 0;
                     this.netDamageAccumulator.set((e as any).id, current + damage * dt);
+                    
+                    // 50% chance to catch fire per second
+                    if (Math.random() < 0.5 * dt) {
+                        this.netIgniteAccumulator.set((e as any).id, true);
+                    }
                 } else {
                     e.takeDamage(damage * dt);
+                    if (Math.random() < 0.5 * dt) {
+                        e.isOnFire = true;
+                    }
                 }
                 (e as any).isOnFire = true;
             }

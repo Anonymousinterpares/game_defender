@@ -257,8 +257,40 @@ export class Simulation implements WeaponParent, CombatParent {
         // 5. Entity Visual Updates (legacy cleanup/flash timers only)
         const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
         const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
+        const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
+
         [this.player, ...this.enemies, ...this.remotePlayers].forEach(e => {
             e.handleFireLogic(dt, fireDPS, baseExtinguish);
+            
+            // Environmental Fire: Catch fire from burning tiles, high heat, or molten surfaces
+            if (e.active && !e.isOnFire && this.heatMap) {
+                const bodies = e.getAllBodies();
+                let isDangerous = false;
+
+                for (const b of bodies) {
+                    const isTouchingFire = this.heatMap.checkFireArea(b.x, b.y, b.radius);
+                    const heatIntensity = this.heatMap.getMaxIntensityArea(b.x, b.y, b.radius);
+                    const moltenIntensity = this.heatMap.getMaxMoltenArea(b.x, b.y, b.radius);
+                    
+                    if (isTouchingFire || heatIntensity > 0.8 || moltenIntensity > 0.1) {
+                        isDangerous = true;
+                        break;
+                    }
+                }
+
+                if (isDangerous && Math.random() < catchChance * dt) {
+                    e.isOnFire = true;
+                    // If it's the local player, broadcast this to others
+                    if (e === this.player && this.role !== SimulationRole.SINGLEPLAYER) {
+                        MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
+                            id: this.myId,
+                            damage: 0,
+                            killerId: 'environment',
+                            ignite: true
+                        });
+                    }
+                }
+            }
         });
 
         this.drops.forEach(d => d.update(dt));

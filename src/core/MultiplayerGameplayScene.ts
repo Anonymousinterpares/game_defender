@@ -104,13 +104,17 @@ export class MultiplayerGameplayScene extends GameplayScene {
   }
 
   private handlePlayerHit(data: any): void {
-      const { id, damage, killerId } = data;
+      const { id, damage, killerId, ignite } = data;
       if (id === this.myId && this.player) {
           this.player.takeDamage(damage);
+          if (ignite) this.player.isOnFire = true;
           if (this.player.health <= 0) this.lastKilledBy = killerId;
       } else {
           const rp = this.remotePlayersMap.get(id);
-          if (rp) rp.takeDamage(damage);
+          if (rp) {
+              rp.takeDamage(damage);
+              if (ignite) rp.isOnFire = true;
+          }
       }
   }
 
