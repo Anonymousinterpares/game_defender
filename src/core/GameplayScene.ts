@@ -239,9 +239,10 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     const viewport: Rect = { x: this.cameraX, y: this.cameraY, w: window.innerWidth, h: window.innerHeight };
     const visibleEntities = this.simulation.spatialGrid.retrieve(viewport);
     visibleEntities.forEach(e => {
-        // If it's in ECS, the RenderSystem already drew it.
-        // We only draw entities that aren't ECS-integrated yet (like Drops or Projectiles)
-        if (!this.simulation.entityManager.getComponent(e.id, 'render')) {
+        // If it's in ECS, the RenderSystem already drew it (unless it's 'custom' type).
+        // We draw entities that aren't ECS-integrated yet OR those marked as 'custom'.
+        const render = this.simulation.entityManager.getComponent<any>(e.id, 'render');
+        if (!render || render.renderType === 'custom') {
             e.render(ctx);
         }
     });

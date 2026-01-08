@@ -48,6 +48,8 @@ export class HeatMap {
     private frameCount: number = 0;
     private fireAsset: HTMLImageElement | null = null;
     private worldRef: any = null;
+    private widthTiles: number = 0;
+    private heightTiles: number = 0;
     
     // Track tiles that became inactive to sync deactivation to clients
     private recentlyDeactivated: Set<string> = new Set();
@@ -70,6 +72,8 @@ export class HeatMap {
 
     public setWorldRef(world: any): void {
         this.worldRef = world;
+        this.widthTiles = world.getWidth();
+        this.heightTiles = world.getHeight();
     }
 
     public isSubTileBurning(worldX: number, worldY: number): boolean {
@@ -241,6 +245,11 @@ export class HeatMap {
     }
 
     private applyHeatToTile(tx: number, ty: number, hitX: number, hitY: number, amount: number, radius: number): void {
+        // Optimization & Visual: Disable heat on world boundaries
+        if (tx <= 0 || tx >= this.widthTiles - 1 || ty <= 0 || ty >= this.heightTiles - 1) {
+            return;
+        }
+
         const key = `${tx},${ty}`;
         let data = this.heatData.get(key);
         if (!data) {
@@ -296,6 +305,11 @@ export class HeatMap {
     }
 
     private ignite(tx: number, ty: number, idx: number): void {
+        // Optimization: Disable fire/heat on world boundaries
+        if (tx <= 0 || tx >= this.widthTiles - 1 || ty <= 0 || ty >= this.heightTiles - 1) {
+            return;
+        }
+
         const key = `${tx},${ty}`;
         let fData = this.fireData.get(key);
         if (!fData) {
@@ -447,6 +461,15 @@ export class HeatMap {
         const soundMgr = SoundManager.getInstance();
 
         this.activeTiles.forEach(key => {
+            const [tx, ty] = key.split(',').map(Number);
+            
+            // Skip boundaries
+            if (tx <= 0 || tx >= this.widthTiles - 1 || ty <= 0 || ty >= this.heightTiles - 1) {
+                this.activeTiles.delete(key);
+                this.recentlyDeactivated.add(key);
+                return;
+            }
+
             const data = this.heatData.get(key);
             const fData = this.fireData.get(key);
             const mlData = this.moltenData.get(key);
@@ -461,8 +484,6 @@ export class HeatMap {
             const nextData = data ? new Float32Array(data) : new Float32Array(this.subDiv * this.subDiv);
             const nextFire = fData ? new Float32Array(fData) : null;
             const nextMolten = mlData ? new Float32Array(mlData) : (this.hasMetal(mData) ? new Float32Array(this.subDiv * this.subDiv) : null);
-
-            const [tx, ty] = key.split(',').map(Number);
 
             for (let y = 0; y < this.subDiv; y++) {
                 for (let x = 0; x < this.subDiv; x++) {

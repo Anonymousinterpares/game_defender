@@ -407,7 +407,6 @@ export class MultiplayerGameplayScene extends GameplayScene {
             this.simulation.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
             this.simulation.entityManager.addComponent(seg.id, new HealthComponent(100, 100));
             this.simulation.entityManager.addComponent(seg.id, new FireComponent());
-            this.simulation.entityManager.addComponent(seg.id, new RenderComponent('custom', rp.color, seg.radius));
         }
     });
 

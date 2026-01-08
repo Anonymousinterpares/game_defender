@@ -132,7 +132,6 @@ export class Simulation implements WeaponParent, CombatParent {
             this.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
             this.entityManager.addComponent(seg.id, new HealthComponent(seg.health, seg.maxHealth));
             this.entityManager.addComponent(seg.id, new FireComponent());
-            this.entityManager.addComponent(seg.id, new RenderComponent('custom', '#cfaa6e', seg.radius));
         });
 
         this.initWeapons();

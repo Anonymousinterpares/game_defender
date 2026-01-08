@@ -22,7 +22,7 @@ export class EntityFactory {
         entityManager.addComponent(id, new PhysicsComponent(0, 0, 15));
         entityManager.addComponent(id, new HealthComponent(maxHealth, maxHealth));
         entityManager.addComponent(id, new FireComponent());
-        entityManager.addComponent(id, new RenderComponent('player', '#cfaa6e', 15));
+        entityManager.addComponent(id, new RenderComponent('custom', '#cfaa6e', 15));
         entityManager.addComponent(id, new InputComponent());
 
         return id;
