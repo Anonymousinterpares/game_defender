@@ -84,40 +84,58 @@ export class PhysicsSystem implements System {
             let nextX = transform.x + physics.vx * dt;
             let nextY = transform.y + physics.vy * dt;
 
-            // 5. World Collision (Robust Circle-vs-Tile)
+            // 5. World Collision (Hybrid Circle-vs-SubTile)
             const checkRadius = physics.radius;
+            const subDiv = 10;
+            const subSize = tileSize / subDiv;
+            
             const minTX = Math.floor((nextX - checkRadius) / tileSize);
             const maxTX = Math.floor((nextX + checkRadius) / tileSize);
             const minTY = Math.floor((nextY - checkRadius) / tileSize);
             const maxTY = Math.floor((nextY + checkRadius) / tileSize);
 
+            const heatMap = this.world.getHeatMap();
+
             for (let ty = minTY; ty <= maxTY; ty++) {
                 for (let tx = minTX; tx <= maxTX; tx++) {
-                    if (this.world.isWallByTile(tx, ty)) {
-                        const tileX = tx * tileSize;
-                        const tileY = ty * tileSize;
-                        // Closest point on tile AABB to circle center
-                        const closestX = Math.max(tileX, Math.min(nextX, tileX + tileSize));
-                        const closestY = Math.max(tileY, Math.min(nextY, tileY + tileSize));
+                    const material = this.world.getTile(tx, ty);
+                    if (material === 0) continue; // MaterialType.NONE
 
-                        const dx = nextX - closestX;
-                        const dy = nextY - closestY;
-                        const distSq = dx * dx + dy * dy;
+                    const hasHeatMapData = heatMap && heatMap.hasTileData(tx, ty);
 
-                        if (distSq < checkRadius * checkRadius) {
-                            const dist = Math.sqrt(distSq) || 0.0001;
-                            const overlap = checkRadius - dist;
-                            const nx = dx / dist;
-                            const ny = dy / dist;
+                    if (!hasHeatMapData) {
+                        // FAST PATH: Tile is fully intact, use one AABB check
+                        const result = this.resolveAABBCollision(nextX, nextY, tx * tileSize, ty * tileSize, tileSize, checkRadius, physics);
+                        nextX = result.x;
+                        nextY = result.y;
+                    } else {
+                        // ACCURATE PATH: Tile is damaged, check sub-tiles
+                        const hpData = heatMap.getTileHP(tx, ty);
+                        if (!hpData) continue;
 
-                            nextX += nx * overlap;
-                            nextY += ny * overlap;
+                        const tileWX = tx * tileSize;
+                        const tileWY = ty * tileSize;
+                        
+                        // Further optimization: Only check sub-tiles that overlap the entity's bounding box
+                        const localMinSX = Math.max(0, Math.floor((nextX - checkRadius - tileWX) / subSize));
+                        const localMaxSX = Math.min(subDiv - 1, Math.floor((nextX + checkRadius - tileWX) / subSize));
+                        const localMinSY = Math.max(0, Math.floor((nextY - checkRadius - tileWY) / subSize));
+                        const localMaxSY = Math.min(subDiv - 1, Math.floor((nextY + checkRadius - tileWY) / subSize));
 
-                            // Project velocity onto tangent to slide
-                            const dot = physics.vx * nx + physics.vy * ny;
-                            if (dot < 0) {
-                                physics.vx -= dot * nx;
-                                physics.vy -= dot * ny;
+                        for (let sy = localMinSY; sy <= localMaxSY; sy++) {
+                            for (let sx = localMinSX; sx <= localMaxSX; sx++) {
+                                if (hpData[sy * subDiv + sx] > 0) {
+                                    const result = this.resolveAABBCollision(
+                                        nextX, nextY, 
+                                        tileWX + sx * subSize, 
+                                        tileWY + sy * subSize, 
+                                        subSize, 
+                                        checkRadius,
+                                        physics
+                                    );
+                                    nextX = result.x;
+                                    nextY = result.y;
+                                }
                             }
                         }
                     }
@@ -139,6 +157,33 @@ export class PhysicsSystem implements System {
             transform.x = nextX;
             transform.y = nextY;
         }
+    }
+
+    private resolveAABBCollision(px: number, py: number, rx: number, ry: number, rSize: number, radius: number, physics: PhysicsComponent): {x: number, y: number} {
+        const closestX = Math.max(rx, Math.min(px, rx + rSize));
+        const closestY = Math.max(ry, Math.min(py, ry + rSize));
+
+        const dx = px - closestX;
+        const dy = py - closestY;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq < radius * radius) {
+            const dist = Math.sqrt(distSq) || 0.0001;
+            const overlap = radius - dist;
+            const nx = dx / dist;
+            const ny = dy / dist;
+
+            px += nx * overlap;
+            py += ny * overlap;
+
+            // Slide velocity
+            const dot = physics.vx * nx + physics.vy * ny;
+            if (dot < 0) {
+                physics.vx -= dot * nx;
+                physics.vy -= dot * ny;
+            }
+        }
+        return { x: px, y: py };
     }
 
     private updateGrid(entities: string[], entityManager: EntityManager): void {
