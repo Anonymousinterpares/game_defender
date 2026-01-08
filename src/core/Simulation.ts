@@ -357,7 +357,7 @@ export class Simulation implements WeaponParent, CombatParent {
                 const tx = Math.floor(x / tileSize);
                 const ty = Math.floor(y / tileSize);
                 MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_DAMAGE_REQUEST, {
-                    tx, ty, m: (this.world as any).tiles[ty][tx], pt: p.type, hx: x, hy: y
+                    tx, ty, m: this.world.getTile(tx, ty), pt: p.type, hx: x, hy: y
                 });
             } else if (this.role === SimulationRole.HOST) {
                 const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
@@ -365,7 +365,7 @@ export class Simulation implements WeaponParent, CombatParent {
                 const ty = Math.floor(y / tileSize);
                 const hpData = this.heatMap.getTileHP(tx, ty);
                 MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_UPDATE, {
-                    tx, ty, m: (this.world as any).tiles[ty][tx],
+                    tx, ty, m: this.world.getTile(tx, ty),
                     hp: hpData ? Array.from(hpData) : null,
                     pt: p.type, hx: x, hy: y
                 });
@@ -414,14 +414,17 @@ export class Simulation implements WeaponParent, CombatParent {
         });
     }
 
-    public removeProjectileAt(x: number, y: number, radius: number): void {
+    public removeProjectileAt(x: number, y: number, radius: number): number {
+        let count = 0;
         this.projectiles.forEach(p => {
             const dx = p.x - x;
             const dy = p.y - y;
-            if (Math.sqrt(dx*dx + dy*dy) < radius) {
+            if (p.active && Math.sqrt(dx*dx + dy*dy) < radius) {
                 p.active = false;
+                count++;
             }
         });
+        return count;
     }
 
     public spawnEnemy(): void {

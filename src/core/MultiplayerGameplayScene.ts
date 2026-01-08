@@ -70,6 +70,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
         case NetworkMessageType.WORLD_SEED: this.handleWorldSeed(msg.d); break;
         case NetworkMessageType.PLAYER_DEATH: this.handleRemoteDeath(msg.d); break;
         case NetworkMessageType.PLAYER_HIT: this.handlePlayerHit(msg.d); break;
+        case NetworkMessageType.EXPLOSION: this.handleRemoteExplosion(msg.d); break;
         case NetworkMessageType.WORLD_HEAT_SYNC: if (this.heatMap) this.heatMap.applyDeltaState(msg.d); break;
         case NetworkMessageType.PLUGIN_SYNC: this.simulation.pluginManager.applySyncStates(msg.d); break;
       }
@@ -132,9 +133,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
       const mm = MultiplayerManager.getInstance();
       if (!mm.isHost || !this.world || !this.heatMap) return;
       const { tx, ty, m, pt, hx, hy } = data;
-      (this.world as any).tiles[ty][tx] = m;
+      this.world.setTile(tx, ty, m);
       this.worldRenderer.invalidateTileCache(tx, ty);
-      this.world.markMeshDirty();
       const hpData = this.heatMap.getTileHP(tx, ty);
       mm.broadcast(NetworkMessageType.WORLD_UPDATE, { tx, ty, m, hp: hpData ? Array.from(hpData) : null, pt, hx, hy });
   }
@@ -345,35 +345,63 @@ export class MultiplayerGameplayScene extends GameplayScene {
       }
   }
 
+  private handleRemoteExplosion(data: any): void {
+      if (!this.world || !this.heatMap) return;
+      const { x, y, radius, mc, pt, tiles } = data;
+
+      // 1. Update all affected tiles
+      if (tiles && tiles.length > 0) {
+          tiles.forEach((t: any) => {
+              const { tx, ty, m, hp } = t;
+              // Use public setTile which also marks mesh as dirty
+              this.world!.setTile(tx, ty, m);
+              
+              if (hp) {
+                  let currentHP = this.heatMap!.getTileHP(tx, ty);
+                  if (!currentHP) {
+                      this.heatMap!.setMaterial(tx, ty, m);
+                      currentHP = this.heatMap!.getTileHP(tx, ty);
+                  }
+                  
+                  if (currentHP) {
+                      for (let i = 0; i < hp.length; i++) {
+                          currentHP[i] = hp[i];
+                      }
+                  }
+              }
+              this.worldRenderer.invalidateTileCache(tx, ty);
+          });
+      }
+
+      // 2. Trigger Visual Explosion
+      this.simulation.removeProjectileAt(x, y, 40);
+      this.simulation.combatSystem.createExplosion(x, y, radius, 0, null, pt, mc);
+  }
+
   private handleWorldUpdate(data: any): void {
       if (this.world && this.heatMap) {
           const { tx, ty, m, hp, pt, hx, hy } = data;
-          (this.world as any).tiles[ty][tx] = m;
+          this.world.setTile(tx, ty, m);
           if (hp) {
-              const currentHP = this.heatMap.getTileHP(tx, ty);
-              if (currentHP) { for (let i = 0; i < hp.length; i++) currentHP[i] = hp[i]; }
-              else {
+              let currentHP = this.heatMap.getTileHP(tx, ty);
+              if (!currentHP) {
                   this.heatMap.setMaterial(tx, ty, m);
-                  const newHP = this.heatMap.getTileHP(tx, ty);
-                  if (newHP) for (let i = 0; i < hp.length; i++) newHP[i] = hp[i];
+                  currentHP = this.heatMap.getTileHP(tx, ty);
+              }
+              if (currentHP) {
+                  for (let i = 0; i < hp.length; i++) currentHP[i] = hp[i];
               }
           }
-          this.worldRenderer.invalidateTileCache(tx, ty); this.world.markMeshDirty();
+          this.worldRenderer.invalidateTileCache(tx, ty);
+          
           if (!MultiplayerManager.getInstance().isHost && pt && hx !== undefined && hy !== undefined) {
-              // Clear any local projectile that might have "passed through"
+              // This is now only for SINGLE tile updates (non-AOE)
               this.simulation.removeProjectileAt(hx, hy, 40);
-
-              if (pt === ProjectileType.ROCKET || pt === ProjectileType.MISSILE || pt === ProjectileType.MINE) {
-                  const cfg = ConfigManager.getInstance();
-                  const aoe = (pt === ProjectileType.MINE ? cfg.get<number>('Weapons', 'mineAOE') : (pt === ProjectileType.ROCKET ? cfg.get<number>('Weapons', 'rocketAOE') : cfg.get<number>('Weapons', 'missileAOE'))) * cfg.get<number>('World', 'tileSize');
-                  this.simulation.combatSystem.createExplosion(hx, hy, aoe, 0);
-              } else {
-                  EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, {
-                      x: hx, y: hy,
-                      projectileType: pt === ProjectileType.CANNON ? 'cannon' : 'rocket',
-                      hitType: 'wall'
-                  });
-              }
+              EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, {
+                  x: hx, y: hy,
+                  projectileType: pt === ProjectileType.CANNON ? 'cannon' : 'rocket',
+                  hitType: 'wall'
+              });
           }
       }
   }

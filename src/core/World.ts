@@ -38,7 +38,16 @@ export class World {
   public getWidth(): number { return this.width; }
   public getHeight(): number { return this.height; }
   public getTileSize(): number { return this.tileSize; }
-  public getTile(x: number, y: number): MaterialType { return this.tiles[y][x]; }
+  public getTile(x: number, y: number): MaterialType { 
+      if (x < 0 || x >= this.width || y < 0 || y >= this.height) return MaterialType.NONE;
+      return this.tiles[y][x]; 
+  }
+  public setTile(x: number, y: number, mat: MaterialType): void {
+      if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
+          this.tiles[y][x] = mat;
+          this.markMeshDirty();
+      }
+  }
   public getHeatMap(): any { return this.heatMapRef; }
 
   public onTileChange(cb: (tx: number, ty: number) => void): void {

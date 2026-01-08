@@ -189,7 +189,7 @@ export class CombatSystem {
         }
     }
 
-    public createExplosion(x: number, y: number, radius: number, damage: number, shooterId: string | null = null, projectileType: ProjectileType | null = null): void {
+    public createExplosion(x: number, y: number, radius: number, damage: number, shooterId: string | null = null, projectileType: ProjectileType | null = null, moltenCountOverride: number | null = null): void {
         if (this.parent.onExplosion) {
             this.parent.onExplosion(x, y, radius, damage);
         }
@@ -197,70 +197,80 @@ export class CombatSystem {
         const mm = MultiplayerManager.getInstance();
         const isMyExplosion = shooterId === this.parent.myId;
 
-        let shrapnelCount = 0;
+        let shrapnelCount = moltenCountOverride !== null ? moltenCountOverride : 0;
         
         if (this.parent.heatMap) {
             this.parent.heatMap.addHeat(x, y, 0.8, radius * 1.5);
             
-            // --- WORLD DAMAGE LOGIC ---
-            // Direct Tile Destruction for Singleplayer or Host
-            const mm = MultiplayerManager.getInstance();
-            if (this.parent.myId === 'local' || mm.isHost) {
-                // Determine destruction intensity based on explosion radius
-                this.parent.heatMap.destroyArea(x, y, radius, true);
-                
-                // If Host, we might need to sync the results of this destruction
-                if (mm.isHost) {
-                    const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-                    const tx = Math.floor(x / tileSize);
-                    const ty = Math.floor(y / tileSize);
-                    const tileRadius = Math.ceil((radius + 10) / tileSize);
+            // --- MATERIAL & SHRAPNEL LOGIC (Calculate BEFORE destruction if not overridden) ---
+            if (moltenCountOverride === null) {
+                const centerMat = this.parent.heatMap.getMaterialAt(x, y);
+                if (centerMat !== MaterialType.NONE) {
+                    EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { 
+                        x, y, 
+                        material: MaterialType[centerMat].toLowerCase() 
+                    });
+                }
 
-                    // Sync all affected tiles
-                    for (let ry = -tileRadius; ry <= tileRadius; ry++) {
-                        for (let rx = -tileRadius; rx <= tileRadius; rx++) {
-                            const ntx = tx + rx;
-                            const nty = ty + ry;
-                            if (this.parent.world && ntx >= 0 && ntx < (this.parent.world as any).width && nty >= 0 && nty < (this.parent.world as any).height) {
-                                const hpData = this.parent.heatMap.getTileHP(ntx, nty);
-                                mm.broadcast(NetworkMessageType.WORLD_UPDATE, {
-                                    tx: ntx, ty: nty,
-                                    m: (this.parent.world as any).tiles[nty][ntx],
-                                    hp: hpData ? Array.from(hpData) : null,
-                                    hx: x, hy: y, // Original explosion center for visual sync
-                                    pt: (ntx === tx && nty === ty) ? projectileType : null // Only send pt for the center tile to avoid redundant visuals
-                                });
+                const scanRadius = Math.max(radius, 32); 
+                const step = 8;
+                for (let dy = -scanRadius; dy <= scanRadius; dy += step) {
+                    for (let dx = -scanRadius; dx <= scanRadius; dx += step) {
+                        const distSq = dx*dx + dy*dy;
+                        if (distSq <= scanRadius*scanRadius) {
+                            const worldX = x + dx;
+                            const worldY = y + dy;
+                            const mat = this.parent.heatMap.getMaterialAt(worldX, worldY);
+                            const inst = this.parent.heatMap.getIntensityAt(worldX, worldY);
+                            const moltenVal = this.parent.heatMap.getMoltenAt(worldX, worldY);
+                            
+                            if (moltenVal > 0.1 || (mat === MaterialType.METAL && inst > 0.5)) {
+                                shrapnelCount++;
                             }
                         }
                     }
                 }
             }
 
-            // --- MATERIAL & SHRAPNEL LOGIC ---
-            const centerMat = this.parent.heatMap.getMaterialAt(x, y);
-            if (centerMat !== MaterialType.NONE) {
-                EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { 
-                    x, y, 
-                    material: MaterialType[centerMat].toLowerCase() 
-                });
-            }
+            // --- WORLD DAMAGE LOGIC ---
+            if (this.parent.myId === 'local' || mm.isHost) {
+                // Determine destruction intensity based on explosion radius
+                this.parent.heatMap.destroyArea(x, y, radius, true);
+                
+                // If Host, sync the results of this destruction via a SINGLE atomic message
+                if (mm.isHost) {
+                    const world = this.parent.world;
+                    const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
+                    const tx = Math.floor(x / tileSize);
+                    const ty = Math.floor(y / tileSize);
+                    // Use a slightly larger radius to ensure all modified tiles (including noise) are synced
+                    const tileRadius = Math.ceil((radius + 32) / tileSize);
+                    const affectedTiles: any[] = [];
 
-            const scanRadius = Math.max(radius, 32); 
-            const step = 8;
-            for (let dy = -scanRadius; dy <= scanRadius; dy += step) {
-                for (let dx = -scanRadius; dx <= scanRadius; dx += step) {
-                    const distSq = dx*dx + dy*dy;
-                    if (distSq <= scanRadius*scanRadius) {
-                        const worldX = x + dx;
-                        const worldY = y + dy;
-                        const mat = this.parent.heatMap.getMaterialAt(worldX, worldY);
-                        const inst = this.parent.heatMap.getIntensityAt(worldX, worldY);
-                        const moltenVal = this.parent.heatMap.getMoltenAt(worldX, worldY);
-                        
-                        if (moltenVal > 0.1 || (mat === MaterialType.METAL && inst > 0.5)) {
-                            shrapnelCount++;
+                    for (let ry = -tileRadius; ry <= tileRadius; ry++) {
+                        for (let rx = -tileRadius; rx <= tileRadius; rx++) {
+                            const ntx = tx + rx;
+                            const nty = ty + ry;
+                            if (world && ntx >= 0 && ntx < world.getWidth() && nty >= 0 && nty < world.getHeight()) {
+                                const hpData = this.parent.heatMap.getTileHP(ntx, nty);
+                                // Only send tiles that have damage or were destroyed
+                                if (hpData || world.getTile(ntx, nty) === MaterialType.NONE) {
+                                    affectedTiles.push({
+                                        tx: ntx, ty: nty,
+                                        m: world.getTile(ntx, nty),
+                                        hp: hpData ? Array.from(hpData) : null
+                                    });
+                                }
+                            }
                         }
                     }
+
+                    mm.broadcast(NetworkMessageType.EXPLOSION, {
+                        x, y, radius,
+                        mc: Math.min(150, shrapnelCount),
+                        pt: projectileType,
+                        tiles: affectedTiles
+                    });
                 }
             }
         }
