@@ -32,6 +32,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
   public lastKilledBy: string | null = null;
   private isSpawned: boolean = false;
   private hostId: string | null = null;
+  private pingTimer: number = 0;
+  private pingStartTime: number = 0;
 
   constructor(sceneManager: SceneManager, inputManager: InputManager) {
     super(sceneManager, inputManager);
@@ -51,6 +53,14 @@ export class MultiplayerGameplayScene extends GameplayScene {
       if (!this.hostId && !mm.isHost) this.hostId = _conn.peer;
       
       switch (msg.t) {
+        case NetworkMessageType.PING_PONG:
+            if (msg.d.ping) {
+                mm.broadcast(NetworkMessageType.PING_PONG, { pong: true });
+            } else if (msg.d.pong) {
+                const now = performance.now();
+                mm.setPing(Math.round(now - this.pingStartTime));
+            }
+            break;
         case NetworkMessageType.PLAYER_STATE: this.handlePlayerState(msg.d); break;
         case NetworkMessageType.PROJECTILE: this.handleRemoteProjectile(msg.d); break;
         case NetworkMessageType.WORLD_DAMAGE_REQUEST: this.handleWorldDamageRequest(msg.d); break;
@@ -180,6 +190,14 @@ export class MultiplayerGameplayScene extends GameplayScene {
   update(dt: number): void {
     if (!this.isSpawned) return;
     
+    // Ping loop: every 1 second
+    this.pingTimer += dt;
+    if (this.pingTimer >= 1.0) {
+        this.pingTimer = 0;
+        this.pingStartTime = performance.now();
+        MultiplayerManager.getInstance().broadcast(NetworkMessageType.PING_PONG, { ping: true });
+    }
+
     // 1. Sync remotePlayers array for simulation systems
     this.simulation.remotePlayers = Array.from(this.remotePlayersMap.values());
 

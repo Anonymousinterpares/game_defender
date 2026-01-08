@@ -13,7 +13,8 @@ export enum NetworkMessageType {
   PLAYER_DEATH = 'pd',
   WORLD_DAMAGE_REQUEST = 'wdr',
   WORLD_HEAT_SYNC = 'whs',
-  PLUGIN_SYNC = 'pls'
+  PLUGIN_SYNC = 'pls',
+  PING_PONG = 'pp'
 }
 
 export interface NetworkMessage {
@@ -30,8 +31,17 @@ export class MultiplayerManager {
   public isHost: boolean = false;
   public myId: string = '';
   public myName: string = 'Player';
+  private ping: number = 0;
 
   private constructor() {}
+
+  public getPing(): number {
+    return this.ping;
+  }
+
+  public setPing(value: number): void {
+    this.ping = value;
+  }
 
   public static getInstance(): MultiplayerManager {
     if (!MultiplayerManager.instance) {

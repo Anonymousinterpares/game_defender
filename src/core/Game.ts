@@ -88,6 +88,17 @@ export class Game {
         this.ctx.font = 'bold 14px "Share Tech Mono", monospace';
         this.ctx.textAlign = 'left';
         this.ctx.fillText(`FPS: ${this.fps}`, 10, this.canvas.height - 10);
+
+        // Latency Meter
+        const showLat = ConfigManager.getInstance().get<boolean>('Debug', 'showLatency');
+        const mm = (window as any).MultiplayerManagerInstance; // Using global instance which is already established
+        const isMultiplayer = mm && mm.getConnectedPeersCount() > 0;
+
+        if (showLat && isMultiplayer) {
+            const ping = mm.getPing();
+            this.ctx.fillStyle = ping < 100 ? '#0f0' : (ping < 250 ? '#ff0' : '#f00');
+            this.ctx.fillText(`LATENCY: ${ping}ms`, 10, this.canvas.height - 30);
+        }
     }
   }
 }

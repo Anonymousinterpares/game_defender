@@ -91,6 +91,7 @@ export const MasterConfig: GameConfigSchema = {
     FpsShow: { value: true, type: 'boolean', description: 'Show FPS Counter' },
     extendedLogs: { value: false, type: 'boolean', description: 'Show detailed logs (Audio, Net, etc)' },
     devModeAlwaysOn: { value: true, type: 'boolean', description: 'Dev commands always active' },
+    showLatency: { value: true, type: 'boolean', description: 'Show Network Latency' },
     enableEnemySpawning: { value: false, type: 'boolean', description: 'Enable Enemy Spawning' }
   },
   Visuals: {
