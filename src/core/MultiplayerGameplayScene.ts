@@ -316,6 +316,11 @@ export class MultiplayerGameplayScene extends GameplayScene {
       }
       const p = new Projectile(data.x, data.y, data.a, data.type);
       if (data.sid) p.shooterId = data.sid;
+      
+      if (p.type === ProjectileType.MISSILE) {
+          p.target = this.simulation.combatSystem.findNearestTarget(p.x, p.y, p.shooterId);
+      }
+
       this.simulation.projectiles.push(p);
       SoundManager.getInstance().playSoundSpatial('shoot_' + p.type, p.x, p.y);
   }

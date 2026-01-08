@@ -2,6 +2,7 @@ import { ConfigManager } from '../config/MasterConfig';
 import { Player } from '../entities/Player';
 import { Projectile, ProjectileType } from '../entities/Projectile';
 import { Enemy } from '../entities/Enemy';
+import { CombatSystem } from './CombatSystem';
 import { Entity } from '../core/Entity';
 import { World } from '../core/World';
 import { HeatMap, MaterialType } from '../core/HeatMap';
@@ -25,6 +26,7 @@ export interface WeaponParent {
     lastShotTime: number;
     setLastShotTime(time: number): void;
     startReload(weapon: string): void;
+    combatSystem: CombatSystem;
 }
 
 export class WeaponSystem {
@@ -173,16 +175,7 @@ export class WeaponSystem {
         });
 
         if (pType === ProjectileType.MISSILE) {
-            let nearest = null;
-            let minDist = 1000;
-            this.parent.enemies.forEach(e => {
-                const d = Math.sqrt((e.x - p.x)**2 + (e.y - p.y)**2);
-                if (d < minDist) {
-                    minDist = d;
-                    nearest = e;
-                }
-            });
-            p.target = nearest;
+            p.target = this.parent.combatSystem.findNearestTarget(p.x, p.y, this.parent.myId);
         }
 
         this.parent.projectiles.push(p);

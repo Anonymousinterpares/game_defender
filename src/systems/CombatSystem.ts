@@ -31,6 +31,47 @@ export class CombatSystem {
         this.resolveDropCollection();
     }
 
+    public findNearestTarget(x: number, y: number, shooterId: string | null, maxDist: number = 1000): any | null {
+        const { enemies, remotePlayers, player } = this.parent;
+        let nearest: any = null;
+        let minDist = maxDist;
+
+        // Check enemies
+        if (enemies) {
+            enemies.forEach((e: Enemy) => {
+                if (!e.active) return;
+                const d = Math.sqrt((e.x - x)**2 + (e.y - y)**2);
+                if (d < minDist) {
+                    minDist = d;
+                    nearest = e;
+                }
+            });
+        }
+
+        // Check remote players
+        if (remotePlayers) {
+            remotePlayers.forEach((rp: RemotePlayer) => {
+                if (!rp.active || rp.id === shooterId) return;
+                const d = Math.sqrt((rp.x - x)**2 + (rp.y - y)**2);
+                if (d < minDist) {
+                    minDist = d;
+                    nearest = rp;
+                }
+            });
+        }
+
+        // Check local player
+        if (player && player.active && (this.parent.myId || 'local') !== shooterId) {
+            const d = Math.sqrt((player.x - x)**2 + (player.y - y)**2);
+            if (d < minDist) {
+                minDist = d;
+                nearest = player;
+            }
+        }
+
+        return nearest;
+    }
+
     private checkCollision(a: {x: number, y: number, radius: number}, b: {x: number, y: number, radius: number}): boolean {
         const dx = a.x - b.x;
         const dy = a.y - b.y;
