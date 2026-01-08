@@ -28,6 +28,7 @@ import { FireComponent } from './ecs/components/FireComponent';
 import { TagComponent } from './ecs/components/TagComponent';
 import { RenderComponent } from './ecs/components/RenderComponent';
 import { EntityFactory } from './ecs/EntityFactory';
+import { EnemyRegistry } from '../entities/enemies/EnemyRegistry';
 
 import { PluginManager } from './plugins/PluginManager';
 
@@ -440,7 +441,8 @@ export class Simulation implements WeaponParent, CombatParent {
             const ex = this.player.x + Math.cos(angle) * dist;
             const ey = this.player.y + Math.sin(angle) * dist;
             if (!this.world.isWall(ex, ey)) {
-                const id = EntityFactory.createEnemy(this.entityManager, ex, ey);
+                const type = EnemyRegistry.getInstance().getRandomName();
+                const id = EntityFactory.createEnemy(this.entityManager, ex, ey, type);
                 
                 const e = new Enemy(ex, ey);
                 e.id = id; 

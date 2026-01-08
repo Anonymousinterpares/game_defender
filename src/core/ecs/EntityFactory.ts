@@ -9,6 +9,7 @@ import { InputComponent } from "./components/InputComponent";
 import { AIComponent } from "./components/AIComponent";
 import { AIBehavior } from "./components/AIDossier";
 import { ConfigManager } from "../../config/MasterConfig";
+import { EnemyRegistry } from "../../entities/enemies/EnemyRegistry";
 
 export class EntityFactory {
     public static createPlayer(entityManager: EntityManager, x: number, y: number): string {
@@ -29,17 +30,24 @@ export class EntityFactory {
         return id;
     }
 
-    public static createEnemy(entityManager: EntityManager, x: number, y: number): string {
+    public static createEnemy(entityManager: EntityManager, x: number, y: number, type: string = 'Scout'): string {
         const entity = entityManager.createEntity();
         const id = entity.id;
 
+        const registry = EnemyRegistry.getInstance();
+        let dossier = registry.get(type);
+        if (!dossier) dossier = registry.get('Scout')!;
+
         entityManager.addComponent(id, new TagComponent('enemy'));
         entityManager.addComponent(id, new TransformComponent(x, y, 0));
-        entityManager.addComponent(id, new PhysicsComponent(0, 0, 12));
-        entityManager.addComponent(id, new HealthComponent(20, 20));
+        entityManager.addComponent(id, new PhysicsComponent(0, 0, dossier.baseStats.radius));
+        entityManager.addComponent(id, new HealthComponent(dossier.baseStats.hp, dossier.baseStats.hp));
         entityManager.addComponent(id, new FireComponent());
-        entityManager.addComponent(id, new RenderComponent('enemy', '#ff3333', 12));
-        entityManager.addComponent(id, new AIComponent(AIBehavior.CHASE, null, 150));
+        entityManager.addComponent(id, new RenderComponent('enemy', dossier.visuals.color, dossier.baseStats.radius));
+        
+        const aiComp = new AIComponent(dossier.behavior, null, dossier.baseStats.speed);
+        aiComp.dossier = dossier;
+        entityManager.addComponent(id, aiComp);
 
         return id;
     }

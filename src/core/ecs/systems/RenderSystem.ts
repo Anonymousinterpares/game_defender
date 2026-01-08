@@ -4,7 +4,7 @@ import { TransformComponent } from "../components/TransformComponent";
 import { RenderComponent } from "../components/RenderComponent";
 import { HealthComponent } from "../components/HealthComponent";
 import { FireComponent } from "../components/FireComponent";
-import { Entity } from "../../Entity";
+import { AIComponent } from "../components/AIComponent";
 
 export class RenderSystem implements System {
     public readonly id = 'render';
@@ -20,10 +20,9 @@ export class RenderSystem implements System {
             const render = entityManager.getComponent<RenderComponent>(id, 'render')!;
             const fire = entityManager.getComponent<FireComponent>(id, 'fire');
 
-            // Skip 'custom' type as they are handled by legacy .render() calls
             if (render.renderType === 'custom') continue;
 
-            const ix = transform.x; // Simplified, no interpolation yet in ECS
+            const ix = transform.x;
             const iy = transform.y;
             const rotation = transform.rotation;
             const scale = health?.visualScale || 1.0;
@@ -39,20 +38,31 @@ export class RenderSystem implements System {
             if (render.renderFn) {
                 render.renderFn(ctx, ix, iy, rotation, scale);
             } else {
-                this.drawByType(ctx, render, ix, iy, rotation, health, fire);
+                this.drawByType(ctx, id, entityManager, render, ix, iy, rotation, health, fire);
             }
 
             ctx.restore();
         }
     }
 
-    private drawByType(ctx: CanvasRenderingContext2D, render: RenderComponent, x: number, y: number, rotation: number, health?: HealthComponent, fire?: FireComponent): void {
+    private drawByType(
+        ctx: CanvasRenderingContext2D, 
+        id: string,
+        entityManager: EntityManager,
+        render: RenderComponent, 
+        x: number, 
+        y: number, 
+        rotation: number, 
+        health?: HealthComponent, 
+        fire?: FireComponent
+    ): void {
         switch (render.renderType) {
             case 'player':
                 this.drawPlayer(ctx, x, y, rotation, render.radius, health);
                 break;
             case 'enemy':
-                this.drawEnemy(ctx, x, y, rotation, render.radius, health);
+                const ai = entityManager.getComponent<AIComponent>(id, 'ai');
+                this.drawEnemy(ctx, x, y, rotation, render.radius, health, ai);
                 break;
             case 'projectile':
                 this.drawProjectile(ctx, x, y, rotation, render.radius);
@@ -60,8 +70,6 @@ export class RenderSystem implements System {
         }
 
         if (fire?.isOnFire) {
-            // Re-use fire rendering from Entity if possible or implement here
-            // For now, simple orange glow
             ctx.beginPath();
             ctx.arc(x, y, render.radius * 1.2, 0, Math.PI * 2);
             ctx.fillStyle = 'rgba(255, 100, 0, 0.4)';
@@ -83,7 +91,6 @@ export class RenderSystem implements System {
         ctx.lineWidth = 3;
         ctx.stroke();
 
-        // Cannon
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(rotation);
@@ -96,38 +103,78 @@ export class RenderSystem implements System {
         ctx.restore();
     }
 
-    private drawEnemy(ctx: CanvasRenderingContext2D, x: number, y: number, rotation: number, radius: number, health?: HealthComponent): void {
-        const grad = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, radius);
-        grad.addColorStop(0, '#757575');
-        grad.addColorStop(0.6, '#434b4d');
-        grad.addColorStop(1, '#2a2a2a');
-        ctx.fillStyle = grad;
+    private drawEnemy(
+        ctx: CanvasRenderingContext2D, 
+        x: number, 
+        y: number, 
+        rotation: number, 
+        radius: number, 
+        health?: HealthComponent,
+        ai?: AIComponent
+    ): void {
+        const dossier = ai?.dossier;
+        const color = dossier?.visuals.color || '#ff3333';
+        const shape = dossier?.visuals.shape || 'circle';
+        const glowColor = dossier?.visuals.glowColor || 'rgba(0,0,0,0.5)';
 
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#222';
-        ctx.stroke();
+        ctx.save();
+        
+        // Shadow/Glow
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = glowColor;
 
-        // Eye
-        const eyeX = x + Math.cos(rotation) * 6;
-        const eyeY = y + Math.sin(rotation) * 6;
-        ctx.fillStyle = '#ff4500';
+        ctx.fillStyle = color;
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+
+        if (shape === 'circle') {
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+        } else if (shape === 'square') {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
+            ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+            ctx.strokeRect(-radius, -radius, radius * 2, radius * 2);
+            ctx.restore();
+        } else if (shape === 'triangle') {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
+            ctx.beginPath();
+            ctx.moveTo(radius, 0);
+            ctx.lineTo(-radius, -radius);
+            ctx.lineTo(-radius, radius);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Eye/Core
+        const eyeX = x + Math.cos(rotation) * (radius * 0.5);
+        const eyeY = y + Math.sin(rotation) * (radius * 0.5);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#fff';
         ctx.beginPath();
-        ctx.arc(eyeX, eyeY, 4, 0, Math.PI * 2);
+        ctx.arc(eyeX, eyeY, radius * 0.2, 0, Math.PI * 2);
         ctx.fill();
+
+        ctx.restore();
 
         // Health Bar (only if damaged)
         if (health && health.health < health.maxHealth) {
-            const barW = radius * 2;
-            const barH = 3;
-            const barY = y + radius + 5;
+            const barW = radius * 2.5;
+            const barH = 4;
+            const barY = y + radius + 8;
             
-            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
             ctx.fillRect(x - barW/2, barY, barW, barH);
             
             const pct = Math.max(0, health.health / health.maxHealth);
-            ctx.fillStyle = '#ff3333'; // Enemy health is red
+            ctx.fillStyle = '#ff0000';
             ctx.fillRect(x - barW/2, barY, barW * pct, barH);
         }
     }
