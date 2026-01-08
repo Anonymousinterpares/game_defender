@@ -256,6 +256,10 @@ export class GameplayHUD {
     public render(ctx: CanvasRenderingContext2D): void {
         if (!this.parent.player) return;
         
+        ctx.save();
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+
         ctx.fillStyle = '#fff';
         ctx.font = '14px Courier';
         ctx.fillText(`POS: ${Math.floor(this.parent.player.x)}, ${Math.floor(this.parent.player.y)}`, 10, 20);
@@ -291,6 +295,7 @@ export class GameplayHUD {
         });
 
         if (!this.parent.player.active) {
+            ctx.restore(); // Restore early for the overlay
             ctx.save();
             ctx.fillStyle = 'rgba(100, 0, 0, 0.4)';
             ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -306,6 +311,8 @@ export class GameplayHUD {
             ctx.fillStyle = '#fff';
             ctx.fillText('EXCESSIVE HEAT DAMAGE DETECTED', ctx.canvas.width / 2, ctx.canvas.height / 2 + 20);
             ctx.fillText('RELOAD PAGE TO RESTART', ctx.canvas.width / 2, ctx.canvas.height / 2 + 50);
+            ctx.restore();
+        } else {
             ctx.restore();
         }
     }
