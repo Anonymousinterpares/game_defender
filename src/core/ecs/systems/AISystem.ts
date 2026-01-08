@@ -4,6 +4,7 @@ import { AIComponent, AIType } from "../components/AIComponent";
 import { TransformComponent } from "../components/TransformComponent";
 import { PhysicsComponent } from "../components/PhysicsComponent";
 import { TagComponent } from "../components/TagComponent";
+import { HealthComponent } from "../components/HealthComponent";
 
 export class AISystem implements System {
     public readonly id = 'ai';
@@ -21,6 +22,9 @@ export class AISystem implements System {
         const aiEntities = entityManager.query(['ai', 'transform', 'physics']);
 
         for (const id of aiEntities) {
+            const health = entityManager.getComponent<HealthComponent>(id, 'health');
+            if (health && !health.active) continue;
+
             const ai = entityManager.getComponent<AIComponent>(id, 'ai')!;
             const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
             const physics = entityManager.getComponent<PhysicsComponent>(id, 'physics')!;

@@ -13,9 +13,11 @@ export class RenderSystem implements System {
         const entities = entityManager.query(['transform', 'render']);
 
         for (const id of entities) {
+            const health = entityManager.getComponent<HealthComponent>(id, 'health');
+            if (health && !health.active) continue;
+
             const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
             const render = entityManager.getComponent<RenderComponent>(id, 'render')!;
-            const health = entityManager.getComponent<HealthComponent>(id, 'health');
             const fire = entityManager.getComponent<FireComponent>(id, 'fire');
 
             // Skip 'custom' type as they are handled by legacy .render() calls
@@ -114,6 +116,20 @@ export class RenderSystem implements System {
         ctx.beginPath();
         ctx.arc(eyeX, eyeY, 4, 0, Math.PI * 2);
         ctx.fill();
+
+        // Health Bar (only if damaged)
+        if (health && health.health < health.maxHealth) {
+            const barW = radius * 2;
+            const barH = 3;
+            const barY = y + radius + 5;
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(x - barW/2, barY, barW, barH);
+            
+            const pct = Math.max(0, health.health / health.maxHealth);
+            ctx.fillStyle = '#ff3333'; // Enemy health is red
+            ctx.fillRect(x - barW/2, barY, barW * pct, barH);
+        }
     }
 
     private drawProjectile(ctx: CanvasRenderingContext2D, x: number, y: number, rotation: number, radius: number): void {

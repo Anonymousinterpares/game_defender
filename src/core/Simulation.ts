@@ -392,9 +392,15 @@ export class Simulation implements WeaponParent, CombatParent {
     private cleanupEntities(): void {
         this.enemies = this.enemies.filter(e => {
             if (!e.active) {
+                // Death Animation: small explosion, no damage
+                this.combatSystem.createExplosion(e.x, e.y, 20, 0);
+
                 if (this.role === SimulationRole.HOST) {
                     MultiplayerManager.getInstance().broadcast(NetworkMessageType.ENTITY_DESTROY, { type: 'enemy', id: e.id });
                 }
+                
+                // Remove from ECS
+                this.entityManager.removeEntity(e.id);
             }
             return e.active;
         });
