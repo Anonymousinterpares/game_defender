@@ -73,5 +73,13 @@ export class EnemyRegistry {
             visuals: { color: '#ff6600', shape: 'triangle', glowColor: '#ff0000' },
             traits: ['heat_proof', 'swift']
         });
+
+        this.register({
+            name: 'Stalker',
+            behavior: AIBehavior.CHASE,
+            baseStats: { hp: 40, speed: 140, radius: 12, attackRange: 50 },
+            visuals: { color: '#330033', shape: 'square', glowColor: '#ff00ff' },
+            traits: ['tracker']
+        });
     }
 }

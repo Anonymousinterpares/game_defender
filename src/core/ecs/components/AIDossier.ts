@@ -54,5 +54,10 @@ export const TRAIT_LIBRARY: Record<string, EnemyTrait> = {
         id: 'swift',
         description: 'Highly mobile but fragile',
         modifiers: { speedMul: 1.5, hpMul: 0.7 }
+    },
+    'tracker': {
+        id: 'tracker',
+        description: 'Always knows player location, ignores Line-of-Sight rules',
+        modifiers: {}
     }
 };

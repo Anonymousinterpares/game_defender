@@ -869,6 +869,23 @@ export class HeatMap {
         }
     }
 
+    public getAverageIntensity(tx: number, ty: number): number {
+        const data = this.heatData.get(`${tx},${ty}`);
+        if (!data) return 0;
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        return sum / data.length;
+    }
+
+    public isTileIgnited(tx: number, ty: number): boolean {
+        const fData = this.fireData.get(`${tx},${ty}`);
+        if (!fData) return false;
+        for (let i = 0; i < fData.length; i++) {
+            if (fData[i] > 0.1) return true;
+        }
+        return false;
+    }
+
     public getIntensityAt(worldX: number, worldY: number): number {
         const tx = Math.floor(worldX / this.tileSize);
         const ty = Math.floor(worldY / this.tileSize);

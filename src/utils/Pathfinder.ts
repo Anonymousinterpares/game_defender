@@ -1,4 +1,5 @@
 import { World } from "../core/World";
+import { HeatMap } from "../core/HeatMap";
 
 interface Node {
     x: number;
@@ -16,9 +17,11 @@ export class Pathfinder {
         startY: number, 
         endX: number, 
         endY: number,
-        canBreach: boolean = false
+        canBreach: boolean = false,
+        isHeatProof: boolean = false
     ): {x: number, y: number}[] {
         const ts = world.getTileSize();
+        const heatMap: HeatMap | null = world.getHeatMap();
         const startTX = Math.floor(startX / ts);
         const startTY = Math.floor(startY / ts);
         const endTX = Math.floor(endX / ts);
@@ -42,7 +45,6 @@ export class Pathfinder {
         openList.push(startNode);
 
         while (openList.length > 0) {
-            // Sort by F score (simplistic, could be optimized with priority queue)
             openList.sort((a, b) => a.f - b.f);
             const current = openList.shift()!;
 
@@ -56,12 +58,21 @@ export class Pathfinder {
             for (const neighbor of neighbors) {
                 if (closedList.has(`${neighbor.x},${neighbor.y}`)) continue;
 
-                // Wall check
+                // 1. Wall check
                 const isWall = world.isWallByTile(neighbor.x, neighbor.y);
                 if (isWall && !canBreach) continue;
                 
-                // Extra cost for walls if we can breach
-                const moveCost = isWall ? 10 : 1; 
+                // 2. Heat check
+                let heatCost = 0;
+                if (!isHeatProof && heatMap) {
+                    const isFire = heatMap.isTileIgnited(neighbor.x, neighbor.y);
+                    const heat = heatMap.getAverageIntensity(neighbor.x, neighbor.y);
+                    
+                    if (isFire) heatCost += 20; // Very high cost for active fire
+                    else if (heat > 0.5) heatCost += 5; // Moderate cost for high heat
+                }
+                
+                const moveCost = (isWall ? 15 : 1) + heatCost; 
                 const gScore = current.g + moveCost;
 
                 let openNode = openList.find(n => n.x === neighbor.x && n.y === neighbor.y);
@@ -83,8 +94,7 @@ export class Pathfinder {
                 }
             }
 
-            // Safety break to prevent infinite loops in weird cases
-            if (closedList.size > 1000) break;
+            if (closedList.size > 800) break;
         }
 
         return [];

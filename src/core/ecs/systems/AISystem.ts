@@ -38,25 +38,35 @@ export class AISystem implements System {
             const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
             const physics = entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
 
-            // 1. Pathfinding Update
+            // 1. Vision / Line of Sight Check
+            const canSeePlayer = this.checkLOS(transform, playerTransform);
+            const isTracker = ai.dossier?.traits.includes('tracker');
+            
+            // AI only updates path if it can see player OR is a tracker OR is already close enough to "hear"
+            const dx = playerTransform.x - transform.x;
+            const dy = playerTransform.y - transform.y;
+            const distToPlayer = Math.sqrt(dx * dx + dy * dy);
+            const canHearPlayer = distToPlayer < 150;
+
+            const shouldUpdatePath = canSeePlayer || isTracker || canHearPlayer;
+
+            // 2. Pathfinding Update
             ai.lastPathUpdateTime += dt;
-            if (ai.lastPathUpdateTime >= this.pathUpdateInterval) {
+            if (ai.lastPathUpdateTime >= this.pathUpdateInterval && shouldUpdatePath) {
                 ai.lastPathUpdateTime = 0;
                 
-                // Only path if player is somewhat far or we are stuck
-                const dx = playerTransform.x - transform.x;
-                const dy = playerTransform.y - transform.y;
-                const distToPlayer = Math.sqrt(dx * dx + dy * dy);
-
                 if (distToPlayer > 50) {
                     const canBreach = ai.dossier?.traits.includes('breacher') || ai.behavior === AIBehavior.BREACHER;
+                    const isHeatProof = ai.dossier?.traits.includes('heat_proof');
+                    
                     ai.path = Pathfinder.findPath(
                         this.world, 
                         transform.x, 
                         transform.y, 
                         playerTransform.x, 
                         playerTransform.y,
-                        canBreach
+                        canBreach,
+                        isHeatProof
                     );
                     ai.nextWaypointIndex = 0;
                 } else {
@@ -64,12 +74,28 @@ export class AISystem implements System {
                 }
             }
 
-            // 2. Behavior Execution
-            this.executeBehavior(dt, ai, transform, physics, playerTransform);
+            // 3. Behavior Execution
+            if (shouldUpdatePath || ai.path.length > 0) {
+                this.executeBehavior(dt, ai, transform, physics, playerTransform);
+            } else {
+                physics.vx *= 0.9; // Slow down if lost player
+                physics.vy *= 0.9;
+            }
 
-            // 3. Crowd Simulation (Steering Behaviors)
+            // 4. Crowd Simulation (Steering Behaviors)
             this.applySteering(id, aiEntities, entityManager, transform, physics, ai);
         }
+    }
+
+    private checkLOS(from: TransformComponent, to: TransformComponent): boolean {
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
+        
+        // Raycast returns hit point or null if clear
+        const hit = this.world.raycast(from.x, from.y, angle, dist);
+        return hit === null;
     }
 
     private applySteering(
