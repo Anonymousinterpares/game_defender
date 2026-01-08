@@ -92,7 +92,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.physicsSystem = new PhysicsSystem(this.world);
         this.fireSystem = new FireSystem();
         this.inputSystem = new InputSystem();
-        this.aiSystem = new AISystem();
+        this.aiSystem = new AISystem(this.world);
         this.renderSystem = new RenderSystem();
         this.pluginManager = new PluginManager(this);
         

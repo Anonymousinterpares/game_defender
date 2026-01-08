@@ -1,16 +1,24 @@
 import { Component } from "../Component";
+import { AIBehavior, EnemyDossier } from "./AIDossier";
 
-export enum AIType {
-    CHASE = 'chase',
-    FLEE = 'flee',
-    WANDER = 'wander'
+export interface Waypoint {
+    x: number;
+    y: number;
 }
 
 export class AIComponent implements Component {
     public readonly type = 'ai';
     
+    public path: Waypoint[] = [];
+    public nextWaypointIndex: number = 0;
+    public lastPathUpdateTime: number = 0;
+    public state: string = 'idle'; // Internal state like 'patrolling', 'chasing', 'fleeing'
+    
+    // Config/Preset
+    public dossier: EnemyDossier | null = null;
+
     constructor(
-        public aiType: AIType = AIType.CHASE,
+        public behavior: AIBehavior = AIBehavior.CHASE,
         public targetId: string | null = null,
         public speed: number = 150
     ) {}

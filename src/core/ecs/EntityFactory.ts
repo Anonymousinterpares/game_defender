@@ -6,7 +6,8 @@ import { FireComponent } from "./components/FireComponent";
 import { RenderComponent } from "./components/RenderComponent";
 import { TagComponent } from "./components/TagComponent";
 import { InputComponent } from "./components/InputComponent";
-import { AIComponent, AIType } from "./components/AIComponent";
+import { AIComponent } from "./components/AIComponent";
+import { AIBehavior } from "./components/AIDossier";
 import { ConfigManager } from "../../config/MasterConfig";
 
 export class EntityFactory {
@@ -38,7 +39,7 @@ export class EntityFactory {
         entityManager.addComponent(id, new HealthComponent(20, 20));
         entityManager.addComponent(id, new FireComponent());
         entityManager.addComponent(id, new RenderComponent('enemy', '#ff3333', 12));
-        entityManager.addComponent(id, new AIComponent(AIType.CHASE, null, 150));
+        entityManager.addComponent(id, new AIComponent(AIBehavior.CHASE, null, 150));
 
         return id;
     }
