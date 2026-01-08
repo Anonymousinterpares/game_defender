@@ -262,9 +262,19 @@ export class ParticleSystem {
         // 4. Smoke Sprite (Softer)
         this.spriteCache.set('smoke_soft', createCachedCanvas(64, ctx => {
             const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-            grad.addColorStop(0, 'rgba(255, 255, 255, 0.6)');
-            grad.addColorStop(0.4, 'rgba(255, 255, 255, 0.2)');
+            grad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+            grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
             grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+        }));
+
+        // 5. BLACK Smoke Sprite (Pre-rendered for visibility)
+        this.spriteCache.set('smoke_black', createCachedCanvas(64, ctx => {
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0, 'rgba(0, 0, 0, 0.9)');
+            grad.addColorStop(0.4, 'rgba(20, 20, 20, 0.5)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
             ctx.fillStyle = grad;
             ctx.fillRect(0, 0, 64, 64);
         }));
@@ -398,11 +408,12 @@ export class ParticleSystem {
         this.processWorkerEvents(player, enemies, world);
 
         // STOCHASTIC SMOKE EMISSION
-        if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke') && world && (world as any).heatMap) {
+        if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke') && world) {
             this.smokeInterval += dt;
             if (this.smokeInterval > 0.05) { // 20 times per second
                 this.smokeInterval = 0;
                 this.emitHeatSmoke(world);
+                this.emitEntitySmoke(player, enemies);
             }
         }
 
@@ -453,32 +464,88 @@ export class ParticleSystem {
     }
 
     private emitHeatSmoke(world: World): void {
-        const heatMap = (world as any).heatMap;
+        const heatMap = world.getHeatMap();
         if (!heatMap) return;
-        const activeTiles = heatMap.activeTiles;
-        const tileSize = (world as any).tileSize;
+        const activeTiles = (heatMap as any).activeTiles;
+        const tileSize = world.getTileSize();
 
-        // Iterate a subset for performance
-        const sampleSize = Math.min(activeTiles.size, 10);
-        const entries = Array.from(activeTiles.keys()) as string[];
-        
-        for (let i = 0; i < sampleSize; i++) {
-            const key = entries[Math.floor(Math.random() * entries.length)];
-            const data = activeTiles.get(key);
-            if (!data) continue;
+        // Iterate through major tiles (activeTiles is a set of "tx,ty")
+        activeTiles.forEach((key: string) => {
+            const fData = (heatMap as any).fireData.get(key);
+            const hData = (heatMap as any).heatData.get(key);
+            if (!fData && !hData) return;
 
             const [tx, ty] = key.split(',').map(Number);
-            const wx = tx * tileSize + Math.random() * tileSize;
-            const wy = ty * tileSize + Math.random() * tileSize;
+            const centerX = tx * tileSize + tileSize / 2;
+            const centerY = ty * tileSize + tileSize / 2;
 
-            if (data.isBurning) {
-                // Dense smoke over fire
-                this.spawnSmoke(wx, wy, (Math.random()-0.5)*10, (Math.random()-0.5)*10, 2.0 + Math.random()*2.0, 20 + Math.random()*20, '#111');
-            } else if (data.temperature > 50) {
-                // Faint smoke over heat
-                this.spawnSmoke(wx, wy, (Math.random()-0.5)*5, (Math.random()-0.5)*5, 1.0 + Math.random(), 10 + Math.random()*10, '#888');
+            // 1. DENSE FIRE SMOKE (Major Tile Level)
+            if (fData) {
+                let burningCount = 0;
+                for (let i = 0; i < fData.length; i++) {
+                    if (fData[i] > 0.05) burningCount++; // Lower threshold to ensure last bit of fire smokes
+                }
+
+                if (burningCount > 0) {
+                    const fireIntensity = burningCount / fData.length; // 0.0 to 1.0
+                    
+                    // Always emit smoke if anything is burning
+                    if (Math.random() < fireIntensity * 0.9 + 0.3) {
+                        const count = 1 + Math.floor(fireIntensity * 4);
+                        for (let i = 0; i < count; i++) {
+                            const offset = (Math.random() - 0.5) * tileSize;
+                            const life = 3.0 + Math.random() * 2.0;
+                            // Smoke size is much larger now
+                            const size = (tileSize * 2.5) + (fireIntensity * tileSize * 2.5);
+                            
+                            this.spawnSmoke(
+                                centerX + offset, 
+                                centerY + offset, 
+                                (Math.random() - 0.5) * 30, 
+                                -30 - Math.random() * 50, // Stronger upward drift
+                                life, 
+                                size, 
+                                '#000' 
+                            );
+                        }
+                    }
+                }
             }
-        }
+
+            // 2. RESIDUE HEAT SMOKE (Smaller/Lighter)
+            if (hData) {
+                let hotCount = 0;
+                for (let i = 0; i < hData.length; i++) {
+                    if (hData[i] > 0.4) hotCount++;
+                }
+
+                if (hotCount > 5 && Math.random() < (hotCount / hData.length) * 0.4) {
+                    this.spawnSmoke(
+                        centerX + (Math.random() - 0.5) * tileSize,
+                        centerY + (Math.random() - 0.5) * tileSize,
+                        (Math.random() - 0.5) * 15,
+                        -15 - Math.random() * 20,
+                        2.0,
+                        tileSize * 1.2,
+                        '#666'
+                    );
+                }
+            }
+        });
+    }
+
+    private emitEntitySmoke(player: Entity | null, enemies: Entity[]): void {
+        const targets = player ? [player, ...enemies] : enemies;
+        targets.forEach(t => {
+            if (t.active && (t as any).isOnFire) {
+                // Persistent dense smoke trailing from burning characters
+                for (let i = 0; i < 2; i++) {
+                    const wx = t.x + (Math.random() - 0.5) * t.radius;
+                    const wy = t.y + (Math.random() - 0.5) * t.radius;
+                    this.spawnSmoke(wx, wy, (Math.random()-0.5)*20, (Math.random()-0.5)*20, 1.5 + Math.random(), 18 + Math.random()*12, '#000');
+                }
+            }
+        });
     }
 
     private processWorkerEvents(player: Entity | null, enemies: Entity[], world: World | null): void {
@@ -658,7 +725,10 @@ export class ParticleSystem {
                         ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
                     }
                 } else if (pType === ParticleType.SMOKE) {
-                    const targetAlpha = Math.max(0, lifeRatio * 0.4);
+                    const colorStr = this.colorPalette[colorIdx];
+                    const isBlack = colorStr === '#000' || colorStr === '#111';
+                    
+                    const targetAlpha = Math.max(0, lifeRatio * (isBlack ? 0.4 : 0.25)); 
                     if (Math.abs(currentAlpha - targetAlpha) > 0.01) {
                         ctx.globalAlpha = currentAlpha = targetAlpha;
                     }
@@ -666,12 +736,15 @@ export class ParticleSystem {
                         ctx.globalCompositeOperation = currentGCO = 'source-over';
                     }
 
-                    const colorStr = this.colorPalette[colorIdx];
-                    const sprite = this.spriteCache.get('smoke_soft');
+                    const sprite = this.spriteCache.get(isBlack ? 'smoke_black' : 'smoke_soft');
                     if (sprite) {
                         const r = this.radius[i];
-                        // Render with color overlay
                         ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
+                        
+                        // Triple-layer for extreme density if it's very fresh black smoke
+                        if (isBlack && lifeRatio > 0.7) {
+                             ctx.drawImage(sprite, ix - r * 0.6, iy - r * 0.6, r * 1.2, r * 1.2);
+                        }
                     }
                 } else {
                     // Standard solid particles - BUCKET THEM

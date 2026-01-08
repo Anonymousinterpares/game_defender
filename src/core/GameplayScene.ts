@@ -155,7 +155,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         this.cameraY = this.player.interpolatedY - window.innerHeight / 2;
     }
 
-    ParticleSystem.getInstance().update(dt, this.world, this.player, this.enemies);
+    ParticleSystem.getInstance().update(dt, this.world, this.player, [...this.enemies, ...this.remotePlayers]);
     if (this.radar && this.player) this.radar.update(dt);
 
     const timeState = WorldClock.getInstance().getTimeState();
