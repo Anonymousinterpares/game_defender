@@ -51,7 +51,7 @@ export class EntityFactory {
         entityManager.addComponent(id, new TagComponent('projectile'));
         entityManager.addComponent(id, new TransformComponent(x, y, angle));
         entityManager.addComponent(id, new PhysicsComponent(Math.cos(angle) * 500, Math.sin(angle) * 500, 5));
-        entityManager.addComponent(id, new RenderComponent('projectile', '#fff', 5));
+        entityManager.addComponent(id, new RenderComponent('custom', '#fff', 5));
         
         return id;
     }

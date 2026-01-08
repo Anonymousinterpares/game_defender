@@ -184,24 +184,103 @@ export class Projectile extends Entity {
         ctx.beginPath();
         ctx.arc(0, 0, this.radius + pulse, 0, Math.PI * 2);
         ctx.fill();
-    } else {
-        // Projectile Body
-        ctx.fillStyle = this.color;
-        if (this.type === ProjectileType.ROCKET || this.type === ProjectileType.MISSILE) {
-            ctx.fillRect(-this.radius*2, -this.radius, this.radius*3, this.radius*2);
-            // Engine glow
-            ctx.fillStyle = '#fff';
-            ctx.fillRect(-this.radius*2, -this.radius/2, this.radius/2, this.radius);
+    } else if (this.type === ProjectileType.ROCKET || this.type === ProjectileType.MISSILE) {
+        // New Pixel-Art Rocket Rendering
+        // The SVG is 64x128. We rotate 90deg so it points along X axis.
+        // Rocket length: we'll scale it so body is approx radius*4
+        ctx.rotate(Math.PI / 2); // Pointing Right (0 deg) -> Up is original SVG orientation
+        
+        const scale = (this.radius * 4) / 128;
+        ctx.scale(scale, scale);
+        ctx.translate(-32, -64); // Center of mass roughly
+
+        const drawPixel = (px: number, py: number, w: number, h: number, fill: string) => {
+            ctx.fillStyle = fill;
+            ctx.fillRect(px, py, w, h);
+        };
+
+        // Nose Cone
+        drawPixel(30, 4, 4, 4, "#cc2200");
+        drawPixel(26, 8, 12, 4, "#cc2200");
+        drawPixel(26, 8, 4, 4, "#ff4433");
+        drawPixel(22, 12, 20, 4, "#cc2200");
+        drawPixel(22, 12, 4, 4, "#ff4433");
+        drawPixel(18, 16, 28, 4, "#cc2200");
+        drawPixel(18, 16, 8, 4, "#ff4433");
+        drawPixel(14, 20, 36, 4, "#cc2200");
+        drawPixel(14, 20, 8, 4, "#ff4433");
+
+        // Body
+        drawPixel(14, 24, 36, 12, "#e8e8e8"); // Combined upper
+        drawPixel(14, 24, 8, 12, "#ffffff"); // Highlights
+        
+        // Window
+        drawPixel(14, 36, 36, 12, "#e8e8e8");
+        drawPixel(14, 36, 8, 12, "#ffffff");
+        drawPixel(26, 36, 12, 12, "#3399cc"); // Glass
+        drawPixel(26, 36, 4, 12, "#66ccff"); // Reflection
+
+        // Red Band
+        drawPixel(14, 48, 36, 8, "#cc2200");
+        drawPixel(14, 48, 8, 8, "#ff4433");
+
+        // Middle Body
+        drawPixel(14, 56, 36, 16, "#e8e8e8");
+        drawPixel(14, 56, 8, 16, "#ffffff");
+
+        // Lower Red Band
+        drawPixel(14, 72, 36, 4, "#cc2200");
+        drawPixel(14, 72, 8, 4, "#ff4433");
+
+        // Lower Body
+        drawPixel(14, 76, 36, 4, "#d0d0d0");
+        drawPixel(14, 76, 8, 4, "#e8e8e8");
+        drawPixel(14, 80, 36, 4, "#c0c0c0");
+        drawPixel(14, 80, 8, 4, "#d8d8d8");
+
+        // Fins
+        drawPixel(6, 84, 8, 4, "#cc2200"); drawPixel(50, 84, 8, 4, "#aa1100");
+        drawPixel(2, 88, 12, 12, "#cc2200"); drawPixel(50, 88, 12, 12, "#aa1100");
+        drawPixel(2, 88, 4, 12, "#ff4433");
+        // Bottom fins detail
+        drawPixel(2, 96, 12, 4, "#aa1100"); drawPixel(50, 96, 12, 4, "#881100");
+
+        // Body bottom part
+        drawPixel(14, 84, 36, 4, "#b0b0b0");
+        drawPixel(14, 88, 36, 4, "#a0a0a0");
+        drawPixel(14, 92, 36, 4, "#909090");
+        drawPixel(18, 96, 28, 4, "#808080");
+
+        // Engine
+        drawPixel(22, 100, 20, 8, "#505050");
+
+        // Exhaust Flame Animation
+        const flicker = Math.random() > 0.5;
+        if (flicker) {
+            drawPixel(26, 108, 12, 4, "#ffff00");
+            drawPixel(28, 112, 8, 4, "#ffff00");
+            drawPixel(22, 108, 4, 4, "#ff6600");
+            drawPixel(38, 108, 4, 4, "#ff4400");
+            drawPixel(28, 120, 8, 4, "#ff4400");
         } else {
-            ctx.beginPath();
-            ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
-            ctx.fill();
+            drawPixel(26, 108, 12, 6, "#ffcc00");
+            drawPixel(28, 114, 8, 4, "#ff9900");
+            drawPixel(22, 108, 4, 4, "#ff4400");
+            drawPixel(38, 108, 4, 4, "#ff2200");
+            drawPixel(30, 124, 4, 4, "#cc2200");
         }
+
+    } else {
+        // Projectile Body (Cannon)
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+        ctx.fill();
     }
     ctx.restore();
     
     // Trail (only for moving projectiles)
-    if (this.speed > 0) {
+    if (this.speed > 0 && this.type === ProjectileType.CANNON) {
         ctx.fillStyle = this.color + '44'; // Alpha
         ctx.beginPath();
         ctx.arc(ix - this.vx * 0.02, iy - this.vy * 0.02, this.radius * 0.7, 0, Math.PI * 2);
