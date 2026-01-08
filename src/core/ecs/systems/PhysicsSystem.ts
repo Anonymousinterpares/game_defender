@@ -222,17 +222,32 @@ export class PhysicsSystem implements System {
 
                     if (distSq < radSum * radSum && distSq > 0) {
                         const dist = Math.sqrt(distSq);
-                        const overlap = (radSum - dist) * 0.5;
+                        const overlap = (radSum - dist);
                         const nx = dx / dist;
                         const ny = dy / dist;
 
-                        // Pushing logic (shared)
-                        // Note: This modifies 'nextX' directly for the current entity
-                        // For the 'other' entity, we'd ideally resolve it too, 
-                        // but to keep it simple and stable in a single pass, 
-                        // we push the current one away.
-                        nextX += nx * overlap;
-                        nextY += ny * overlap;
+                        // Push both entities away from each other
+                        // 0.5 ratio means they both move equally. 
+                        // We could use mass if we had it.
+                        const ratio = 0.5;
+
+                        // Adjust current entity's potential next position
+                        // (We need to update the local variables nextX, nextY for the current step)
+                        // This will be committed to the transform after the loop.
+                        nextX += nx * overlap * ratio;
+                        nextY += ny * overlap * ratio;
+
+                        // Adjust the other entity's actual position immediately
+                        // This prevents them from "sinking" into each other in the next frame
+                        otherTransform.x -= nx * overlap * (1 - ratio);
+                        otherTransform.y -= ny * overlap * (1 - ratio);
+
+                        // Also push their velocities slightly to prevent sticky collisions
+                        const pushStrength = 20;
+                        physics.vx += nx * pushStrength;
+                        physics.vy += ny * pushStrength;
+                        otherPhysics.vx -= nx * pushStrength;
+                        otherPhysics.vy -= ny * pushStrength;
                     }
                 }
             }

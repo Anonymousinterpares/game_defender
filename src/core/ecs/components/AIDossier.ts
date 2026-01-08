@@ -30,6 +30,7 @@ export interface EnemyDossier {
         radius: number;
         attackRange: number;
         preferredDistance?: number;
+        contactDamage?: number; // Damage dealt on touch
     };
     visuals: {
         color: string;

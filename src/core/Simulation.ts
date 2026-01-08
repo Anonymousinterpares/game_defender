@@ -19,6 +19,7 @@ import { PhysicsSystem } from './ecs/systems/PhysicsSystem';
 import { FireSystem } from './ecs/systems/FireSystem';
 import { InputSystem } from './ecs/systems/InputSystem';
 import { AISystem } from './ecs/systems/AISystem';
+import { ContactDamageSystem } from './ecs/systems/ContactDamageSystem';
 import { RenderSystem } from './ecs/systems/RenderSystem';
 import { System } from './ecs/System';
 import { TransformComponent } from './ecs/components/TransformComponent';
@@ -57,6 +58,7 @@ export class Simulation implements WeaponParent, CombatParent {
     private fireSystem: FireSystem;
     private inputSystem: InputSystem;
     private aiSystem: AISystem;
+    private contactDamageSystem: ContactDamageSystem;
     private renderSystem: RenderSystem;
     private customSystems: System[] = [];
 
@@ -94,6 +96,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.fireSystem = new FireSystem();
         this.inputSystem = new InputSystem();
         this.aiSystem = new AISystem(this.world);
+        this.contactDamageSystem = new ContactDamageSystem();
         this.renderSystem = new RenderSystem();
         this.pluginManager = new PluginManager(this);
         
@@ -233,6 +236,7 @@ export class Simulation implements WeaponParent, CombatParent {
         
         if (this.role !== SimulationRole.CLIENT) {
             this.aiSystem.update(dt, this.entityManager);
+            this.contactDamageSystem.update(dt, this.entityManager);
         }
 
         this.combatSystem.update(dt);
