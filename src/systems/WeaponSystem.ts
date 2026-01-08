@@ -121,7 +121,7 @@ export class WeaponSystem {
         this.netBroadcastTimer += dt;
         if (this.netBroadcastTimer >= 0.1) {
             this.netDamageAccumulator.forEach((dmg, targetId) => {
-                if (dmg > 0.1) {
+                if (dmg > 0.01) {
                     MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
                         id: targetId,
                         damage: dmg,
@@ -194,77 +194,62 @@ export class WeaponSystem {
         
         const player = this.parent.player;
         const maxDist = type === 'laser' ? 800 : 500;
-        
-        // Use World raycast for consistency
         const wallHit = this.parent.world.raycast(player.x, player.y, player.rotation, maxDist);
         
         let dist = 0;
-        let hitEnemy: Enemy | null = null;
-        let hitRP: any = null;
+        let hitEntity: Entity | null = null;
         let hitSomething = !!wallHit;
         let finalX = wallHit ? wallHit.x : player.x + Math.cos(player.rotation) * maxDist;
         let finalY = wallHit ? wallHit.y : player.y + Math.sin(player.rotation) * maxDist;
 
-        // Check Entities along the beam BEFORE it hits a wall
         const actualMaxDist = wallHit ? Math.sqrt((wallHit.x - player.x)**2 + (wallHit.y - player.y)**2) : maxDist;
         
-        // Entity check (Enemies and Remote Players)
+        // Unified Entity check (Enemies and Remote Players) using checkHitbox
+        const targets: Entity[] = [...this.parent.enemies, ...this.parent.remotePlayers];
         const step = 8;
         for (let d = 0; d < actualMaxDist; d += step) {
             const tx = player.x + Math.cos(player.rotation) * d;
             const ty = player.y + Math.sin(player.rotation) * d;
 
-            // Enemies
-            for (const e of this.parent.enemies) {
-                const dx = e.x - tx;
-                const dy = e.y - ty;
-                if (Math.sqrt(dx*dx + dy*dy) < e.radius) {
-                    hitEnemy = e;
+            for (const e of targets) {
+                if (e.active && e.checkHitbox(tx, ty)) {
+                    hitEntity = e;
                     dist = d;
                     finalX = tx; finalY = ty;
                     break;
                 }
             }
-            if (hitEnemy) break;
-
-            // Remote Players
-            for (const rp of this.parent.remotePlayers) {
-                const dx = rp.x - tx;
-                const dy = rp.y - ty;
-                if (Math.sqrt(dx*dx + dy*dy) < rp.radius) {
-                    hitRP = rp;
-                    dist = d;
-                    finalX = tx; finalY = ty;
-                    break;
-                }
-            }
-            if (hitRP) break;
+            if (hitEntity) break;
         }
 
-        if (!hitEnemy && !hitRP && wallHit) {
+        if (!hitEntity && wallHit) {
             dist = actualMaxDist;
-        } else if (!hitEnemy && !hitRP) {
+        } else if (!hitEntity) {
             dist = maxDist;
         }
 
         this.beamEndPos = { x: finalX, y: finalY };
         
-        if (hitRP) {
+        if (hitEntity) {
             const dmg = type === 'laser' ? ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt : 
                         (ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage') / (1 + (dist/32)**2)) * dt;
             
-            const current = this.netDamageAccumulator.get(hitRP.id) || 0;
-            this.netDamageAccumulator.set(hitRP.id, current + dmg);
+            if ((hitEntity as any).id && (hitEntity as any).id !== this.parent.myId && !(hitEntity instanceof Enemy)) {
+                const current = this.netDamageAccumulator.get((hitEntity as any).id) || 0;
+                this.netDamageAccumulator.set((hitEntity as any).id, current + dmg);
+            } else {
+                hitEntity.takeDamage(dmg);
+            }
         }
         
         const hitSfx = type === 'laser' ? 'hit_laser' : 'hit_ray';
 
-        if (hitSomething || hitEnemy || hitRP) {
+        if (hitSomething || hitEntity) {
             const eb = EventBus.getInstance();
             eb.emit(GameEvent.SOUND_LOOP_START, { soundId: hitSfx, x: this.beamEndPos.x, y: this.beamEndPos.y });
             eb.emit(GameEvent.SOUND_LOOP_MOVE, { soundId: hitSfx, x: this.beamEndPos.x, y: this.beamEndPos.y });
             
-            if (!hitEnemy && !hitRP) {
+            if (!hitEntity) {
                 const heatAmount = type === 'laser' ? 0.4 : 0.6;
                 this.parent.heatMap.addHeat(this.beamEndPos.x, this.beamEndPos.y, heatAmount * dt * 5, 12);
                 
@@ -275,12 +260,6 @@ export class WeaponSystem {
                         hitType: 'wall'
                     });
                 }
-            }
-
-            if (hitEnemy) {
-                const dmg = type === 'laser' ? ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt : 
-                            (ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage') / (1 + (dist/32)**2)) * dt;
-                hitEnemy.takeDamage(dmg);
             }
         } else {
             EventBus.getInstance().emit(GameEvent.SOUND_LOOP_STOP, { soundId: hitSfx });
@@ -298,27 +277,39 @@ export class WeaponSystem {
         const coneAngle = Math.PI / 4;
 
         const targets: Entity[] = [...this.parent.enemies, ...this.parent.remotePlayers];
+        
+        // Improved Flamethrower detection: check multiple points in the cone against entity hitboxes
         targets.forEach(e => {
-            const dx = e.x - player.x;
-            const dy = e.y - player.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            
-            if (dist < range) {
-                const angleToTarget = Math.atan2(dy, dx);
-                let diff = angleToTarget - player.rotation;
-                while (diff < -Math.PI) diff += Math.PI * 2;
-                while (diff > Math.PI) diff -= Math.PI * 2;
+            if (!e.active) return;
+            const bodies = e.getAllBodies();
+            let hit = false;
 
-                if (Math.abs(diff) < coneAngle / 2) {
-                    // If it's a remote player, we must broadcast the hit
-                    if ((e as any).id && (e as any).id !== this.parent.myId && !(e instanceof Enemy)) {
-                        const current = this.netDamageAccumulator.get((e as any).id) || 0;
-                        this.netDamageAccumulator.set((e as any).id, current + damage * dt);
-                    } else {
-                        e.takeDamage(damage * dt);
+            for (const b of bodies) {
+                const dx = b.x - player.x;
+                const dy = b.y - player.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                if (dist < range) {
+                    const angleToTarget = Math.atan2(dy, dx);
+                    let diff = angleToTarget - player.rotation;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+
+                    if (Math.abs(diff) < coneAngle / 2) {
+                        hit = true;
+                        break;
                     }
-                    (e as any).isOnFire = true;
                 }
+            }
+
+            if (hit) {
+                if ((e as any).id && (e as any).id !== this.parent.myId && !(e instanceof Enemy)) {
+                    const current = this.netDamageAccumulator.get((e as any).id) || 0;
+                    this.netDamageAccumulator.set((e as any).id, current + damage * dt);
+                } else {
+                    e.takeDamage(damage * dt);
+                }
+                (e as any).isOnFire = true;
             }
         });
 

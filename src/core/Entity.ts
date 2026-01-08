@@ -204,6 +204,27 @@ export abstract class Entity implements PhysicsBody {
     }
   }
 
+  /**
+   * Returns all physical bodies/hitboxes associated with this entity.
+   * Defaults to just the entity itself, but can be overridden (e.g., by Player/RemotePlayer).
+   */
+  public getAllBodies(): PhysicsBody[] {
+      return [this];
+  }
+
+  /**
+   * Generic collision check against all hitboxes of this entity.
+   */
+  public checkHitbox(x: number, y: number): boolean {
+      const bodies = this.getAllBodies();
+      for (const b of bodies) {
+          const dx = b.x - x;
+          const dy = b.y - y;
+          if (dx*dx + dy*dy < b.radius * b.radius) return true;
+      }
+      return false;
+  }
+
   public handleFireLogic(dt: number, fireDPS: number, baseExtinguishChance: number): void {
       // NOTE: Gameplay logic (damage/extinguish) moved to ECS FireSystem
       // This method now only updates visual feedback timers for legacy entities
