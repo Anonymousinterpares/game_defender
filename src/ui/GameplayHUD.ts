@@ -266,6 +266,8 @@ export class GameplayHUD {
         const reloadTimer = this.parent.weaponReloadTimer.get(weapon) || 0;
         const currentAmmo = this.parent.weaponAmmo.get(weapon) || 0;
 
+        const displayName = weapon === 'missile' ? 'GUIDED MISSILE' : weapon.toUpperCase();
+
         let ammoText = "";
         if (weapon === 'cannon') {
             ammoText = "AMMO: ∞";
@@ -276,15 +278,16 @@ export class GameplayHUD {
         
         ctx.fillStyle = isReloading ? '#ff4500' : '#cfaa6e';
         ctx.font = 'bold 16px "Share Tech Mono"';
-        ctx.fillText(`${weapon.toUpperCase()} | ${ammoText}`, 10, 70);
+        ctx.fillText(`${displayName} | ${ammoText}`, 10, 70);
 
         ctx.font = '12px "Share Tech Mono"';
         let slotX = 10;
         Object.entries(this.parent.weaponSlots).forEach(([key, name], i) => {
             const isSelected = name === weapon;
             const isUnlocked = this.parent.unlockedWeapons.has(name);
+            const slotDisplayName = name === 'missile' ? 'GUIDED MISSILE' : name.toUpperCase();
             ctx.fillStyle = isSelected ? '#00ff00' : (isUnlocked ? '#888' : '#444');
-            ctx.fillText(`${i+1}: ${name.toUpperCase()}${isSelected ? ' <' : ''}`, slotX, 90 + i * 15);
+            ctx.fillText(`${i+1}: ${slotDisplayName}${isSelected ? ' <' : ''}`, slotX, 90 + i * 15);
         });
 
         if (!this.parent.player.active) {

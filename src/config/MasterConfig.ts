@@ -30,7 +30,7 @@ export const MasterConfig: GameConfigSchema = {
     maxHealth: { value: 100, type: 'number', min: 1, max: 1000, step: 10, description: 'Base Health' },
     bodyLength: { value: 2, type: 'number', min: 1, max: 20, step: 1, description: 'Additional Body Segments' },
     shootCooldown: { value: 0.2, type: 'number', min: 0.05, max: 2.0, step: 0.01, description: 'Weapon Fire Rate' },
-    activeWeapon: { value: 'cannon', type: 'string', description: 'Active Weapon (cannon, laser, ray, rocket, missile, mine)', options: ['cannon', 'laser', 'ray', 'rocket', 'missile', 'mine'] }
+    activeWeapon: { value: 'cannon', type: 'string', description: 'Active Weapon (cannon, laser, ray, rocket, guided missile, mine)', options: ['cannon', 'laser', 'ray', 'rocket', 'missile', 'mine'] }
   },
   Weapons: {
     cannonDamage: { value: 10, type: 'number', min: 1, max: 100, step: 1, description: 'Cannon Damage' },
@@ -48,16 +48,16 @@ export const MasterConfig: GameConfigSchema = {
     rayReloadTime: { value: 5.0, type: 'number', min: 1, max: 20, step: 1, description: 'Ray Charge (s)' },
 
     rocketDamage: { value: 60, type: 'number', min: 10, max: 500, step: 10, description: 'Rocket Impact Damage' },
-    rocketMaxAmmo: { value: 30, type: 'number', min: 1, max: 200, step: 1, description: 'Rocket Mag Size' },
+    rocketMaxAmmo: { value: 30, type: 'number', min: 1, max: 100, step: 1, description: 'Rocket Mag Size' },
     rocketReloadTime: { value: 3.0, type: 'number', min: 1, max: 20, step: 1, description: 'Rocket Reload (s)' },
     rocketAOE: { value: 3.5, type: 'number', min: 1, max: 10, step: 0.5, description: 'Rocket AOE Radius' },
 
-    missileDamage: { value: 30, type: 'number', min: 5, max: 300, step: 5, description: 'Missile Damage' },
-    missileMaxAmmo: { value: 60, type: 'number', min: 1, max: 200, step: 1, description: 'Missile Mag Size' },
-    missileReloadTime: { value: 4.0, type: 'number', min: 1, max: 20, step: 1, description: 'Missile Reload (s)' },
-    missileAOE: { value: 2.5, type: 'number', min: 1, max: 10, step: 0.5, description: 'Missile AOE Radius' },
-    missileSpeed: { value: 8, type: 'number', min: 2, max: 20, step: 1, description: 'Missile Speed' },
-    missileTurnSpeed: { value: 0.1, type: 'number', min: 0.01, max: 0.5, step: 0.01, description: 'Missile Agility' },
+    missileDamage: { value: 30, type: 'number', min: 5, max: 300, step: 5, description: 'Guided Missile Damage' },
+    missileMaxAmmo: { value: 60, type: 'number', min: 1, max: 200, step: 1, description: 'Guided Missile Mag Size' },
+    missileReloadTime: { value: 4.0, type: 'number', min: 1, max: 20, step: 1, description: 'Guided Missile Reload (s)' },
+    missileAOE: { value: 2.5, type: 'number', min: 1, max: 10, step: 0.5, description: 'Guided Missile AOE Radius' },
+    missileSpeed: { value: 8, type: 'number', min: 2, max: 20, step: 1, description: 'Guided Missile Speed' },
+    missileTurnSpeed: { value: 0.1, type: 'number', min: 0.01, max: 0.5, step: 0.01, description: 'Guided Missile Agility' },
 
     mineDamage: { value: 80, type: 'number', min: 10, max: 1000, step: 10, description: 'Mine Damage' },
     mineMaxAmmo: { value: 20, type: 'number', min: 1, max: 200, step: 1, description: 'Mine Mag Size' },
