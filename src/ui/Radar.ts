@@ -14,11 +14,14 @@ interface RadarBlip {
 export class Radar {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private scanAngle: number = 0;
-  private lastScanAngle: number = 0;
   
   // Persistence
   private blips: Map<string, RadarBlip> = new Map();
+  
+  // Pulse logic
+  private pulseTimer: number = 0;
+  private pulseVisual: number = 0; // 0 to 1 for expanding circle
+  private currentInterval: number = 2.0;
   
   // Config
   private size: number = 200;
@@ -38,6 +41,7 @@ export class Radar {
     this.canvas.style.borderRadius = '50%';
     this.canvas.style.border = '2px solid #00ff00';
     this.canvas.style.backgroundColor = 'rgba(0, 20, 0, 0.8)';
+    this.canvas.style.boxShadow = '0 0 15px rgba(0, 255, 0, 0.3)';
     
     document.getElementById('ui-layer')?.appendChild(this.canvas);
   }
@@ -47,28 +51,84 @@ export class Radar {
   }
 
   public update(dt: number): void {
-    this.lastScanAngle = this.scanAngle;
-    // Rotate scanner
-    this.scanAngle += dt * 3; // Slightly faster scan
-    if (this.scanAngle > Math.PI * 2) {
-        this.scanAngle -= Math.PI * 2;
-        this.lastScanAngle -= Math.PI * 2;
+    // Pulse Visual Animation
+    if (this.pulseVisual < 1.0) {
+        this.pulseVisual += dt * (1.5 / this.currentInterval); 
     }
 
     // Decay blips
     this.blips.forEach((blip, id) => {
-        blip.life -= dt * 0.5; // Fades out over 2 seconds
+        blip.life -= dt * 0.4; // Slightly slower fade
         if (blip.life <= 0) this.blips.delete(id);
     });
+
+    this.pulseTimer -= dt;
   }
 
   public render(player: Player, entities: Entity[]): void {
-    this.ctx.clearRect(0, 0, this.size, this.size);
-    
     const center = this.size / 2;
     const scale = (this.size / 2) / this.range;
 
-    // 1. Draw Static Grid
+    // 1. Calculate next pulse interval based on closest entity
+    let minDist = this.range;
+    let foundAny = false;
+
+    entities.forEach(entity => {
+        if (entity instanceof Player) return;
+        const dx = entity.x - player.x;
+        const dy = entity.y - player.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        if (dist < this.range) {
+            foundAny = true;
+            if (dist < minDist) minDist = dist;
+        }
+    });
+
+    // Frequency logic: 0.3s (closest) to 2.0s (furthest/idle)
+    const targetInterval = foundAny ? 0.3 + (minDist / this.range) * 1.7 : 2.5;
+    this.currentInterval = targetInterval;
+
+    // 2. Trigger Pulse
+    if (this.pulseTimer <= 0) {
+        this.pulseTimer = this.currentInterval;
+        this.pulseVisual = 0; // Reset visual animation
+
+        // Play Ping Sound
+        EventBus.getInstance().emit(GameEvent.SOUND_PLAY_SPATIAL, {
+            soundId: 'ping',
+            x: player.x,
+            y: player.y
+        });
+
+        // Update all blips at once
+        entities.forEach(entity => {
+            if (entity instanceof Player) return;
+            const dx = entity.x - player.x;
+            const dy = entity.y - player.y;
+            const distSq = dx*dx + dy*dy;
+            
+            if (distSq <= this.range * this.range) {
+                const id = entity.constructor.name + "_" + entity.id; // Using entity.id if available, fallback to pos
+                
+                let specificColor: string | undefined;
+                if (entity instanceof RemotePlayer) specificColor = entity.color;
+
+                this.blips.set(id, {
+                    x: dx * scale,
+                    y: dy * scale,
+                    type: entity.constructor.name,
+                    life: 1.0,
+                    color: specificColor
+                });
+            }
+        });
+    }
+
+    // 3. Drawing
+    this.ctx.clearRect(0, 0, this.size, this.size);
+    
+    // Draw Static Grid
     this.ctx.strokeStyle = 'rgba(0, 255, 0, 0.2)';
     this.ctx.lineWidth = 1;
     this.ctx.beginPath();
@@ -84,50 +144,17 @@ export class Radar {
     this.ctx.moveTo(center, 0); this.ctx.lineTo(center, this.size);
     this.ctx.stroke();
 
-    // 2. Process Scanning
-    let pingTriggered = false;
-
-    entities.forEach(entity => {
-      if (entity instanceof Player) return; // Player is always at center
-
-      const dx = entity.x - player.x;
-      const dy = entity.y - player.y;
-      
-      if (Math.abs(dx) > this.range || Math.abs(dy) > this.range) return;
-
-      // Angle relative to radar (up is -PI/2)
-      let angle = Math.atan2(dy, dx); 
-      if (angle < 0) angle += Math.PI * 2;
-      
-      // If scan line passes the entity's angle
-      if (this.isAngleBetween(angle, this.lastScanAngle, this.scanAngle)) {
-          // Use a semi-unique ID (using instance for simplicity in this prototype)
-          // In a real game use entity.id
-          const id = entity.constructor.name + "_" + Math.floor(entity.x) + "_" + Math.floor(entity.y);
-          
-          let specificColor: string | undefined;
-          if (entity instanceof RemotePlayer) specificColor = entity.color;
-
-          this.blips.set(id, {
-              x: dx * scale,
-              y: dy * scale,
-              type: entity.constructor.name,
-              life: 1.0,
-              color: specificColor
-          });
-          pingTriggered = true;
-      }
-    });
-
-    if (pingTriggered) {
-        EventBus.getInstance().emit(GameEvent.SOUND_PLAY_SPATIAL, {
-            soundId: 'ping',
-            x: player.x,
-            y: player.y
-        });
+    // Pulse Visual Ring
+    if (this.pulseVisual < 1.0) {
+        const ringAlpha = (1.0 - this.pulseVisual) * 0.4;
+        this.ctx.strokeStyle = `rgba(0, 255, 0, ${ringAlpha})`;
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        this.ctx.arc(center, center, this.pulseVisual * (this.size / 2), 0, Math.PI * 2);
+        this.ctx.stroke();
     }
 
-    // 3. Render Blips
+    // Render Blips
     this.blips.forEach(blip => {
         const x = center + blip.x;
         const y = center + blip.y;
@@ -143,38 +170,16 @@ export class Radar {
         this.ctx.shadowColor = color;
         
         this.ctx.beginPath();
-        this.ctx.arc(x, y, 2, 0, Math.PI * 2);
+        this.ctx.arc(x, y, 2.5, 0, Math.PI * 2);
         this.ctx.fill();
     });
     this.ctx.shadowBlur = 0;
     this.ctx.globalAlpha = 1.0;
 
-    // 4. Player (Fixed at center)
+    // Player (Fixed at center)
     this.ctx.fillStyle = '#fff';
     this.ctx.beginPath();
     this.ctx.arc(center, center, 3, 0, Math.PI * 2);
     this.ctx.fill();
-
-    // 5. Draw Scan Line with trailing sweep
-    const sweepSegments = 20;
-    for (let i = 0; i < sweepSegments; i++) {
-        const alpha = (1 - i / sweepSegments) * 0.5;
-        const angle = this.scanAngle - (i * 0.05);
-        this.ctx.strokeStyle = `rgba(0, 255, 0, ${alpha})`;
-        this.ctx.lineWidth = i === 0 ? 2 : 1;
-        this.ctx.beginPath();
-        this.ctx.moveTo(center, center);
-        this.ctx.lineTo(center + Math.cos(angle) * (this.size/2), center + Math.sin(angle) * (this.size/2));
-        this.ctx.stroke();
-    }
-  }
-
-  private isAngleBetween(target: number, start: number, end: number): boolean {
-      if (start <= end) {
-          return target >= start && target < end;
-      } else {
-          // Wrap around case (e.g. start=350 deg, end=10 deg)
-          return target >= start || target < end;
-      }
   }
 }
