@@ -151,6 +151,19 @@ export class RenderSystem implements System {
             ctx.fill();
             ctx.stroke();
             ctx.restore();
+        } else if (shape === 'rocket') {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
+            ctx.beginPath();
+            ctx.moveTo(radius, 0);
+            ctx.lineTo(-radius, -radius * 0.8);
+            ctx.lineTo(-radius * 0.5, 0);
+            ctx.lineTo(-radius, radius * 0.8);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
         }
 
         // Eye/Core

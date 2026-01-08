@@ -66,6 +66,87 @@ export class AISystem implements System {
 
             // 2. Behavior Execution
             this.executeBehavior(dt, ai, transform, physics, playerTransform);
+
+            // 3. Crowd Simulation (Steering Behaviors)
+            this.applySteering(id, aiEntities, entityManager, transform, physics, ai);
+        }
+    }
+
+    private applySteering(
+        id: string, 
+        allAiIds: string[], 
+        entityManager: EntityManager, 
+        transform: TransformComponent, 
+        physics: PhysicsComponent,
+        ai: AIComponent
+    ): void {
+        let sepX = 0, sepY = 0; // Separation
+        let aliX = 0, aliY = 0; // Alignment
+        let cohX = 0, cohY = 0; // Cohesion
+        
+        let sepCount = 0;
+        let flockCount = 0;
+
+        const sepDist = 35;
+        const flockDist = 100;
+
+        for (const otherId of allAiIds) {
+            if (id === otherId) continue;
+            
+            const otherTransform = entityManager.getComponent<TransformComponent>(otherId, 'transform');
+            const otherPhysics = entityManager.getComponent<PhysicsComponent>(otherId, 'physics');
+            const otherAi = entityManager.getComponent<AIComponent>(otherId, 'ai');
+            if (!otherTransform || !otherPhysics || !otherAi) continue;
+
+            const dx = transform.x - otherTransform.x;
+            const dy = transform.y - otherTransform.y;
+            const distSq = dx * dx + dy * dy;
+
+            // Separation (Avoid all)
+            if (distSq > 0 && distSq < sepDist * sepDist) {
+                const dist = Math.sqrt(distSq);
+                sepX += dx / dist;
+                sepY += dy / dist;
+                sepCount++;
+            }
+
+            // Alignment & Cohesion (Only with same behavior/dossier type)
+            if (otherAi.behavior === ai.behavior && distSq < flockDist * flockDist) {
+                aliX += otherPhysics.vx;
+                aliY += otherPhysics.vy;
+                
+                cohX += otherTransform.x;
+                cohY += otherTransform.y;
+                flockCount++;
+            }
+        }
+
+        const steeringForce = 40;
+
+        // Apply Separation
+        if (sepCount > 0) {
+            physics.vx += (sepX / sepCount) * (steeringForce * 1.5);
+            physics.vy += (sepY / sepCount) * (steeringForce * 1.5);
+        }
+
+        // Apply Alignment & Cohesion (Flocking)
+        if (flockCount > 0) {
+            // Alignment: Match velocity
+            const avgAliX = aliX / flockCount;
+            const avgAliY = aliY / flockCount;
+            physics.vx += (avgAliX - physics.vx) * 0.05;
+            physics.vy += (avgAliY - physics.vy) * 0.05;
+
+            // Cohesion: Move to center
+            const avgCohX = cohX / flockCount;
+            const avgCohY = cohY / flockCount;
+            const cohDirX = avgCohX - transform.x;
+            const cohDirY = avgCohY - transform.y;
+            const cohDist = Math.sqrt(cohDirX * cohDirX + cohDirY * cohDirY);
+            if (cohDist > 0) {
+                physics.vx += (cohDirX / cohDist) * (steeringForce * 0.5);
+                physics.vy += (cohDirY / cohDist) * (steeringForce * 0.5);
+            }
         }
     }
 
@@ -138,6 +219,18 @@ export class AISystem implements System {
             case AIBehavior.STATIONARY:
                 physics.vx = 0;
                 physics.vy = 0;
+                transform.rotation = Math.atan2(dy, dx);
+                break;
+
+            case AIBehavior.FLOCK:
+                // Move towards player but with less urgency, letting steering handle the group
+                if (distToPlayer > 100) {
+                    physics.vx = (dx / distToPlayer) * ai.speed * 0.8;
+                    physics.vy = (dy / distToPlayer) * ai.speed * 0.8;
+                } else if (distToPlayer > 10) {
+                    physics.vx = (dx / distToPlayer) * ai.speed;
+                    physics.vy = (dy / distToPlayer) * ai.speed;
+                }
                 transform.rotation = Math.atan2(dy, dx);
                 break;
 

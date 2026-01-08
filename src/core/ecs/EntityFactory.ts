@@ -7,7 +7,7 @@ import { RenderComponent } from "./components/RenderComponent";
 import { TagComponent } from "./components/TagComponent";
 import { InputComponent } from "./components/InputComponent";
 import { AIComponent } from "./components/AIComponent";
-import { AIBehavior } from "./components/AIDossier";
+import { AIBehavior, TRAIT_LIBRARY } from "./components/AIDossier";
 import { ConfigManager } from "../../config/MasterConfig";
 import { EnemyRegistry } from "../../entities/enemies/EnemyRegistry";
 
@@ -38,14 +38,26 @@ export class EntityFactory {
         let dossier = registry.get(type);
         if (!dossier) dossier = registry.get('Scout')!;
 
+        // Apply trait modifiers to base stats
+        let finalHp = dossier.baseStats.hp;
+        let finalSpeed = dossier.baseStats.speed;
+        
+        dossier.traits.forEach(traitId => {
+            const trait = TRAIT_LIBRARY[traitId];
+            if (trait && trait.modifiers) {
+                if (trait.modifiers.hpMul) finalHp *= trait.modifiers.hpMul;
+                if (trait.modifiers.speedMul) finalSpeed *= trait.modifiers.speedMul;
+            }
+        });
+
         entityManager.addComponent(id, new TagComponent('enemy'));
         entityManager.addComponent(id, new TransformComponent(x, y, 0));
         entityManager.addComponent(id, new PhysicsComponent(0, 0, dossier.baseStats.radius));
-        entityManager.addComponent(id, new HealthComponent(dossier.baseStats.hp, dossier.baseStats.hp));
+        entityManager.addComponent(id, new HealthComponent(finalHp, finalHp));
         entityManager.addComponent(id, new FireComponent());
         entityManager.addComponent(id, new RenderComponent('enemy', dossier.visuals.color, dossier.baseStats.radius));
         
-        const aiComp = new AIComponent(dossier.behavior, null, dossier.baseStats.speed);
+        const aiComp = new AIComponent(dossier.behavior, null, finalSpeed);
         aiComp.dossier = dossier;
         entityManager.addComponent(id, aiComp);
 

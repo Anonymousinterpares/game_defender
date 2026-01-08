@@ -2,6 +2,7 @@ import { EntityManager } from '../EntityManager';
 import { System } from '../System';
 import { FireComponent } from '../components/FireComponent';
 import { HealthComponent } from '../components/HealthComponent';
+import { AIComponent } from '../components/AIComponent';
 import { ConfigManager } from '../../../config/MasterConfig';
 
 export class FireSystem implements System {
@@ -16,6 +17,10 @@ export class FireSystem implements System {
         for (const id of entityIds) {
             const fire = entityManager.getComponent<FireComponent>(id, 'fire')!;
             const health = entityManager.getComponent<HealthComponent>(id, 'health')!;
+            const ai = entityManager.getComponent<AIComponent>(id, 'ai');
+
+            // Respect heat_proof trait
+            const isHeatProof = ai?.dossier?.traits.includes('heat_proof');
 
             // Update visual feedback timers (moved from Entity)
             if (health.damageFlash > 0) health.damageFlash -= dt;
@@ -25,6 +30,11 @@ export class FireSystem implements System {
             }
 
             if (!fire.isOnFire) continue;
+
+            if (isHeatProof) {
+                fire.isOnFire = false;
+                continue;
+            }
 
             fire.fireTimer += dt;
             

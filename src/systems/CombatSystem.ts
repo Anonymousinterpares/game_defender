@@ -99,6 +99,30 @@ export class CombatSystem {
         }
     }
 
+    private calculateDamage(target: any, rawDamage: number, sourceX: number, sourceY: number): number {
+        // Only enemies have traits/dossiers for now
+        if (!target.id || !this.parent.entityManager) return rawDamage;
+        
+        const ai = this.parent.entityManager.getComponent(target.id, 'ai');
+        if (ai && ai.dossier && ai.dossier.traits.includes('armored')) {
+            const dx = sourceX - target.x;
+            const dy = sourceY - target.y;
+            const angleToSource = Math.atan2(dy, dx);
+            
+            // Normalize angles
+            let diff = angleToSource - target.rotation;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            
+            // If hit is from front (within 45 degrees of rotation)
+            if (Math.abs(diff) < Math.PI / 4) {
+                return rawDamage * 0.3; // 70% reduction
+            }
+        }
+        
+        return rawDamage;
+    }
+
     private resolveProjectileCollisions(): void {
         const { world, projectiles, enemies, remotePlayers, player } = this.parent;
         if (!world || !player) return;
@@ -116,7 +140,8 @@ export class CombatSystem {
                         if (p.aoeRadius > 0) {
                             this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
                         } else {
-                            e.takeDamage(p.damage);
+                            const finalDamage = this.calculateDamage(e, p.damage, p.x, p.y);
+                            e.takeDamage(finalDamage);
                             EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
                                 x: p.x, y: p.y, 
                                 projectileType: p.type, 
@@ -330,7 +355,9 @@ export class CombatSystem {
             const dist = Math.sqrt(dx*dx + dy*dy);
             if (dist < radius) {
                 const falloff = 1 - (dist / radius);
-                e.takeDamage(damage * falloff);
+                const rawDmg = damage * falloff;
+                const finalDmg = this.calculateDamage(e, rawDmg, x, y);
+                e.takeDamage(finalDmg);
             }
         });
 

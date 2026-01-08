@@ -57,5 +57,21 @@ export class EnemyRegistry {
             visuals: { color: '#00ffff', shape: 'triangle', glowColor: '#004444' },
             traits: []
         });
+
+        this.register({
+            name: 'Horde Runner',
+            behavior: AIBehavior.FLOCK,
+            baseStats: { hp: 10, speed: 200, radius: 8, attackRange: 30 },
+            visuals: { color: '#ffcc00', shape: 'rocket', glowColor: '#664400' },
+            traits: ['swift']
+        });
+
+        this.register({
+            name: 'Flame Bat',
+            behavior: AIBehavior.CHASE,
+            baseStats: { hp: 20, speed: 160, radius: 9, attackRange: 40 },
+            visuals: { color: '#ff6600', shape: 'triangle', glowColor: '#ff0000' },
+            traits: ['heat_proof', 'swift']
+        });
     }
 }
