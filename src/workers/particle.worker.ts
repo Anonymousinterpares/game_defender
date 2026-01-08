@@ -75,8 +75,8 @@ self.onmessage = (e: MessageEvent) => {
     } 
     else if (type === 'update') {
         if (!buffers) return;
-        const { dt, player, enemies } = data;
-        updateParticles(dt, player, enemies);
+        const { dt, player, enemies, weather } = data;
+        updateParticles(dt, player, enemies, weather);
         // Signal completion
         (self as any).postMessage({ type: 'updated' });
     }
@@ -91,13 +91,16 @@ function isWall(wx: number, wy: number): boolean {
     return tile !== 0; // MaterialType.NONE is 0
 }
 
-function updateParticles(dt: number, player: any, enemies: any[]) {
+function updateParticles(dt: number, player: any, enemies: any[], weather: any) {
     if (!buffers) return;
     const count = 10000;
     const b = buffers;
 
     const damageEvents: { targetIdx: number, damage: number }[] = [];
     const heatEvents: { x: number, y: number, intensity: number, radius: number }[] = [];
+
+    const windX = weather ? weather.windDir.x * weather.windSpeed : 0;
+    const windY = weather ? weather.windDir.y * weather.windSpeed : 0;
 
     for (let i = 0; i < count; i++) {
         if (!(b.flags[i] & FLAG_ACTIVE)) continue;
@@ -108,7 +111,24 @@ function updateParticles(dt: number, player: any, enemies: any[]) {
 
         const pType = b.type[i];
         
-        if (pType === ParticleType.STANDARD || pType === ParticleType.MOLTEN) {
+        if (pType === ParticleType.SMOKE) {
+            // Smoke physics: Wind + Drift + Turbulence
+            const driftY = -15; // Rising heat
+            const time = Date.now() * 0.001 + i;
+            const turbX = Math.sin(time * 2) * 10;
+            const turbY = Math.cos(time * 1.5) * 5;
+
+            b.vx[i] += (windX * 20 + turbX - b.vx[i] * 0.5) * dt;
+            b.vy[i] += (windY * 20 + driftY + turbY - b.vy[i] * 0.5) * dt;
+
+            b.x[i] += b.vx[i] * dt;
+            b.y[i] += b.vy[i] * dt;
+            
+            // Expand smoke
+            const lifeRatio = b.life[i] / b.maxLife[i];
+            b.radius[i] = b.startRadius[i] + (1.0 - lifeRatio) * (b.startRadius[i] * 2);
+        }
+        else if (pType === ParticleType.STANDARD || pType === ParticleType.MOLTEN) {
             const nextX = b.x[i] + b.vx[i] * dt;
             const nextY = b.y[i] + b.vy[i] * dt;
 

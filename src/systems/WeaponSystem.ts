@@ -190,6 +190,7 @@ export class WeaponSystem {
         
         EventBus.getInstance().emit(GameEvent.WEAPON_FIRED, { 
             x: player.x, y: player.y, 
+            rotation: player.rotation,
             weaponType: weapon, 
             ownerId: this.parent.myId 
         });

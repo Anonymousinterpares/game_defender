@@ -30,7 +30,7 @@ export enum GameEvent {
 export interface EventPayloads {
     [GameEvent.ENTITY_HIT]: { x: number, y: number, damage: number, targetId: string, sourceId: string, color?: string };
     [GameEvent.ENTITY_DEATH]: { x: number, y: number, entityId: string, type: string };
-    [GameEvent.WEAPON_FIRED]: { x: number, y: number, weaponType: string, ownerId: string };
+    [GameEvent.WEAPON_FIRED]: { x: number, y: number, weaponType: string, ownerId: string, rotation?: number };
     [GameEvent.WEAPON_RELOAD]: { x: number, y: number, ownerId: string };
     [GameEvent.PROJECTILE_HIT]: { x: number, y: number, projectileType: string, hitType: 'entity' | 'wall' | 'indestructible' };
     [GameEvent.EXPLOSION]: { x: number, y: number, radius: number, type: 'small' | 'large', moltenCount?: number };

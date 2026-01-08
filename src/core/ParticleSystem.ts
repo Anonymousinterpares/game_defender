@@ -3,6 +3,8 @@ import { World } from './World';
 import { ParticleType, FLAG_ACTIVE, FLAG_IS_FLAME, MAX_PARTICLES } from './ParticleConstants';
 import { EventBus, GameEvent } from './EventBus';
 import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
+import { WeatherManager } from './WeatherManager';
+import { ConfigManager } from '../config/MasterConfig';
 
 export class ParticleSystem {
     private static instance: ParticleSystem;
@@ -30,6 +32,8 @@ export class ParticleSystem {
     private activeIndices: Uint32Array;
     private activeCount: number = 0;
     
+    private smokeInterval: number = 0;
+
     // Bucket map for O(N) rendering: Map<hash, bucket>
     private buckets: Map<number, { count: number, x: Float32Array, y: Float32Array, r: Float32Array }>;
 
@@ -134,13 +138,13 @@ export class ParticleSystem {
             }
 
             // 4. Smoke
-            const smokeCount = 20 + Math.floor(Math.random() * 10);
+            const smokeCount = 15 + Math.floor(Math.random() * 10);
             for (let i = 0; i < smokeCount; i++) {
                 const angle = Math.random() * Math.PI * 2;
                 const speed = 40 + Math.random() * 80;
-                const life = 1.0 + Math.random() * 1.5;
-                const color = Math.random() < 0.5 ? '#333' : '#555';
-                this.spawnParticle(x, y, color, Math.cos(angle) * speed, Math.sin(angle) * speed, life);
+                const life = 2.0 + Math.random() * 1.5;
+                const color = Math.random() < 0.5 ? '#222' : '#444';
+                this.spawnSmoke(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed, life, 15 + Math.random() * 15, color);
             }
 
             // 5. Molten Metal (Shrapnel)
@@ -162,6 +166,10 @@ export class ParticleSystem {
                 const angle = Math.random() * Math.PI * 2;
                 const speed = 30 + Math.random() * 100;
                 this.spawnParticle(data.x, data.y, '#ccc', Math.cos(angle) * speed, Math.sin(angle) * speed, 0.2 + Math.random() * 0.2);
+            }
+            // Small puff of smoke on impact
+            if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke')) {
+                this.spawnSmoke(data.x, data.y, (Math.random()-0.5)*30, (Math.random()-0.5)*30, 1.0, 10, '#555');
             }
         });
 
@@ -187,6 +195,24 @@ export class ParticleSystem {
                     const speed = 20 + Math.random() * 50;
                     this.spawnParticle(data.x, data.y, '#666', Math.cos(angle) * speed, Math.sin(angle) * speed, 0.3);
                 }
+
+                // BACKBLAST SMOKE
+                if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke') && (data.weaponType === 'rocket' || data.weaponType === 'missile')) {
+                    const rot = (data as any).rotation || 0;
+                    const backAngle = rot + Math.PI;
+                    for (let i = 0; i < 8; i++) {
+                        const spread = (Math.random() - 0.5) * 0.5;
+                        const speed = 100 + Math.random() * 100;
+                        this.spawnSmoke(
+                            data.x, data.y, 
+                            Math.cos(backAngle + spread) * speed, 
+                            Math.sin(backAngle + spread) * speed, 
+                            0.8 + Math.random() * 0.4, 
+                            12 + Math.random() * 10, 
+                            '#888'
+                        );
+                    }
+                }
             }
         });
     }
@@ -211,7 +237,7 @@ export class ParticleSystem {
         }));
 
         // 2. Flame Glows for different colors
-        const flameColors = ['#fffbe6', '#ffcc00', '#ff4400', '#333'];
+        const flameColors = ['#fffbe6', '#ffcc00', '#ff4400', '#333', '#222', '#444', '#555', '#888'];
         flameColors.forEach(color => {
             this.spriteCache.set(`flame_${color}`, createCachedCanvas(32, ctx => {
                 const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
@@ -229,6 +255,16 @@ export class ParticleSystem {
             grad.addColorStop(0.2, 'rgba(255, 255, 0, 0.8)');
             grad.addColorStop(0.5, 'rgba(255, 68, 0, 0.5)');
             grad.addColorStop(1, 'rgba(255, 68, 0, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+        }));
+
+        // 4. Smoke Sprite (Softer)
+        this.spriteCache.set('smoke_soft', createCachedCanvas(64, ctx => {
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 0.6)');
+            grad.addColorStop(0.4, 'rgba(255, 255, 255, 0.2)');
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
             ctx.fillStyle = grad;
             ctx.fillRect(0, 0, 64, 64);
         }));
@@ -292,6 +328,21 @@ export class ParticleSystem {
         return i;
     }
 
+    public spawnSmoke(x: number, y: number, vx: number, vy: number, life: number, size: number, color: string): number {
+        const i = this.getNextIndex();
+        if (i === -1) return -1;
+        this.x[i] = x; this.y[i] = y; this.z[i] = 0;
+        this.prevX[i] = x; this.prevY[i] = y; this.prevZ[i] = 0;
+        this.vx[i] = vx; this.vy[i] = vy; this.vz[i] = 0;
+        this.life[i] = life; this.maxLife[i] = life;
+        this.radius[i] = size * 0.5;
+        this.startRadius[i] = this.radius[i];
+        this.type[i] = ParticleType.SMOKE;
+        this.colorIdx[i] = this.getColorIndex(color);
+        this.flags[i] = FLAG_ACTIVE;
+        return i;
+    }
+
     public spawnShockwave(x: number, y: number, radius: number): number {
         const i = this.getNextIndex();
         if (i === -1) return -1;
@@ -346,6 +397,15 @@ export class ParticleSystem {
         // Process pending events from the worker
         this.processWorkerEvents(player, enemies, world);
 
+        // STOCHASTIC SMOKE EMISSION
+        if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke') && world && (world as any).heatMap) {
+            this.smokeInterval += dt;
+            if (this.smokeInterval > 0.05) { // 20 times per second
+                this.smokeInterval = 0;
+                this.emitHeatSmoke(world);
+            }
+        }
+
         const useWorker = typeof SharedArrayBuffer !== 'undefined' && this.sharedBuffer instanceof SharedArrayBuffer;
 
         if (useWorker) {
@@ -356,7 +416,8 @@ export class ParticleSystem {
                     data: {
                         dt,
                         player: player ? { x: player.x, y: player.y, radius: player.radius, active: player.active } : null,
-                        enemies: enemies.map(e => ({ x: e.x, y: e.y, radius: e.radius, active: e.active }))
+                        enemies: enemies.map(e => ({ x: e.x, y: e.y, radius: e.radius, active: e.active })),
+                        weather: WeatherManager.getInstance().getWeatherState()
                     }
                 });
             }
@@ -387,6 +448,35 @@ export class ParticleSystem {
                     else if (moltenLifeRatio > 0.1) this.colorIdx[i] = this.getColorIndex('#ff4400');
                     else this.colorIdx[i] = this.getColorIndex('#222');
                 }
+            }
+        }
+    }
+
+    private emitHeatSmoke(world: World): void {
+        const heatMap = (world as any).heatMap;
+        if (!heatMap) return;
+        const activeTiles = heatMap.activeTiles;
+        const tileSize = (world as any).tileSize;
+
+        // Iterate a subset for performance
+        const sampleSize = Math.min(activeTiles.size, 10);
+        const entries = Array.from(activeTiles.keys()) as string[];
+        
+        for (let i = 0; i < sampleSize; i++) {
+            const key = entries[Math.floor(Math.random() * entries.length)];
+            const data = activeTiles.get(key);
+            if (!data) continue;
+
+            const [tx, ty] = key.split(',').map(Number);
+            const wx = tx * tileSize + Math.random() * tileSize;
+            const wy = ty * tileSize + Math.random() * tileSize;
+
+            if (data.isBurning) {
+                // Dense smoke over fire
+                this.spawnSmoke(wx, wy, (Math.random()-0.5)*10, (Math.random()-0.5)*10, 2.0 + Math.random()*2.0, 20 + Math.random()*20, '#111');
+            } else if (data.temperature > 50) {
+                // Faint smoke over heat
+                this.spawnSmoke(wx, wy, (Math.random()-0.5)*5, (Math.random()-0.5)*5, 1.0 + Math.random(), 10 + Math.random()*10, '#888');
             }
         }
     }
@@ -425,6 +515,10 @@ export class ParticleSystem {
     }
 
     private updateMainThread(dt: number, world: World | null, player: Entity | null, enemies: Entity[]): void {
+        const weather = WeatherManager.getInstance().getWeatherState();
+        const windX = weather.windDir.x * weather.windSpeed;
+        const windY = weather.windDir.y * weather.windSpeed;
+
         for (let i = 0; i < MAX_PARTICLES; i++) {
             if (!(this.flags[i] & FLAG_ACTIVE)) continue;
 
@@ -434,7 +528,22 @@ export class ParticleSystem {
 
             const pType = this.type[i];
             
-            if (pType === ParticleType.STANDARD || pType === ParticleType.MOLTEN) {
+            if (pType === ParticleType.SMOKE) {
+                const driftY = -15; // Rising heat
+                const time = Date.now() * 0.001 + i;
+                const turbX = Math.sin(time * 2) * 10;
+                const turbY = Math.cos(time * 1.5) * 5;
+
+                this.vx[i] += (windX * 20 + turbX - this.vx[i] * 0.5) * dt;
+                this.vy[i] += (windY * 20 + driftY + turbY - this.vy[i] * 0.5) * dt;
+
+                this.x[i] += this.vx[i] * dt;
+                this.y[i] += this.vy[i] * dt;
+                
+                const lifeRatio = this.life[i] / this.maxLife[i];
+                this.radius[i] = this.startRadius[i] + (1.0 - lifeRatio) * (this.startRadius[i] * 2);
+            }
+            else if (pType === ParticleType.STANDARD || pType === ParticleType.MOLTEN) {
                 const nextX = this.x[i] + this.vx[i] * dt;
                 const nextY = this.y[i] + this.vy[i] * dt;
                 const isFlame = this.flags[i] & FLAG_IS_FLAME;
@@ -531,7 +640,7 @@ export class ParticleSystem {
             const colorIdx = this.colorIdx[i];
             const lifeRatio = this.life[i] / this.maxLife[i];
 
-            if (pType === ParticleType.STANDARD) {
+            if (pType === ParticleType.STANDARD || pType === ParticleType.SMOKE) {
                 if (this.flags[i] & FLAG_IS_FLAME) {
                     const targetAlpha = Math.max(0, lifeRatio);
                     if (Math.abs(currentAlpha - targetAlpha) > 0.01) {
@@ -546,6 +655,22 @@ export class ParticleSystem {
                     const sprite = this.spriteCache.get(`flame_${colorStr}`);
                     if (sprite) {
                         const r = this.radius[i];
+                        ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
+                    }
+                } else if (pType === ParticleType.SMOKE) {
+                    const targetAlpha = Math.max(0, lifeRatio * 0.4);
+                    if (Math.abs(currentAlpha - targetAlpha) > 0.01) {
+                        ctx.globalAlpha = currentAlpha = targetAlpha;
+                    }
+                    if (currentGCO !== 'source-over') {
+                        ctx.globalCompositeOperation = currentGCO = 'source-over';
+                    }
+
+                    const colorStr = this.colorPalette[colorIdx];
+                    const sprite = this.spriteCache.get('smoke_soft');
+                    if (sprite) {
+                        const r = this.radius[i];
+                        // Render with color overlay
                         ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
                     }
                 } else {

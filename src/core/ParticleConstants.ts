@@ -2,7 +2,8 @@ export enum ParticleType {
     STANDARD = 0,
     SHOCKWAVE = 1,
     FLASH = 2,
-    MOLTEN = 3
+    MOLTEN = 3,
+    SMOKE = 4
 }
 
 export const FLAG_ACTIVE = 1 << 0;
