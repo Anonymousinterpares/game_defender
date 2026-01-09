@@ -20,7 +20,8 @@ export class Enemy extends Entity {
 
     if (!player || !this.active) return;
 
-    // Basic Chase AI
+    // LEGACY AI DISABLED: Logic moved to ECS AISystem
+    /*
     const dx = player.x - this.x;
     const dy = player.y - this.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -30,6 +31,7 @@ export class Enemy extends Entity {
       this.vy = (dy / dist) * this.speed;
       this.rotation = Math.atan2(dy, dx);
     }
+    */
   }
 
   render(ctx: CanvasRenderingContext2D): void {
