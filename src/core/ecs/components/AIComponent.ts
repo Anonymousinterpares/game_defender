@@ -12,6 +12,7 @@ export class AIComponent implements Component {
     public path: Waypoint[] = [];
     public nextWaypointIndex: number = 0;
     public lastPathUpdateTime: number = 0;
+    public waitTimer: number = 0; // Time to wait/retreat after an action
     public state: string = 'idle'; // Internal state like 'patrolling', 'chasing', 'fleeing'
     
     // Config/Preset

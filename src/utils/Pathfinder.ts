@@ -72,7 +72,10 @@ export class Pathfinder {
                     else if (heat > 0.5) heatCost += 5; // Moderate cost for high heat
                 }
                 
-                const moveCost = (isWall ? 15 : 1) + heatCost; 
+                const dx = neighbor.x - current.x;
+                const dy = neighbor.y - current.y;
+                const stepCost = Math.sqrt(dx * dx + dy * dy);
+                const moveCost = (isWall ? 15 : stepCost) + heatCost; 
                 const gScore = current.g + moveCost;
 
                 let openNode = openList.find(n => n.x === neighbor.x && n.y === neighbor.y);
@@ -101,20 +104,34 @@ export class Pathfinder {
     }
 
     private static heuristic(x1: number, y1: number, x2: number, y2: number): number {
-        return Math.abs(x1 - x2) + Math.abs(y1 - y2);
+        // Octile distance for 8-way movement
+        const dx = Math.abs(x1 - x2);
+        const dy = Math.abs(y1 - y2);
+        return (dx + dy) + (Math.sqrt(2) - 2) * Math.min(dx, dy);
     }
 
     private static getNeighbors(node: Node, world: World): {x: number, y: number}[] {
-        const neighbors = [
-            {x: node.x + 1, y: node.y},
-            {x: node.x - 1, y: node.y},
-            {x: node.x, y: node.y + 1},
-            {x: node.x, y: node.y - 1}
-        ];
-        return neighbors.filter(n => 
-            n.x >= 0 && n.x < world.getWidth() && 
-            n.y >= 0 && n.y < world.getHeight()
-        );
+        const neighbors = [];
+        for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                if (dx === 0 && dy === 0) continue;
+                
+                const nx = node.x + dx;
+                const ny = node.y + dy;
+                
+                if (nx >= 0 && nx < world.getWidth() && ny >= 0 && ny < world.getHeight()) {
+                    // Check diagonal accessibility (prevent cutting corners through solid walls)
+                    if (dx !== 0 && dy !== 0) {
+                        const wall1 = world.isWallByTile(node.x + dx, node.y);
+                        const wall2 = world.isWallByTile(node.x, node.y + dy);
+                        // If both adjacent tiles are walls, can't move diagonally between them
+                        if (wall1 && wall2) continue; 
+                    }
+                    neighbors.push({ x: nx, y: ny });
+                }
+            }
+        }
+        return neighbors;
     }
 
     private static reconstructPath(node: Node, ts: number): {x: number, y: number}[] {

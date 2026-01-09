@@ -6,6 +6,7 @@ export class PhysicsComponent implements Component {
         public vx: number = 0,
         public vy: number = 0,
         public radius: number = 10,
-        public isStatic: boolean = false
+        public isStatic: boolean = false,
+        public mass: number = 1.0
     ) {}
 }

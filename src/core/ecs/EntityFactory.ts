@@ -21,7 +21,7 @@ export class EntityFactory {
 
         entityManager.addComponent(id, new TagComponent('player'));
         entityManager.addComponent(id, new TransformComponent(x, y, 0));
-        entityManager.addComponent(id, new PhysicsComponent(0, 0, 15));
+        entityManager.addComponent(id, new PhysicsComponent(0, 0, 15, false, 10.0)); // Player mass 10.0
         entityManager.addComponent(id, new HealthComponent(maxHealth, maxHealth));
         entityManager.addComponent(id, new FireComponent());
         entityManager.addComponent(id, new RenderComponent('custom', '#cfaa6e', 15));
@@ -50,9 +50,12 @@ export class EntityFactory {
             }
         });
 
+        const isSwamer = dossier.name === 'Scout' || dossier.name === 'Horde Runner';
+        const finalMass = dossier.name === 'Heavy' ? 5.0 : (isSwamer ? 0.5 : 1.0);
+
         entityManager.addComponent(id, new TagComponent('enemy'));
         entityManager.addComponent(id, new TransformComponent(x, y, 0));
-        entityManager.addComponent(id, new PhysicsComponent(0, 0, dossier.baseStats.radius));
+        entityManager.addComponent(id, new PhysicsComponent(0, 0, dossier.baseStats.radius, false, finalMass));
         entityManager.addComponent(id, new HealthComponent(finalHp, finalHp));
         entityManager.addComponent(id, new FireComponent());
         entityManager.addComponent(id, new RenderComponent('enemy', dossier.visuals.color, dossier.baseStats.radius));

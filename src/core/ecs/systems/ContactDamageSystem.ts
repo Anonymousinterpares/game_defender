@@ -51,6 +51,27 @@ export class ContactDamageSystem implements System {
                 playerHealth.health -= damage;
                 this.damageCooldowns.set(enemyId, this.COOLDOWN);
 
+                // Apply Knockback / Bounce
+                const dist = Math.sqrt(distSq) || 0.1;
+                const nx = dx / dist; // Direction from player to enemy
+                const ny = dy / dist;
+                
+                // Professional grade bounce: apply impulse to both
+                const bounceStrength = 300;
+                if (playerPhysics) {
+                    playerPhysics.vx -= nx * bounceStrength * (physics?.mass || 1.0);
+                    playerPhysics.vy -= ny * bounceStrength * (physics?.mass || 1.0);
+                }
+                if (physics) {
+                    physics.vx += nx * bounceStrength * 2.0; // Enemies bounce off harder
+                    physics.vy += ny * bounceStrength * 2.0;
+                }
+
+                // Set AI wait timer to prevent immediate re-charge
+                if (ai) {
+                    ai.waitTimer = this.COOLDOWN; // Sync with damage cooldown
+                }
+
                 // Feedback
                 EventBus.getInstance().emit(GameEvent.ENTITY_HIT, {
                     x: playerTransform.x,

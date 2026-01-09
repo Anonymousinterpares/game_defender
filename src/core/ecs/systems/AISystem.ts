@@ -38,52 +38,90 @@ export class AISystem implements System {
             const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
             const physics = entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
 
+            // Recovery/Wait logic
+            if (ai.waitTimer > 0) {
+                ai.waitTimer -= dt;
+                // Friction for recovery phase
+                physics.vx *= Math.pow(0.9, dt * 60);
+                physics.vy *= Math.pow(0.9, dt * 60);
+                continue; 
+            }
+
             // 1. Vision / Line of Sight Check
             const canSeePlayer = this.checkLOS(transform, playerTransform);
             const isTracker = ai.dossier?.traits.includes('tracker');
             
-            // AI only updates path if it can see player OR is a tracker OR is already close enough to "hear"
             const dx = playerTransform.x - transform.x;
             const dy = playerTransform.y - transform.y;
             const distToPlayer = Math.sqrt(dx * dx + dy * dy);
             const canHearPlayer = distToPlayer < 150;
 
-            const shouldUpdatePath = canSeePlayer || isTracker || canHearPlayer;
+            const shouldUpdatePath = (canSeePlayer || isTracker || canHearPlayer) && distToPlayer > 40;
 
             // 2. Pathfinding Update
             ai.lastPathUpdateTime += dt;
             if (ai.lastPathUpdateTime >= this.pathUpdateInterval && shouldUpdatePath) {
                 ai.lastPathUpdateTime = 0;
                 
-                if (distToPlayer > 50) {
-                    const canBreach = ai.dossier?.traits.includes('breacher') || ai.behavior === AIBehavior.BREACHER;
-                    const isHeatProof = ai.dossier?.traits.includes('heat_proof');
-                    
-                    ai.path = Pathfinder.findPath(
-                        this.world, 
-                        transform.x, 
-                        transform.y, 
-                        playerTransform.x, 
-                        playerTransform.y,
-                        canBreach,
-                        isHeatProof
-                    );
-                    ai.nextWaypointIndex = 0;
+                const canBreach = ai.dossier?.traits.includes('breacher') || ai.behavior === AIBehavior.BREACHER;
+                const isHeatProof = ai.dossier?.traits.includes('heat_proof');
+                
+                ai.path = Pathfinder.findPath(
+                    this.world, 
+                    transform.x, 
+                    transform.y, 
+                    playerTransform.x, 
+                    playerTransform.y,
+                    canBreach,
+                    isHeatProof
+                );
+                ai.nextWaypointIndex = 0;
+            }
+
+            // 3. Accumulate Steering Forces
+            let forceX = 0;
+            let forceY = 0;
+
+            if (ai.path.length > 0 && ai.nextWaypointIndex < ai.path.length) {
+                // Path following force
+                const waypoint = ai.path[ai.nextWaypointIndex];
+                const wdx = waypoint.x - transform.x;
+                const wdy = waypoint.y - transform.y;
+                const wdist = Math.sqrt(wdx * wdx + wdy * wdy);
+
+                if (wdist < 15) {
+                    ai.nextWaypointIndex++;
                 } else {
-                    ai.path = [];
+                    forceX += (wdx / wdist) * ai.speed;
+                    forceY += (wdy / wdist) * ai.speed;
+                }
+            } else if (distToPlayer > 10) {
+                // Direct pursuit if close or no path
+                forceX += (dx / distToPlayer) * ai.speed;
+                forceY += (dy / distToPlayer) * ai.speed;
+            }
+
+            // Apply Behavior modifiers (like Sniper staying away)
+            if (ai.behavior === AIBehavior.SNIPER) {
+                const preferredDist = ai.dossier?.baseStats.preferredDistance || 250;
+                if (distToPlayer < preferredDist) {
+                    // Reverse the force if too close
+                    forceX *= -1.2; 
+                    forceY *= -1.2;
                 }
             }
 
-            // 3. Behavior Execution
-            if (shouldUpdatePath || ai.path.length > 0) {
-                this.executeBehavior(dt, ai, transform, physics, playerTransform);
-            } else {
-                physics.vx *= 0.9; // Slow down if lost player
-                physics.vy *= 0.9;
+            // Apply steering and update rotation
+            const steeringWeight = 5.0; // How fast they turn/adjust
+            physics.vx += (forceX - physics.vx) * dt * steeringWeight;
+            physics.vy += (forceY - physics.vy) * dt * steeringWeight;
+
+            if (Math.abs(physics.vx) > 0.1 || Math.abs(physics.vy) > 0.1) {
+                transform.rotation = Math.atan2(physics.vy, physics.vx);
             }
 
-            // 4. Crowd Simulation (Steering Behaviors)
-            this.applySteering(id, aiEntities, entityManager, transform, physics, ai);
+            // 4. Crowd Simulation (Separation is KEY)
+            this.applySteering(id, aiEntities, entityManager, transform, physics, ai, dt);
         }
     }
 
@@ -104,7 +142,8 @@ export class AISystem implements System {
         entityManager: EntityManager, 
         transform: TransformComponent, 
         physics: PhysicsComponent,
-        ai: AIComponent
+        ai: AIComponent,
+        dt: number
     ): void {
         let sepX = 0, sepY = 0; // Separation
         let aliX = 0, aliY = 0; // Alignment
@@ -113,7 +152,7 @@ export class AISystem implements System {
         let sepCount = 0;
         let flockCount = 0;
 
-        const sepDist = 35;
+        const sepDist = 40; // Increased separation distance
         const flockDist = 100;
 
         for (const otherId of allAiIds) {
@@ -131,8 +170,7 @@ export class AISystem implements System {
             // Separation (Avoid all)
             if (distSq > 0 && distSq < sepDist * sepDist) {
                 const dist = Math.sqrt(distSq);
-                sepX += dx / dist;
-                sepY += dy / dist;
+                sepX += (dx / dist) * (sepDist - dist); // Inverse weight
                 sepCount++;
             }
 
@@ -147,12 +185,12 @@ export class AISystem implements System {
             }
         }
 
-        const steeringForce = 40;
+        const steeringForce = 150;
 
         // Apply Separation
         if (sepCount > 0) {
-            physics.vx += (sepX / sepCount) * (steeringForce * 1.5);
-            physics.vy += (sepY / sepCount) * (steeringForce * 1.5);
+            physics.vx += (sepX / sepCount) * steeringForce * dt;
+            physics.vy += (sepY / sepCount) * steeringForce * dt;
         }
 
         // Apply Alignment & Cohesion (Flocking)
@@ -160,8 +198,8 @@ export class AISystem implements System {
             // Alignment: Match velocity
             const avgAliX = aliX / flockCount;
             const avgAliY = aliY / flockCount;
-            physics.vx += (avgAliX - physics.vx) * 0.05;
-            physics.vy += (avgAliY - physics.vy) * 0.05;
+            physics.vx += (avgAliX - physics.vx) * 0.1 * dt * 60;
+            physics.vy += (avgAliY - physics.vy) * 0.1 * dt * 60;
 
             // Cohesion: Move to center
             const avgCohX = cohX / flockCount;
@@ -170,104 +208,9 @@ export class AISystem implements System {
             const cohDirY = avgCohY - transform.y;
             const cohDist = Math.sqrt(cohDirX * cohDirX + cohDirY * cohDirY);
             if (cohDist > 0) {
-                physics.vx += (cohDirX / cohDist) * (steeringForce * 0.5);
-                physics.vy += (cohDirY / cohDist) * (steeringForce * 0.5);
+                physics.vx += (cohDirX / cohDist) * (steeringForce * 0.2) * dt;
+                physics.vy += (cohDirY / cohDist) * (steeringForce * 0.2) * dt;
             }
-        }
-    }
-
-    private executeBehavior(
-        dt: number, 
-        ai: AIComponent, 
-        transform: TransformComponent, 
-        physics: PhysicsComponent, 
-        playerTransform: TransformComponent
-    ): void {
-        const dx = playerTransform.x - transform.x;
-        const dy = playerTransform.y - transform.y;
-        const distToPlayer = Math.sqrt(dx * dx + dy * dy);
-
-        // If we have a path and are not right next to the player, follow it
-        if (ai.path.length > 0 && ai.nextWaypointIndex < ai.path.length && distToPlayer > 40) {
-            const waypoint = ai.path[ai.nextWaypointIndex];
-            const wdx = waypoint.x - transform.x;
-            const wdy = waypoint.y - transform.y;
-            const wdist = Math.sqrt(wdx * wdx + wdy * wdy);
-
-            if (wdist < 10) {
-                ai.nextWaypointIndex++;
-                // Stop if reached end
-                if (ai.nextWaypointIndex >= ai.path.length) {
-                    physics.vx = 0;
-                    physics.vy = 0;
-                    return;
-                }
-            } else {
-                physics.vx = (wdx / wdist) * ai.speed;
-                physics.vy = (wdy / wdist) * ai.speed;
-                transform.rotation = Math.atan2(wdy, wdx);
-                return;
-            }
-        }
-
-        // Behavior-specific logic when close or no path
-        switch (ai.behavior) {
-            case AIBehavior.CHASE:
-            case AIBehavior.KAMIKAZE:
-            case AIBehavior.BREACHER:
-                if (distToPlayer > 5) {
-                    physics.vx = (dx / distToPlayer) * ai.speed;
-                    physics.vy = (dy / distToPlayer) * ai.speed;
-                    transform.rotation = Math.atan2(dy, dx);
-                } else {
-                    physics.vx = 0;
-                    physics.vy = 0;
-                }
-                break;
-
-            case AIBehavior.SNIPER:
-                const preferredDist = ai.dossier?.baseStats.preferredDistance || 200;
-                if (distToPlayer < preferredDist - 20) {
-                    // Move away
-                    physics.vx = -(dx / distToPlayer) * ai.speed;
-                    physics.vy = -(dy / distToPlayer) * ai.speed;
-                } else if (distToPlayer > preferredDist + 20) {
-                    // Move closer
-                    physics.vx = (dx / distToPlayer) * ai.speed;
-                    physics.vy = (dy / distToPlayer) * ai.speed;
-                } else {
-                    physics.vx = 0;
-                    physics.vy = 0;
-                }
-                transform.rotation = Math.atan2(dy, dx);
-                break;
-
-            case AIBehavior.STATIONARY:
-                physics.vx = 0;
-                physics.vy = 0;
-                transform.rotation = Math.atan2(dy, dx);
-                break;
-
-            case AIBehavior.FLOCK:
-                // Move towards player but with less urgency, letting steering handle the group
-                if (distToPlayer > 100) {
-                    physics.vx = (dx / distToPlayer) * ai.speed * 0.8;
-                    physics.vy = (dy / distToPlayer) * ai.speed * 0.8;
-                } else if (distToPlayer > 10) {
-                    physics.vx = (dx / distToPlayer) * ai.speed;
-                    physics.vy = (dy / distToPlayer) * ai.speed;
-                }
-                transform.rotation = Math.atan2(dy, dx);
-                break;
-
-            default:
-                // Fallback to simple chase
-                if (distToPlayer > 0) {
-                    physics.vx = (dx / distToPlayer) * ai.speed;
-                    physics.vy = (dy / distToPlayer) * ai.speed;
-                    transform.rotation = Math.atan2(dy, dx);
-                }
-                break;
         }
     }
 }

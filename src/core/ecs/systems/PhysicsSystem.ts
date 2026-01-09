@@ -226,28 +226,23 @@ export class PhysicsSystem implements System {
                         const nx = dx / dist;
                         const ny = dy / dist;
 
-                        // Push both entities away from each other
-                        // 0.5 ratio means they both move equally. 
-                        // We could use mass if we had it.
-                        const ratio = 0.5;
+                        // Mass-weighted resolution
+                        // Heavier entities are pushed less
+                        const totalMass = physics.mass + otherPhysics.mass;
+                        const ratio1 = otherPhysics.mass / totalMass; // Current entity push ratio
+                        const ratio2 = physics.mass / totalMass;       // Other entity push ratio
 
-                        // Adjust current entity's potential next position
-                        // (We need to update the local variables nextX, nextY for the current step)
-                        // This will be committed to the transform after the loop.
-                        nextX += nx * overlap * ratio;
-                        nextY += ny * overlap * ratio;
+                        nextX += nx * overlap * ratio1;
+                        nextY += ny * overlap * ratio1;
 
-                        // Adjust the other entity's actual position immediately
-                        // This prevents them from "sinking" into each other in the next frame
-                        otherTransform.x -= nx * overlap * (1 - ratio);
-                        otherTransform.y -= ny * overlap * (1 - ratio);
+                        otherTransform.x -= nx * overlap * ratio2;
+                        otherTransform.y -= ny * overlap * ratio2;
 
-                        // Also push their velocities slightly to prevent sticky collisions
-                        const pushStrength = 20;
-                        physics.vx += nx * pushStrength;
-                        physics.vy += ny * pushStrength;
-                        otherPhysics.vx -= nx * pushStrength;
-                        otherPhysics.vy -= ny * pushStrength;
+                        // Increased dampening on velocity when colliding to prevent "infinite push"
+                        physics.vx *= 0.8;
+                        physics.vy *= 0.8;
+                        otherPhysics.vx *= 0.8;
+                        otherPhysics.vy *= 0.8;
                     }
                 }
             }
