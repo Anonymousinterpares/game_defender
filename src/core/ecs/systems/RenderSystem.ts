@@ -177,6 +177,24 @@ export class RenderSystem implements System {
 
         ctx.restore();
 
+        // --- State Halo ---
+        if (ai) {
+            let haloColor = '#00ff00'; // Green (Idle)
+            if (ai.state === 'patrol') haloColor = '#0088ff'; // Blue
+            if (ai.state === 'investigate') haloColor = '#ffff00'; // Yellow
+            if (ai.isAlert && !ai.activeToken) haloColor = '#ffaa00'; // Orange (Tracking)
+            if (ai.activeToken === 'attack') haloColor = '#ff0000'; // Red (Engaged)
+
+            ctx.save();
+            ctx.strokeStyle = haloColor;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 2]); // Dotted circle for subtle look
+            ctx.beginPath();
+            ctx.arc(x, y, radius + 4, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+
         // Health Bar (only if damaged)
         if (health && health.health < health.maxHealth) {
             const barW = radius * 2.5;

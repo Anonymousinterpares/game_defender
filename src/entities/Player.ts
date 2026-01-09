@@ -99,43 +99,9 @@ export class Player extends Entity {
         seg.handleFireLogic(dt, fireDPS, baseExtinguish);
     });
 
-    if (!this.active || !this.inputManager) return;
+    if (!this.active) return;
 
-    // 1. MOUSE AIMING
-    const screenX = window.innerWidth / 2;
-    const screenY = window.innerHeight / 2;
-    
-    const dx = this.inputManager.mouseX - screenX;
-    const dy = this.inputManager.mouseY - screenY;
-    const distToMouse = Math.sqrt(dx*dx + dy*dy);
-    
-    if (distToMouse > 20) {
-        const targetRotation = Math.atan2(dy, dx);
-        let diff = targetRotation - this.rotation;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        this.rotation += diff * 10 * dt; 
-    }
-
-    // 2. MOVEMENT
-    let driveSpeed = 0;
-    if (this.inputManager.isActionDown('moveUp')) driveSpeed = this.speed;
-    else if (this.inputManager.isActionDown('moveDown')) driveSpeed = -this.speed * 0.6;
-
-    if (driveSpeed === 0) {
-        this.vx = 0;
-        this.vy = 0;
-    } else {
-        this.vx = Math.cos(this.rotation) * driveSpeed;
-        this.vy = Math.sin(this.rotation) * driveSpeed;
-    }
-
-    // 3. PASSIVE SEGMENTS
-    this.segments.forEach(seg => {
-        seg.vx = 0;
-        seg.vy = 0;
-    });
-
+    // Constraints still need to be resolved for the physical body structure
     this.resolveSegmentConstraints();
 
     // 4. UPDATE UPGRADES

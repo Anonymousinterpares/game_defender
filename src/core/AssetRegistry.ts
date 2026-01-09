@@ -47,6 +47,7 @@ export class AssetRegistry {
         { id: 'ping', path: 'assets/sounds/ping.wav', type: AssetType.AUDIO },
         { id: 'place_mine', path: 'assets/sounds/place_mine.wav', type: AssetType.AUDIO },
         { id: 'shoot_cannon', path: 'assets/sounds/shoot_cannon.wav', type: AssetType.AUDIO },
+        { id: 'shoot_flamethrower', path: 'assets/sounds/shoot_flamethrower.wav', type: AssetType.AUDIO },
         { id: 'shoot_laser', path: 'assets/sounds/shoot_laser.wav', type: AssetType.AUDIO },
         { id: 'shoot_missile', path: 'assets/sounds/shoot_missile.wav', type: AssetType.AUDIO },
         { id: 'shoot_ray', path: 'assets/sounds/shoot_ray.wav', type: AssetType.AUDIO },

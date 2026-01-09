@@ -16,6 +16,12 @@ export enum GameEvent {
     // Item Events
     ITEM_COLLECTED = 'item:collected',
     
+    // AI Coordination Events
+    AI_REQUEST_TOKEN = 'ai:request_token',
+    AI_ASSIGN_TOKEN = 'ai:assign_token',
+    AI_RELEASE_TOKEN = 'ai:release_token',
+    AI_ACOUSTIC_EVENT = 'ai:acoustic_event',
+    
     // UI Events
     UI_CLICK = 'ui:click',
     
@@ -36,6 +42,10 @@ export interface EventPayloads {
     [GameEvent.EXPLOSION]: { x: number, y: number, radius: number, type: 'small' | 'large', moltenCount?: number };
     [GameEvent.MATERIAL_HIT]: { x: number, y: number, material: string };
     [GameEvent.ITEM_COLLECTED]: { x: number, y: number, itemType: string, collectorId: string };
+    [GameEvent.AI_REQUEST_TOKEN]: { entityId: string, tokenType: 'attack' | 'flank' | 'suppress' };
+    [GameEvent.AI_ASSIGN_TOKEN]: { entityId: string, tokenType: 'attack' | 'flank' | 'suppress' | null };
+    [GameEvent.AI_RELEASE_TOKEN]: { entityId: string, tokenType: 'attack' | 'flank' | 'suppress' };
+    [GameEvent.AI_ACOUSTIC_EVENT]: { x: number, y: number, volume: number, type: 'gunshot' | 'explosion' | 'footstep' };
     [GameEvent.UI_CLICK]: { buttonId?: string };
     [GameEvent.SOUND_PLAY]: { soundId: string, volume?: number };
     [GameEvent.SOUND_PLAY_SPATIAL]: { soundId: string, x: number, y: number, volume?: number };

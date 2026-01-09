@@ -17,19 +17,6 @@ export class Enemy extends Entity {
     const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
     const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
     this.handleFireLogic(dt, fireDPS, baseExtinguish);
-
-    if (!player || !this.active) return;
-
-    // Basic Chase AI
-    const dx = player.x - this.x;
-    const dy = player.y - this.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-
-    if (dist > 0) {
-      this.vx = (dx / dist) * this.speed;
-      this.vy = (dy / dist) * this.speed;
-      this.rotation = Math.atan2(dy, dx);
-    }
   }
 
   render(ctx: CanvasRenderingContext2D): void {

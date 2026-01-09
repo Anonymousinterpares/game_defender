@@ -19,6 +19,7 @@ import { PhysicsSystem } from './ecs/systems/PhysicsSystem';
 import { FireSystem } from './ecs/systems/FireSystem';
 import { InputSystem } from './ecs/systems/InputSystem';
 import { AISystem } from './ecs/systems/AISystem';
+import { DirectorSystem } from './ecs/systems/DirectorSystem';
 import { ContactDamageSystem } from './ecs/systems/ContactDamageSystem';
 import { RenderSystem } from './ecs/systems/RenderSystem';
 import { System } from './ecs/System';
@@ -58,6 +59,7 @@ export class Simulation implements WeaponParent, CombatParent {
     private fireSystem: FireSystem;
     private inputSystem: InputSystem;
     private aiSystem: AISystem;
+    private directorSystem: DirectorSystem;
     private contactDamageSystem: ContactDamageSystem;
     private renderSystem: RenderSystem;
     private customSystems: System[] = [];
@@ -78,6 +80,7 @@ export class Simulation implements WeaponParent, CombatParent {
 
     private nextDropSpawn: number = 5;
     private nextEnemySpawn: number = 3;
+    private footstepTimer: number = 0;
     private role: SimulationRole;
 
     constructor(role: SimulationRole, seed?: number) {
@@ -96,6 +99,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.fireSystem = new FireSystem();
         this.inputSystem = new InputSystem();
         this.aiSystem = new AISystem(this.world);
+        this.directorSystem = new DirectorSystem();
         this.contactDamageSystem = new ContactDamageSystem();
         this.renderSystem = new RenderSystem();
         this.pluginManager = new PluginManager(this);
@@ -236,6 +240,7 @@ export class Simulation implements WeaponParent, CombatParent {
         
         if (this.role !== SimulationRole.CLIENT) {
             this.aiSystem.update(dt, this.entityManager);
+            this.directorSystem.update(dt, this.entityManager);
             this.contactDamageSystem.update(dt, this.entityManager);
         }
 
@@ -257,6 +262,21 @@ export class Simulation implements WeaponParent, CombatParent {
 
         // 4. Entity Updates
         this.player.update(dt);
+        
+        // Footstep emission
+        if (Math.abs(this.player.vx) > 10 || Math.abs(this.player.vy) > 10) {
+            this.footstepTimer += dt;
+            if (this.footstepTimer >= 0.4) {
+                this.footstepTimer = 0;
+                EventBus.getInstance().emit(GameEvent.AI_ACOUSTIC_EVENT, {
+                    x: this.player.x,
+                    y: this.player.y,
+                    volume: 15,
+                    type: 'footstep'
+                });
+            }
+        }
+
         this.enemies.forEach(e => e.update(dt, this.player));
 
         // 5. Entity Visual Updates (legacy cleanup/flash timers only)
@@ -441,7 +461,7 @@ export class Simulation implements WeaponParent, CombatParent {
     public spawnEnemy(): void {
         for(let i=0; i<10; i++) {
             const angle = Math.random() * Math.PI * 2;
-            const dist = 400 + Math.random() * 400;
+            const dist = 800 + Math.random() * 400; // Increased distance
             const ex = this.player.x + Math.cos(angle) * dist;
             const ey = this.player.y + Math.sin(angle) * dist;
             if (!this.world.isWall(ex, ey)) {

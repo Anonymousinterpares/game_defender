@@ -201,7 +201,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
     // 1. Sync remotePlayers array for simulation systems
     this.simulation.remotePlayers = Array.from(this.remotePlayersMap.values());
 
-    // 2. Run Core Simulation (duplication removed!)
+    // 2. Run Core Simulation
     super.update(dt);
 
     // 3. Remote Player Heat/Firing Simulation (Visuals only)

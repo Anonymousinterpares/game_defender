@@ -2,21 +2,25 @@ import { EntityManager } from '../EntityManager';
 import { System } from '../System';
 import { FireComponent } from '../components/FireComponent';
 import { HealthComponent } from '../components/HealthComponent';
+import { TransformComponent } from '../components/TransformComponent';
 import { AIComponent } from '../components/AIComponent';
 import { ConfigManager } from '../../../config/MasterConfig';
+import { SoundManager } from '../../SoundManager';
 
 export class FireSystem implements System {
     public readonly id = 'fire';
 
     update(dt: number, entityManager: EntityManager): void {
-        const entityIds = entityManager.query(['fire', 'health']);
+        const entityIds = entityManager.query(['fire', 'health', 'transform']);
         const config = ConfigManager.getInstance();
         const fireDPS = config.get<number>('Fire', 'dps');
         const baseExtinguishChance = config.get<number>('Fire', 'baseExtinguishChance');
+        const soundMgr = SoundManager.getInstance();
 
         for (const id of entityIds) {
             const fire = entityManager.getComponent<FireComponent>(id, 'fire')!;
             const health = entityManager.getComponent<HealthComponent>(id, 'health')!;
+            const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
             const ai = entityManager.getComponent<AIComponent>(id, 'ai');
 
             // Respect heat_proof trait
@@ -44,6 +48,9 @@ export class FireSystem implements System {
                 health.health = 0;
                 health.active = false;
             }
+
+            // Fire sound for entities
+            soundMgr.updateAreaSound('fire', transform.x, transform.y, 10); // intensity 10 for entities
 
             // Extinguish logic every 1000ms
             if (fire.fireTimer >= 1.0) {

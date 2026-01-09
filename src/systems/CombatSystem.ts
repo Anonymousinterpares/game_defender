@@ -348,6 +348,13 @@ export class CombatSystem {
             moltenCount: Math.min(150, shrapnelCount)
         });
 
+        // Acoustic event for AI
+        EventBus.getInstance().emit(GameEvent.AI_ACOUSTIC_EVENT, {
+            x, y,
+            volume: radius * 1.5,
+            type: 'explosion'
+        });
+
         // --- DAMAGE LOGIC (Authoritative) ---
         this.parent.enemies.forEach((e: Enemy) => {
             const dx = e.x - x;

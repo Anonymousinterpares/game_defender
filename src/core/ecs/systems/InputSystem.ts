@@ -33,6 +33,10 @@ export class InputSystem implements System {
             input.turn = turn;
             input.isFiring = inputManager.isKeyDown(fireKey);
             input.activeWeapon = config.get<string>('Player', 'activeWeapon');
+            
+            // Capture mouse for aiming
+            input.mouseX = inputManager.mouseX;
+            input.mouseY = inputManager.mouseY;
         }
     }
 }

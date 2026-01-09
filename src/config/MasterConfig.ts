@@ -102,8 +102,8 @@ export const MasterConfig: GameConfigSchema = {
     coneDistance: { value: 5.0, type: 'number', min: 5, max: 100, step: 1, description: 'Vision Cone Distance' }
   },
   Audio: {
-    masterVolume: { value: 0.5, type: 'number', min: 0, max: 1, step: 0.05, description: 'Master Volume' },
-    
+    masterVolume: { value: 0.5, type: 'number', min: 0, max: 1.0, step: 0.05, description: 'Master Volume' },
+    vol_fire: { value: 0.4, type: 'number', description: 'Environmental Fire Volume' },
     // Per-sound base volumes
     vol_shoot_cannon: { value: 0.4, type: 'number', description: 'Cannon Shot Volume' },
     vol_shoot_laser: { value: 0.3, type: 'number', description: 'Laser Loop Volume' },

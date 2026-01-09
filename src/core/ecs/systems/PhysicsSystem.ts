@@ -66,9 +66,26 @@ export class PhysicsSystem implements System {
 
             // 2. Handle Input (Consolidated from MovementSystem)
             if (input) {
-                if (tag?.tag !== 'player') {
+                if (tag?.tag === 'player') {
+                    // Mouse-based aiming for player
+                    const screenX = window.innerWidth / 2;
+                    const screenY = window.innerHeight / 2;
+                    const adx = input.mouseX - screenX;
+                    const ady = input.mouseY - screenY;
+                    const distToMouse = Math.sqrt(adx*adx + ady*ady);
+                    
+                    if (distToMouse > 20) {
+                        const targetRotation = Math.atan2(ady, adx);
+                        let diff = targetRotation - transform.rotation;
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        while (diff > Math.PI) diff -= Math.PI * 2;
+                        transform.rotation += diff * 10 * dt; 
+                    }
+                } else {
+                    // Key-based rotation for others
                     transform.rotation += input.turn * turnSpeed * dt;
                 }
+
                 if (input.throttle !== 0) {
                     const speedPx = baseSpeed * tileSize;
                     physics.vx += Math.cos(transform.rotation) * input.throttle * speedPx * dt * 5;

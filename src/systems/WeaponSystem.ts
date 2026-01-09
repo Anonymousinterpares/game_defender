@@ -188,6 +188,23 @@ export class WeaponSystem {
             ownerId: this.parent.myId 
         });
 
+        // Acoustic sensing for AI
+        const volumes: Record<string, number> = {
+            'cannon': 100,
+            'rocket': 120,
+            'missile': 80,
+            'mine': 30,
+            'laser': 40,
+            'ray': 30,
+            'flamethrower': 50
+        };
+        EventBus.getInstance().emit(GameEvent.AI_ACOUSTIC_EVENT, {
+            x: player.x,
+            y: player.y,
+            volume: volumes[weapon] || 50,
+            type: 'gunshot'
+        });
+
         if (this.parent.weaponAmmo.get(weapon)! <= 0 && weapon !== 'cannon') {
             this.parent.startReload(weapon);
         }

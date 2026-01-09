@@ -130,7 +130,7 @@ export class World {
         if (x === 0 || x === this.width - 1 || y === 0 || y === this.height - 1) {
           row.push(MaterialType.INDESTRUCTIBLE);
         } else {
-            if (this.seededRandom() < 0.05) {
+            if (this.seededRandom() < 0.12) { // 12% density
                 const mat = materials[Math.floor(this.seededRandom() * materials.length)];
                 row.push(mat);
             } else {
@@ -182,25 +182,45 @@ export class World {
   }
 
   public raycast(startX: number, startY: number, angle: number, maxDist: number): {x: number, y: number} | null {
-      const step = 2; 
-      const dx = Math.cos(angle) * step;
-      const dy = Math.sin(angle) * step;
+      const dirX = Math.cos(angle);
+      const dirY = Math.sin(angle);
       
-      let curX = startX;
-      let curY = startY;
+      const ts = this.tileSize;
+      
+      // Initial tile coordinates
+      let gx = Math.floor(startX / ts);
+      let gy = Math.floor(startY / ts);
+      
+      const stepX = dirX > 0 ? 1 : -1;
+      const stepY = dirY > 0 ? 1 : -1;
+      
+      const tDeltaX = Math.abs(ts / dirX);
+      const tDeltaY = Math.abs(ts / dirY);
+      
+      let tMaxX = (dirX > 0 ? (gx + 1) * ts - startX : startX - gx * ts) / Math.abs(dirX);
+      let tMaxY = (dirY > 0 ? (gy + 1) * ts - startY : startY - gy * ts) / Math.abs(dirY);
+      
       let dist = 0;
       
       while (dist < maxDist) {
-          curX += dx;
-          curY += dy;
-          dist += step;
-          
-          if (this.isWall(curX, curY)) {
-              return { x: curX, y: curY };
+          if (tMaxX < tMaxY) {
+              dist = tMaxX;
+              tMaxX += tDeltaX;
+              gx += stepX;
+          } else {
+              dist = tMaxY;
+              tMaxY += tDeltaY;
+              gy += stepY;
           }
           
-          if (curX < 0 || curX > this.getWidthPixels() || curY < 0 || curY > this.getHeightPixels()) {
-              return { x: curX, y: curY };
+          if (dist > maxDist) break;
+          
+          if (this.isWallByTile(gx, gy)) {
+              return { x: startX + dirX * dist, y: startY + dirY * dist };
+          }
+          
+          if (gx < 0 || gx >= this.width || gy < 0 || gy >= this.height) {
+              return { x: startX + dirX * dist, y: startY + dirY * dist };
           }
       }
       

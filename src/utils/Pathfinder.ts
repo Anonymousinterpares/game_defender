@@ -58,7 +58,6 @@ export class Pathfinder {
             for (const neighbor of neighbors) {
                 if (closedList.has(`${neighbor.x},${neighbor.y}`)) continue;
 
-                // 1. Wall check
                 const isWall = world.isWallByTile(neighbor.x, neighbor.y);
                 if (isWall && !canBreach) continue;
                 
@@ -72,11 +71,22 @@ export class Pathfinder {
                     else if (heat > 0.5) heatCost += 5; // Moderate cost for high heat
                 }
                 
-                const dx = neighbor.x - current.x;
-                const dy = neighbor.y - current.y;
-                const stepCost = Math.sqrt(dx * dx + dy * dy);
-                const moveCost = (isWall ? 15 : stepCost) + heatCost; 
-                const gScore = current.g + moveCost;
+                // --- THETA* LOGIC ---
+                let parent = current;
+                let gScore = 0;
+
+                if (current.parent && this.hasLineOfSight(current.parent, neighbor, world, ts)) {
+                    // Shortcut: Parent of current becomes parent of neighbor
+                    parent = current.parent;
+                    const dx = neighbor.x - parent.x;
+                    const dy = neighbor.y - parent.y;
+                    gScore = parent.g + Math.sqrt(dx * dx + dy * dy) + heatCost;
+                } else {
+                    const dx = neighbor.x - current.x;
+                    const dy = neighbor.y - current.y;
+                    const stepCost = Math.sqrt(dx * dx + dy * dy);
+                    gScore = current.g + (isWall ? 15 : stepCost) + heatCost;
+                }
 
                 let openNode = openList.find(n => n.x === neighbor.x && n.y === neighbor.y);
                 if (!openNode) {
@@ -86,14 +96,14 @@ export class Pathfinder {
                         g: gScore,
                         h: this.heuristic(neighbor.x, neighbor.y, endTX, endTY),
                         f: 0,
-                        parent: current
+                        parent: parent
                     };
                     newNode.f = newNode.g + newNode.h;
                     openList.push(newNode);
                 } else if (gScore < openNode.g) {
                     openNode.g = gScore;
                     openNode.f = openNode.g + openNode.h;
-                    openNode.parent = current;
+                    openNode.parent = parent;
                 }
             }
 
@@ -132,6 +142,22 @@ export class Pathfinder {
             }
         }
         return neighbors;
+    }
+
+    private static hasLineOfSight(n1: {x: number, y: number}, n2: {x: number, y: number}, world: World, ts: number): boolean {
+        const x1 = n1.x * ts + ts / 2;
+        const y1 = n1.y * ts + ts / 2;
+        const x2 = n2.x * ts + ts / 2;
+        const y2 = n2.y * ts + ts / 2;
+        
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
+        
+        // Use a slightly more conservative raycast for pathfinding (half-tile steps)
+        const hit = world.raycast(x1, y1, angle, dist);
+        return hit === null;
     }
 
     private static reconstructPath(node: Node, ts: number): {x: number, y: number}[] {

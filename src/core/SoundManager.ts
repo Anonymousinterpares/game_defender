@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { World } from './World';
-import { SoundRaycaster, AudiblePath } from '../utils/SoundRaycaster';
+import { SoundRaycaster, AcousticResult } from '../utils/SoundRaycaster';
 import { ConfigManager } from '../config/MasterConfig';
 import { EventBus, GameEvent } from './EventBus';
 import { AssetRegistry } from './AssetRegistry';
@@ -34,9 +34,11 @@ export class SoundManager {
   private activeLoops: Map<string, { osc: OscillatorNode | AudioBufferSourceNode, gain: GainNode, startTime?: number, isEnding?: boolean }> = new Map();
   
   private spatialLoops: Map<string, SpatialVoice> = new Map();
+  private dryGains: Map<string, GainNode> = new Map(); // Dry gain for local loops
   private listenerX: number = 0;
   private listenerY: number = 0;
   private world: World | null = null;
+  private readonly SPEED_OF_SOUND = 5000; // Pixels per second
 
   // Track available variants per material category
   private materialVariants: Map<string, string[]> = new Map();
@@ -48,6 +50,8 @@ export class SoundManager {
   // Area Sound Management (for persistent effects like fire)
   private areaSoundQueue: Map<string, { x: number, y: number, intensity: number }> = new Map();
   private activeAreaLoops: Map<string, SpatialVoice> = new Map();
+  private lastAreaUpdate: number = 0;
+  private isProcessingArea: boolean = false;
 
   private constructor() {}
 
@@ -80,7 +84,7 @@ export class SoundManager {
         'brick_hit_1', 'brick_hit_2', 'brick_hit_3', 'collect_coin', 'explosion_large', 'fire',
         'hit_cannon', 'hit_laser', 'hit_missile', 'hit_ray', 'indestructible_hit_1',
         'metal_hit_1', 'metal_hit_2', 'metal_hit_3', 'metal_hit_4', 'metal_hit_5', 'metal_hit_6',
-        'ping', 'place_mine', 'shoot_cannon', 'shoot_laser', 'shoot_missile', 'shoot_ray', 'shoot_rocket',
+        'ping', 'place_mine', 'shoot_cannon', 'shoot_flamethrower', 'shoot_laser', 'shoot_missile', 'shoot_ray', 'shoot_rocket',
         'stone_hit_1', 'ui_click', 'weapon_reload', 'wood_hit_1', 'wood_hit_2', 'wood_hit_3'
     ];
 
@@ -108,24 +112,29 @@ export class SoundManager {
     const eb = EventBus.getInstance();
 
     eb.on(GameEvent.WEAPON_FIRED, (data) => {
-        this.playSoundSpatial('shoot_' + data.weaponType, data.x, data.y);
+        this.playAcousticEvent('shoot_' + data.weaponType, data.x, data.y);
     });
 
     eb.on(GameEvent.WEAPON_RELOAD, (data) => {
-        this.playSoundSpatial('weapon_reload', data.x, data.y);
+        this.playAcousticEvent('weapon_reload', data.x, data.y);
     });
 
     eb.on(GameEvent.PROJECTILE_HIT, (data) => {
         const sfx = data.projectileType === 'missile' ? 'hit_missile' : 'hit_cannon';
-        this.playSoundSpatial(sfx, data.x, data.y);
+        this.playAcousticEvent(sfx, data.x, data.y);
     });
 
     eb.on(GameEvent.EXPLOSION, (data) => {
-        this.playSoundSpatial('explosion_large', data.x, data.y);
+        this.playAcousticEvent('explosion_large', data.x, data.y);
     });
 
     eb.on(GameEvent.MATERIAL_HIT, (data) => {
-        this.playMaterialHit(data.material, data.x, data.y);
+        const matLower = data.material.toLowerCase();
+        const available = this.materialVariants.get(matLower);
+        if (available && available.length > 0) {
+            const name = available[Math.floor(Math.random() * available.length)];
+            this.playAcousticEvent(name, data.x, data.y);
+        }
     });
 
     eb.on(GameEvent.ITEM_COLLECTED, () => {
@@ -178,15 +187,58 @@ export class SoundManager {
     }
   }
 
-  private processAreaSounds(): void {
-    if (!this.audioCtx || !this.masterGain || !this.world) return;
+    private async processAreaSounds(): Promise<void> {
 
-    const now = this.audioCtx.currentTime;
-    const clusterVolScale = ConfigManager.getInstance().get<number>('Fire', 'volumePerSubTile') || 0.005;
-    const maxClusterVol = ConfigManager.getInstance().get<number>('Fire', 'maxClusterVolume') || 0.8;
-    const ttl = ConfigManager.getInstance().get<number>('Fire', 'soundTTL') || 0.2;
+      if (!this.audioCtx || !this.masterGain || !this.world || this.isProcessingArea) return;
 
-    this.areaSoundQueue.forEach((data, key) => {
+  
+
+      const now = this.audioCtx.currentTime;
+
+      // Throttle worker requests for area sounds to ~5Hz
+
+      if (now - this.lastAreaUpdate < 0.2) {
+
+          this.cleanupAreaVoices(now, 0.2); // Still cleanup if needed
+
+          return;
+
+      }
+
+  
+
+      this.isProcessingArea = true;
+
+      this.lastAreaUpdate = now;
+
+  
+
+      const clusterVolScale = ConfigManager.getInstance().get<number>('Fire', 'volumePerSubTile') || 0.005;
+
+      const maxClusterVol = ConfigManager.getInstance().get<number>('Fire', 'maxClusterVolume') || 0.8;
+
+      const ttl = ConfigManager.getInstance().get<number>('Fire', 'soundTTL') || 0.2;
+
+  
+
+      const listeners = [{ id: 'player', x: this.listenerX, y: this.listenerY }];
+
+      const soundRequests: Promise<{key: string, data: any, result: AcousticResult}>[] = [];
+
+  
+
+      this.areaSoundQueue.forEach((data, key) => {
+        const soundName = key.split('_')[0];
+        const baseVolume = ConfigManager.getInstance().get<number>('Audio', 'vol_' + soundName) || 1.0;
+        
+        const req = SoundRaycaster.propagate({ x: data.x, y: data.y, volume: 100 * baseVolume }, listeners, this.world!)
+            .then(results => ({ key, data, result: results['player'] }));
+        soundRequests.push(req);
+    });
+
+    const allResults = await Promise.all(soundRequests);
+    
+    for (const { key, data, result } of allResults) {
         const soundName = key.split('_')[0];
         let voice = this.activeAreaLoops.get(key);
 
@@ -210,10 +262,19 @@ export class SoundManager {
                 bSource.loop = true;
                 source = bSource;
             } else {
-                const osc = this.audioCtx!.createOscillator();
-                osc.type = 'sine';
-                osc.frequency.value = 200;
-                source = osc;
+                // Better fire fallback: low-passed noise
+                const bufferSize = this.audioCtx!.sampleRate * 2.0;
+                const noiseBuffer = this.audioCtx!.createBuffer(1, bufferSize, this.audioCtx!.sampleRate);
+                const noiseData = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) noiseData[i] = Math.random() * 2 - 1;
+                
+                const bSource = this.audioCtx!.createBufferSource();
+                bSource.buffer = noiseBuffer;
+                bSource.loop = true;
+                source = bSource;
+
+                filter.frequency.value = 400; // Muffled crackle
+                filter.Q.value = 5;
             }
 
             source.connect(filter);
@@ -222,53 +283,40 @@ export class SoundManager {
             const baseVolume = ConfigManager.getInstance().get<number>('Audio', 'vol_' + soundName) || 1.0;
             voice = { source, gain, panner, filter, x: data.x, y: data.y, baseVolume, lastSeen: now, intensity: data.intensity };
             this.activeAreaLoops.set(key, voice);
-        } else {
-            voice.x = data.x;
-            voice.y = data.y;
-            voice.intensity = data.intensity;
+        }
+
+        if (result && result.volume > 1) {
+            const intensityVol = Math.min(maxClusterVol, (data.intensity || 0) * clusterVolScale);
+            const finalVol = (result.volume / 100) * intensityVol;
+
+            const dx = result.apparentSource.x - this.listenerX;
+            const dy = result.apparentSource.y - this.listenerY;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const pan = dist > 0 ? Math.max(-1, Math.min(1, dx / dist)) : 0;
+
+            voice.gain.gain.setTargetAtTime(finalVol, now, 0.1);
+            voice.panner.pan.setTargetAtTime(pan, now, 0.1);
+            voice.filter.frequency.setTargetAtTime(result.cutoff, now, 0.1);
             voice.lastSeen = now;
         }
-    });
+    }
 
+    this.cleanupAreaVoices(now, ttl);
+    this.areaSoundQueue.clear();
+    this.isProcessingArea = false;
+  }
+
+  private cleanupAreaVoices(now: number, ttl: number): void {
     this.activeAreaLoops.forEach((voice, key) => {
         const timeSinceSeen = now - (voice.lastSeen || 0);
-
         if (timeSinceSeen > ttl) {
             voice.gain.gain.setTargetAtTime(0, now, 0.1);
             if (timeSinceSeen > ttl + 0.5) {
                 voice.source.stop();
                 this.activeAreaLoops.delete(key);
             }
-        } else {
-            const paths = SoundRaycaster.calculateAudiblePaths(voice.x, voice.y, this.listenerX, this.listenerY, this.world!);
-            
-            if (paths.length === 0) {
-                voice.gain.gain.setTargetAtTime(0, now, 0.1);
-            } else {
-                let totalEnergy = 0;
-                let weightedPan = 0;
-                let minCutoff = 20000;
-                for (const p of paths) {
-                    totalEnergy += p.volume * p.volume;
-                    weightedPan += p.pan * p.volume;
-                    minCutoff = Math.min(minCutoff, p.filterCutoff);
-                }
-
-                const spatialVol = Math.sqrt(totalEnergy);
-                const intensityVol = Math.min(maxClusterVol, (voice.intensity || 0) * clusterVolScale);
-                const finalVol = spatialVol * intensityVol;
-
-                const totalPathVol = paths.reduce((acc, p) => acc + p.volume, 0);
-                const finalPan = totalPathVol > 0 ? weightedPan / totalPathVol : 0;
-
-                voice.gain.gain.setTargetAtTime(finalVol, now, 0.1);
-                voice.panner.pan.setTargetAtTime(finalPan, now, 0.1);
-                voice.filter.frequency.setTargetAtTime(minCutoff, now, 0.1);
-            }
         }
     });
-
-    this.areaSoundQueue.clear();
   }
 
   public queueSoundSpatial(name: string, x: number, y: number): void {
@@ -321,93 +369,119 @@ export class SoundManager {
       }
   }
 
-  private updateVoiceSpatial(voice: SpatialVoice): void {
+  private async updateVoiceSpatial(voice: SpatialVoice, name: string): Promise<void> {
       if (!this.world || !this.audioCtx) return;
 
-      const paths = SoundRaycaster.calculateAudiblePaths(voice.x, voice.y, this.listenerX, this.listenerY, this.world);
-      
-      if (paths.length === 0) {
-          voice.gain.gain.setTargetAtTime(0, this.audioCtx.currentTime, 0.1);
-          return;
-      }
+      const listeners = [{ id: 'player', x: this.listenerX, y: this.listenerY }];
+      const results = await SoundRaycaster.propagate({ x: voice.x, y: voice.y, volume: 100 * voice.baseVolume }, listeners, this.world);
+      const result = results['player'];
 
-      let totalEnergy = 0;
-      let weightedPan = 0;
-      let minCutoff = 20000;
-
-      for (const p of paths) {
-          totalEnergy += p.volume * p.volume;
-          weightedPan += p.pan * p.volume;
-          minCutoff = Math.min(minCutoff, p.filterCutoff);
-      }
-
-      const finalVolume = Math.min(1.0, Math.sqrt(totalEnergy) * voice.baseVolume);
-      const finalPan = paths.reduce((acc, p) => acc + p.volume, 0) > 0 
-          ? weightedPan / paths.reduce((acc, p) => acc + p.volume, 0) 
-          : 0;
+      if (this.spatialLoops.get(name) !== voice) return; // Voice was stopped during async call
 
       const now = this.audioCtx.currentTime;
-      voice.gain.gain.setTargetAtTime(finalVolume, now, 0.1);
-      voice.panner.pan.setTargetAtTime(finalPan, now, 0.1);
-      voice.filter.frequency.setTargetAtTime(minCutoff, now, 0.1);
+      if (result && result.volume > 1) {
+          const isLocal = Math.sqrt((voice.x - this.listenerX)**2 + (voice.y - this.listenerY)**2) < 32;
+          const acousticVolumeScale = isLocal ? 0.4 : 1.0;
+
+          const dx = result.apparentSource.x - this.listenerX;
+          const dy = result.apparentSource.y - this.listenerY;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          const pan = dist > 0 ? Math.max(-1, Math.min(1, dx / dist)) : 0;
+
+          voice.gain.gain.setTargetAtTime((result.volume / 100) * acousticVolumeScale, now, 0.1);
+          voice.panner.pan.setTargetAtTime(pan, now, 0.1);
+          voice.filter.frequency.setTargetAtTime(result.cutoff, now, 0.1);
+          
+          const dry = this.dryGains.get(name);
+          if (dry) {
+              if (isLocal) {
+                  dry.gain.setTargetAtTime(voice.baseVolume, now, 0.1);
+              } else {
+                  dry.gain.setTargetAtTime(0, now, 0.1);
+              }
+          }
+      } else {
+          voice.gain.gain.setTargetAtTime(0, now, 0.1);
+          const dry = this.dryGains.get(name);
+          if (dry) dry.gain.setTargetAtTime(0, now, 0.1);
+      }
+  }
+
+  public async playAcousticEvent(name: string, x: number, y: number, volumeScale: number = 1.0): Promise<void> {
+    if (this.isMuted || !this.audioCtx || !this.masterGain || !this.world) return;
+    
+    // 1. IMMEDIATE DRY PLAYBACK for local player weapons
+    // If the distance is very small (< 32 pixels), we assume it's the local player
+    const distToListener = Math.sqrt((x - this.listenerX)**2 + (y - this.listenerY)**2);
+    const isLocal = distToListener < 32;
+
+    if (isLocal && name.startsWith('shoot_')) {
+        this.playSoundImmediate(name, volumeScale);
+    }
+
+    // 2. ACOUSTIC PROPAGATION (for environmental echoes and others)
+    const listeners = [{ id: 'player', x: this.listenerX, y: this.listenerY }];
+    const baseVolume = ConfigManager.getInstance().get<number>('Audio', 'vol_' + name) || 1.0;
+    
+    const results = await SoundRaycaster.propagate({ x, y, volume: 100 * baseVolume * volumeScale }, listeners, this.world);
+    const result = results['player'];
+
+    if (result && result.volume > 1) {
+        // For local shots, the worker result is used as the "echo/room effect"
+        // so we might want to scale its volume or filter it differently
+        const acousticVolumeScale = isLocal ? 0.4 : 1.0; 
+
+        const buffer = this.sounds.get(name);
+        if (!buffer) return;
+
+        const delay = result.distance / this.SPEED_OF_SOUND;
+        const startTime = this.audioCtx.currentTime + delay;
+
+        const dx = result.apparentSource.x - this.listenerX;
+        const dy = result.apparentSource.y - this.listenerY;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const pan = dist > 0 ? Math.max(-1, Math.min(1, dx / dist)) : 0;
+
+        const filter = this.audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(result.cutoff, startTime);
+
+        const panner = this.audioCtx.createStereoPanner();
+        panner.pan.setValueAtTime(pan, startTime);
+
+        const gain = this.audioCtx.createGain();
+        const finalGain = (result.volume / 100) * volumeScale * acousticVolumeScale;
+        gain.gain.setValueAtTime(finalGain, startTime);
+
+        filter.connect(panner);
+        panner.connect(gain);
+        gain.connect(this.masterGain);
+
+        const source = this.audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(filter);
+        source.start(startTime);
+    }
+  }
+
+  private playSoundImmediate(name: string, volumeScale: number = 1.0): void {
+      if (!this.audioCtx || !this.masterGain) return;
+      const buffer = this.sounds.get(name);
+      if (buffer) {
+          const source = this.audioCtx.createBufferSource();
+          source.buffer = buffer;
+          const gain = this.audioCtx.createGain();
+          const baseVol = ConfigManager.getInstance().get<number>('Audio', 'vol_' + name) || 1.0;
+          gain.gain.setValueAtTime(baseVol * volumeScale, this.audioCtx.currentTime);
+          source.connect(gain);
+          gain.connect(this.masterGain);
+          source.start();
+      }
   }
 
   public playSoundSpatial(name: string, x: number, y: number, volumeScale: number = 1.0): void {
-    if (this.isMuted || !this.audioCtx || !this.masterGain || !this.world) return;
-    if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
-
-    const paths = SoundRaycaster.calculateAudiblePaths(x, y, this.listenerX, this.listenerY, this.world);
-    if (paths.length === 0) return;
-
-    let totalEnergy = 0;
-    let weightedPan = 0;
-    let minCutoff = 20000;
-    for (const p of paths) {
-        totalEnergy += p.volume * p.volume;
-        weightedPan += p.pan * p.volume;
-        minCutoff = Math.min(minCutoff, p.filterCutoff);
-    }
-
-    const pathVol = Math.sqrt(totalEnergy);
-    const totalVol = paths.reduce((acc, p) => acc + p.volume, 0);
-    const finalPan = totalVol > 0 ? weightedPan / totalVol : 0;
-
-    let baseVol = ConfigManager.getInstance().get<number>('Audio', 'vol_' + name);
-    
-    if (baseVol === undefined) {
-        if (name.includes('_hit_')) {
-            baseVol = ConfigManager.getInstance().get<number>('Audio', 'vol_hit_material');
-        }
-    }
-    
-    if (baseVol === undefined) baseVol = 1.0;
-
-    const finalVolume = Math.min(2.0, pathVol * baseVol * volumeScale);
-
-    const buffer = this.sounds.get(name);
-    if (!buffer) {
-        this.synthesizeSpatialFallback(name, x, y, finalVolume, finalPan, minCutoff);
-        return;
-    }
-
-    const filter = this.audioCtx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = minCutoff;
-
-    const panner = this.audioCtx.createStereoPanner();
-    panner.pan.value = finalPan;
-
-    const gain = this.audioCtx.createGain();
-    gain.gain.value = finalVolume;
-
-    filter.connect(panner);
-    panner.connect(gain);
-    gain.connect(this.masterGain);
-
-    const source = this.audioCtx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(filter);
-    source.start();
+      // Compatibility wrapper for immediate non-acoustic sounds if needed
+      this.playAcousticEvent(name, x, y, volumeScale);
   }
 
   private synthesizeSpatialFallback(name: string, x: number, y: number, volume: number, pan: number, cutoff: number): void {
@@ -435,8 +509,10 @@ export class SoundManager {
     
     const filter = this.audioCtx.createBiquadFilter();
     filter.type = 'lowpass';
+    filter.frequency.value = 20000; // Start open
     const panner = this.audioCtx.createStereoPanner();
     const gain = this.audioCtx.createGain();
+    gain.gain.value = 0; // Start silent, updateVoiceSpatial will set it
 
     filter.connect(panner);
     panner.connect(gain);
@@ -458,6 +534,19 @@ export class SoundManager {
     }
 
     source.connect(filter);
+
+    // Local dry playback if near listener
+    const dist = Math.sqrt((x - this.listenerX)**2 + (y - this.listenerY)**2);
+    if (dist < 32 && name.startsWith('shoot_')) {
+        const dryGain = this.audioCtx.createGain();
+        let baseVol = ConfigManager.getInstance().get<number>('Audio', 'vol_' + name);
+        if (baseVol === undefined) baseVol = 1.0;
+        dryGain.gain.setValueAtTime(baseVol, this.audioCtx.currentTime);
+        source.connect(dryGain);
+        dryGain.connect(this.masterGain!);
+        this.dryGains.set(name, dryGain);
+    }
+
     source.start();
 
     let baseVolume = ConfigManager.getInstance().get<number>('Audio', 'vol_' + name);
@@ -465,7 +554,7 @@ export class SoundManager {
 
     const voice: SpatialVoice = { source, gain, panner, filter, x, y, baseVolume };
     this.spatialLoops.set(name, voice);
-    this.updateVoiceSpatial(voice);
+    this.updateVoiceSpatial(voice, name);
   }
 
   public updateLoopPosition(name: string, x: number, y: number): void {
@@ -473,7 +562,7 @@ export class SoundManager {
       if (voice) {
           voice.x = x;
           voice.y = y;
-          this.updateVoiceSpatial(voice);
+          this.updateVoiceSpatial(voice, name);
       }
   }
 
@@ -482,6 +571,13 @@ export class SoundManager {
       if (voice && this.audioCtx) {
           const now = this.audioCtx.currentTime;
           voice.gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+          
+          const dry = this.dryGains.get(name);
+          if (dry) {
+              dry.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+              this.dryGains.delete(name);
+          }
+
           voice.source.stop(now + 0.1);
           this.spatialLoops.delete(name);
       }
@@ -537,6 +633,7 @@ export class SoundManager {
           case 'ping': this.synthesizePing(); break;
           case 'shoot_cannon': this.synthesizeShoot(400, 0.15, 'square', 0.1); break;
           case 'shoot_laser': this.synthesizeShoot(1200, 0.08, 'sine', 0.05); break;
+          case 'shoot_flamethrower': this.synthesizeShoot(150, 0.5, 'sawtooth', 0.1); break;
           case 'shoot_ray': this.synthesizeShoot(200, 0.25, 'sawtooth', 0.08); break;
           case 'shoot_rocket': this.synthesizeShoot(300, 0.35, 'sawtooth', 0.1); break;
           case 'shoot_missile': this.synthesizeShoot(500, 0.25, 'sine', 0.08); break;
