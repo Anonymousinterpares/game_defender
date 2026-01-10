@@ -72,3 +72,4 @@ Refer to `ARCHITECTURAL_INVARIANTS.md` for the complete list. **These must be re
     - CODE CREATION/MODIFICATION --> DELIVERABLE: 1) clean, robust, error & assumption free code without comments NOT relevant for the codebase. 2) summary of the changes with explanation why they were done in such a way & clear checkpoints for user to check himself if changes are successfull
     - ANSWER: IF USER asks a question, REGARDLESS to any other keywords triggering analysis or code changes, YOU MUST FIRST ANSWER each of the questions
 - IF THERE IS NO KEYWORD PRESENT IN USER'S INPUT AND THIS IS NOT RELATED TO THE PREVIOUS ACTION, YOU SHOULD FIRST REUEST USER FOR CONFIRMATION WHAT IS REQUIRED FROM YOU.
+- AVOID also overthinking -> you should analyse your reasoning step by step in SYSTEMATIC WAY. AS soon as all analysed statements are TRUE, you should PASS to NEXT POINT

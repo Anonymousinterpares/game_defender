@@ -109,6 +109,11 @@ export class RenderSystem implements System {
             case 'enemy':
                 const ai = entityManager.getComponent<AIComponent>(id, 'ai');
                 this.drawEnemy(ctx, x, y, rotation, render.radius, damageFlash, health, ai);
+                
+                // NPC Health Bar: Only show if damaged
+                if (health && health.health < health.maxHealth && health.active) {
+                    this.drawHealthBar(ctx, x, y, render.radius, health.health, health.maxHealth);
+                }
                 break;
             case 'projectile':
                 this.drawProjectile(ctx, x, y, rotation, render.radius);
@@ -290,6 +295,36 @@ export class RenderSystem implements System {
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
+    }
+
+    private drawHealthBar(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, health: number, maxHealth: number): void {
+        const width = radius * 2.5;
+        const height = 4;
+        const barX = x - width / 2;
+        const barY = y - radius - 12;
+
+        ctx.save();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 0.8;
+
+        // Background
+        ctx.fillStyle = '#333';
+        ctx.fillRect(barX, barY, width, height);
+
+        // Fill
+        const pct = Math.max(0, health / maxHealth);
+        if (pct > 0.6) ctx.fillStyle = '#2ecc71'; // Green
+        else if (pct > 0.3) ctx.fillStyle = '#f1c40f'; // Yellow
+        else ctx.fillStyle = '#e74c3c'; // Red
+
+        ctx.fillRect(barX, barY, width * pct, height);
+
+        // Border
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(barX, barY, width, height);
+
+        ctx.restore();
     }
 
     private drawFire(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, id: string): void {
