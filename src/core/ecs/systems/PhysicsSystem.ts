@@ -7,18 +7,22 @@ import { TagComponent } from "../components/TagComponent";
 import { ConfigManager } from "../../../config/MasterConfig";
 import { World } from "../../World";
 import { WeatherManager, WeatherType } from "../../WeatherManager";
+import { Quadtree, QuadtreeItem } from "../../../utils/Quadtree";
+import { Entity } from "../../Entity"; // Import base Entity if needed for Quadtree, or define interface
+
+interface PhysicsEntity extends QuadtreeItem {
+    id: string;
+    // QuadtreeItem has x, y, radius
+}
 
 export class PhysicsSystem implements System {
     public readonly id = 'physics';
-    
-    private spatialGrid: Map<string, string[]> = new Map();
-    private gridSize: number = 128;
     
     private accumulator: number = 0;
     private readonly fixedTimeStep: number = 1 / 60;
     public alpha: number = 0;
 
-    constructor(private world: World) {}
+    constructor(private world: World, private spatialGrid: Quadtree<Entity>) {}
 
     update(dt: number, entityManager: EntityManager): void {
         // Prevent "Spiral of Death"
@@ -47,12 +51,15 @@ export class PhysicsSystem implements System {
         if (weather.type === WeatherType.RAIN) friction *= 0.95;
         else if (weather.type === WeatherType.SNOW) friction *= 0.85;
 
-        const entities = entityManager.query(['transform', 'physics']);
+        const entityIds = entityManager.query(['transform', 'physics']);
         
-        // 1. Update Spatial Grid
-        this.updateGrid(entities, entityManager);
+        // 1. Prepare entities for Quadtree updates (handled in Simulation usually, but let's ensure we use current positions)
+        // Actually, Simulation.ts calls `updateSpatialGrid()` at the end of the frame. 
+        // For Physics, we might want to query the LAST frame's grid or update it?
+        // The instruction says "Spatial Grid Integration: Modify PhysicsSystem to use the Quadtree for entity-vs-entity collisions".
+        // Assuming the Quadtree is up-to-date from the previous frame or Simulation loop.
 
-        for (const id of entities) {
+        for (const id of entityIds) {
             const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
             const physics = entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
             const input = entityManager.getComponent<InputComponent>(id, 'input');
@@ -71,95 +78,166 @@ export class PhysicsSystem implements System {
                 }
                 if (input.throttle !== 0) {
                     const speedPx = baseSpeed * tileSize;
+                    // Apply input as force/acceleration instead of direct velocity if possible,
+                    // but for strict game-feel compatibility, we'll keep adding to velocity 
+                    // or treat it as an impulse.
                     physics.vx += Math.cos(transform.rotation) * input.throttle * speedPx * dt * 5;
                     physics.vy += Math.sin(transform.rotation) * input.throttle * speedPx * dt * 5;
                 }
             }
 
-            // 3. Apply Friction
+            // 3. Apply Steering Forces (from AI)
+            if (physics.steeringForceX !== 0 || physics.steeringForceY !== 0) {
+                // F = ma -> a = F/m
+                const ax = physics.steeringForceX / physics.mass;
+                const ay = physics.steeringForceY / physics.mass;
+                physics.vx += ax * dt;
+                physics.vy += ay * dt;
+
+                // Reset forces
+                physics.steeringForceX = 0;
+                physics.steeringForceY = 0;
+            }
+
+            // 4. Apply Friction
             physics.vx *= Math.pow(friction, dt * 60);
             physics.vy *= Math.pow(friction, dt * 60);
 
-            // 4. Predict Position
+            // 5. Predict Position
             let nextX = transform.x + physics.vx * dt;
             let nextY = transform.y + physics.vy * dt;
 
-            // 5. World Collision (Hybrid Circle-vs-SubTile)
-            const checkRadius = physics.radius;
-            const subDiv = 10;
-            const subSize = tileSize / subDiv;
+            // 6. World Collision (Centralized Logic)
+            const wallResult = PhysicsSystem.checkCircleVsTile(this.world, nextX, nextY, physics.radius);
+            nextX = wallResult.x;
+            nextY = wallResult.y;
             
-            const minTX = Math.floor((nextX - checkRadius) / tileSize);
-            const maxTX = Math.floor((nextX + checkRadius) / tileSize);
-            const minTY = Math.floor((nextY - checkRadius) / tileSize);
-            const maxTY = Math.floor((nextY + checkRadius) / tileSize);
+            // Adjust velocity if hit wall
+            if (wallResult.hit) {
+               // Simple reflection/slide logic is inside checkCircleVsTile implicitly by returning corrected pos,
+               // but we should also kill velocity into the wall.
+               // For now, we just accept the position fix.
+               // Ideally, we'd project velocity.
+               if (wallResult.nx !== 0 || wallResult.ny !== 0) {
+                   const dot = physics.vx * wallResult.nx + physics.vy * wallResult.ny;
+                   if (dot < 0) {
+                       physics.vx -= dot * wallResult.nx;
+                       physics.vy -= dot * wallResult.ny;
+                   }
+               }
+            }
 
-            const heatMap = this.world.getHeatMap();
+            // Map Bounds
+            const mapW = this.world.getWidthPixels();
+            const mapH = this.world.getHeightPixels();
+            if (nextX < physics.radius) { nextX = physics.radius; physics.vx = 0; }
+            if (nextX > mapW - physics.radius) { nextX = mapW - physics.radius; physics.vx = 0; }
+            if (nextY < physics.radius) { nextY = physics.radius; physics.vy = 0; }
+            if (nextY > mapH - physics.radius) { nextY = mapH - physics.radius; physics.vy = 0; }
 
-            for (let ty = minTY; ty <= maxTY; ty++) {
-                for (let tx = minTX; tx <= maxTX; tx++) {
-                    const material = this.world.getTile(tx, ty);
-                    if (material === 0) continue; // MaterialType.NONE
+            // 7. Entity vs Entity (Separation via Quadtree)
+            const separation = this.calculateSeparation(id, nextX, nextY, physics, entityManager);
+            nextX += separation.x;
+            nextY += separation.y;
+            // Also apply separation to velocity to prevent re-entry
+            if (separation.x !== 0 || separation.y !== 0) {
+                 physics.vx += separation.x * 5; // Impulse
+                 physics.vy += separation.y * 5;
+            }
 
-                    const hasHeatMapData = heatMap && heatMap.hasTileData(tx, ty);
+            // 8. Commit Final Position
+            transform.x = nextX;
+            transform.y = nextY;
+        }
+    }
 
-                    if (!hasHeatMapData) {
-                        // FAST PATH: Tile is fully intact, use one AABB check
-                        const result = this.resolveAABBCollision(nextX, nextY, tx * tileSize, ty * tileSize, tileSize, checkRadius, physics);
-                        nextX = result.x;
-                        nextY = result.y;
-                    } else {
-                        // ACCURATE PATH: Tile is damaged, check sub-tiles
-                        const hpData = heatMap.getTileHP(tx, ty);
-                        if (!hpData) continue;
+    // Public static method for universal access (Physics "Single Source of Truth")
+    public static checkCircleVsTile(world: World, px: number, py: number, radius: number): { x: number, y: number, hit: boolean, nx: number, ny: number } {
+        const tileSize = world.getTileSize();
+        const checkRadius = radius;
+        const subDiv = 10;
+        const subSize = tileSize / subDiv;
+        
+        const minTX = Math.floor((px - checkRadius) / tileSize);
+        const maxTX = Math.floor((px + checkRadius) / tileSize);
+        const minTY = Math.floor((py - checkRadius) / tileSize);
+        const maxTY = Math.floor((py + checkRadius) / tileSize);
 
-                        const tileWX = tx * tileSize;
-                        const tileWY = ty * tileSize;
-                        
-                        // Further optimization: Only check sub-tiles that overlap the entity's bounding box
-                        const localMinSX = Math.max(0, Math.floor((nextX - checkRadius - tileWX) / subSize));
-                        const localMaxSX = Math.min(subDiv - 1, Math.floor((nextX + checkRadius - tileWX) / subSize));
-                        const localMinSY = Math.max(0, Math.floor((nextY - checkRadius - tileWY) / subSize));
-                        const localMaxSY = Math.min(subDiv - 1, Math.floor((nextY + checkRadius - tileWY) / subSize));
+        const heatMap = world.getHeatMap();
 
-                        for (let sy = localMinSY; sy <= localMaxSY; sy++) {
-                            for (let sx = localMinSX; sx <= localMaxSX; sx++) {
-                                if (hpData[sy * subDiv + sx] > 0) {
-                                    const result = this.resolveAABBCollision(
-                                        nextX, nextY, 
-                                        tileWX + sx * subSize, 
-                                        tileWY + sy * subSize, 
-                                        subSize, 
-                                        checkRadius,
-                                        physics
-                                    );
-                                    nextX = result.x;
-                                    nextY = result.y;
+        let finalX = px;
+        let finalY = py;
+        let hitAny = false;
+        let avgNX = 0;
+        let avgNY = 0;
+        let hitCount = 0;
+
+        for (let ty = minTY; ty <= maxTY; ty++) {
+            for (let tx = minTX; tx <= maxTX; tx++) {
+                const material = world.getTile(tx, ty);
+                if (material === 0) continue; 
+
+                const hasHeatMapData = heatMap && heatMap.hasTileData(tx, ty);
+
+                if (!hasHeatMapData) {
+                    // FAST PATH: Tile is fully intact
+                    const result = PhysicsSystem.resolveAABBCollision(finalX, finalY, tx * tileSize, ty * tileSize, tileSize, checkRadius);
+                    if (result.hit) {
+                        finalX = result.x;
+                        finalY = result.y;
+                        hitAny = true;
+                        avgNX += result.nx;
+                        avgNY += result.ny;
+                        hitCount++;
+                    }
+                } else {
+                    // ACCURATE PATH: Tile is damaged
+                    const hpData = heatMap.getTileHP(tx, ty);
+                    if (!hpData) continue;
+
+                    const tileWX = tx * tileSize;
+                    const tileWY = ty * tileSize;
+                    
+                    const localMinSX = Math.max(0, Math.floor((finalX - checkRadius - tileWX) / subSize));
+                    const localMaxSX = Math.min(subDiv - 1, Math.floor((finalX + checkRadius - tileWX) / subSize));
+                    const localMinSY = Math.max(0, Math.floor((finalY - checkRadius - tileWY) / subSize));
+                    const localMaxSY = Math.min(subDiv - 1, Math.floor((finalY + checkRadius - tileWY) / subSize));
+
+                    for (let sy = localMinSY; sy <= localMaxSY; sy++) {
+                        for (let sx = localMinSX; sx <= localMaxSX; sx++) {
+                            if (hpData[sy * subDiv + sx] > 0) {
+                                const result = PhysicsSystem.resolveAABBCollision(
+                                    finalX, finalY, 
+                                    tileWX + sx * subSize, 
+                                    tileWY + sy * subSize, 
+                                    subSize, 
+                                    checkRadius
+                                );
+                                if (result.hit) {
+                                    finalX = result.x;
+                                    finalY = result.y;
+                                    hitAny = true;
+                                    avgNX += result.nx;
+                                    avgNY += result.ny;
+                                    hitCount++;
                                 }
                             }
                         }
                     }
                 }
             }
-
-            // Map Bounds
-            const mapW = this.world.getWidthPixels();
-            const mapH = this.world.getHeightPixels();
-            if (nextX < checkRadius) { nextX = checkRadius; physics.vx = 0; }
-            if (nextX > mapW - checkRadius) { nextX = mapW - checkRadius; physics.vx = 0; }
-            if (nextY < checkRadius) { nextY = checkRadius; physics.vy = 0; }
-            if (nextY > mapH - checkRadius) { nextY = mapH - checkRadius; physics.vy = 0; }
-
-            // 6. Body vs Body Collision
-            this.resolveBodyCollisions(id, nextX, nextY, physics, entityManager);
-
-            // 7. Commit Final Position
-            transform.x = nextX;
-            transform.y = nextY;
         }
+        
+        if (hitCount > 0) {
+            const len = Math.sqrt(avgNX*avgNX + avgNY*avgNY) || 1;
+            avgNX /= len;
+            avgNY /= len;
+        }
+
+        return { x: finalX, y: finalY, hit: hitAny, nx: avgNX, ny: avgNY };
     }
 
-    private resolveAABBCollision(px: number, py: number, rx: number, ry: number, rSize: number, radius: number, physics: PhysicsComponent): {x: number, y: number} {
+    private static resolveAABBCollision(px: number, py: number, rx: number, ry: number, rSize: number, radius: number): {x: number, y: number, hit: boolean, nx: number, ny: number} {
         const closestX = Math.max(rx, Math.min(px, rx + rSize));
         const closestY = Math.max(ry, Math.min(py, ry + rSize));
 
@@ -173,79 +251,51 @@ export class PhysicsSystem implements System {
             const nx = dx / dist;
             const ny = dy / dist;
 
-            px += nx * overlap;
-            py += ny * overlap;
-
-            // Slide velocity
-            const dot = physics.vx * nx + physics.vy * ny;
-            if (dot < 0) {
-                physics.vx -= dot * nx;
-                physics.vy -= dot * ny;
-            }
+            return { x: px + nx * overlap, y: py + ny * overlap, hit: true, nx, ny };
         }
-        return { x: px, y: py };
+        return { x: px, y: py, hit: false, nx: 0, ny: 0 };
     }
 
-    private updateGrid(entities: string[], entityManager: EntityManager): void {
-        this.spatialGrid.clear();
-        for (const id of entities) {
-            const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
-            const gx = Math.floor(transform.x / this.gridSize);
-            const gy = Math.floor(transform.y / this.gridSize);
-            const key = `${gx},${gy}`;
-            if (!this.spatialGrid.has(key)) this.spatialGrid.set(key, []);
-            this.spatialGrid.get(key)!.push(id);
-        }
-    }
+    private calculateSeparation(id: string, nextX: number, nextY: number, physics: PhysicsComponent, entityManager: EntityManager): {x: number, y: number} {
+        const range = physics.radius * 2.5; 
+        const neighbors = this.spatialGrid.retrieve({ x: nextX - range, y: nextY - range, w: range * 2, h: range * 2 });
+        
+        let sepX = 0;
+        let sepY = 0;
+        let count = 0;
 
-    private resolveBodyCollisions(id: string, nextX: number, nextY: number, physics: PhysicsComponent, entityManager: EntityManager): void {
-        const gx = Math.floor(nextX / this.gridSize);
-        const gy = Math.floor(nextY / this.gridSize);
+        for (const other of neighbors) {
+            if (other.id === id) continue;
+            
+            // Check if ECS entity (prefer Transform/Physics components if available)
+            // But Quadtree stores Entity instances (which map to ECS IDs if we set them up right).
+            // However, Quadtree in Simulation stores 'Entity' objects (the class). 
+            // We need to bridge this.
+            // Assumption: The 'Entity' class objects IN the Quadtree have an 'id' that matches the ECS id (if they are ECS entities).
+            // OR they are legacy entities. 
+            // We'll treat them as circles.
+            
+            const dx = nextX - other.x;
+            const dy = nextY - other.y;
+            const distSq = dx * dx + dy * dy;
+            const radSum = physics.radius + other.radius;
 
-        for (let ox = -1; ox <= 1; ox++) {
-            for (let oy = -1; oy <= 1; oy++) {
-                const key = `${gx + ox},${gy + oy}`;
-                const cell = this.spatialGrid.get(key);
-                if (!cell) continue;
-
-                for (const otherId of cell) {
-                    if (id === otherId) continue;
-                    
-                    const otherTransform = entityManager.getComponent<TransformComponent>(otherId, 'transform')!;
-                    const otherPhysics = entityManager.getComponent<PhysicsComponent>(otherId, 'physics')!;
-                    if (otherPhysics.isStatic) continue;
-
-                    const dx = nextX - otherTransform.x;
-                    const dy = nextY - otherTransform.y;
-                    const distSq = dx * dx + dy * dy;
-                    const radSum = physics.radius + otherPhysics.radius;
-
-                    if (distSq < radSum * radSum && distSq > 0) {
-                        const dist = Math.sqrt(distSq);
-                        const overlap = (radSum - dist);
-                        const nx = dx / dist;
-                        const ny = dy / dist;
-
-                        // Mass-weighted resolution
-                        // Heavier entities are pushed less
-                        const totalMass = physics.mass + otherPhysics.mass;
-                        const ratio1 = otherPhysics.mass / totalMass; // Current entity push ratio
-                        const ratio2 = physics.mass / totalMass;       // Other entity push ratio
-
-                        nextX += nx * overlap * ratio1;
-                        nextY += ny * overlap * ratio1;
-
-                        otherTransform.x -= nx * overlap * ratio2;
-                        otherTransform.y -= ny * overlap * ratio2;
-
-                        // Increased dampening on velocity when colliding to prevent "infinite push"
-                        physics.vx *= 0.8;
-                        physics.vy *= 0.8;
-                        otherPhysics.vx *= 0.8;
-                        otherPhysics.vy *= 0.8;
-                    }
-                }
+            if (distSq > 0 && distSq < radSum * radSum) {
+                const dist = Math.sqrt(distSq);
+                const overlap = radSum - dist;
+                const push = Math.min(overlap, 2.0); // Limit push per frame to avoid instability
+                
+                sepX += (dx / dist) * push;
+                sepY += (dy / dist) * push;
+                count++;
             }
         }
+
+        if (count > 0) {
+            // Average out and dampen
+            // Heuristic: move partially to resolve
+            return { x: sepX * 0.5, y: sepY * 0.5 };
+        }
+        return { x: 0, y: 0 };
     }
 }

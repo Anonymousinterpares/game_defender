@@ -1,5 +1,6 @@
 import { ConfigManager } from '../config/MasterConfig';
 import { MaterialType } from './HeatMap';
+import { PhysicsSystem } from './ecs/systems/PhysicsSystem';
 
 export class World {
   private width: number;
@@ -151,18 +152,15 @@ export class World {
   }
 
   public checkWallCollision(x: number, y: number, radius: number): {x: number, y: number} | null {
-      const points = [
-          {x, y},
-          {x: x - radius, y}, {x: x + radius, y},
-          {x, y: y - radius}, {x, y: y + radius},
-          {x: x - radius * 0.7, y: y - radius * 0.7},
-          {x: x + radius * 0.7, y: y - radius * 0.7},
-          {x: x - radius * 0.7, y: y + radius * 0.7},
-          {x: x + radius * 0.7, y: y + radius * 0.7}
-      ];
-
-      for (const p of points) {
-          if (this.isWall(p.x, p.y)) return p;
+      // Delegate to the Single Source of Truth in PhysicsSystem
+      const result = PhysicsSystem.checkCircleVsTile(this, x, y, radius);
+      
+      // Adaptation: PhysicsSystem corrects position. 
+      // checkWallCollision expects to return the NEW position (conceptually "the point of collision resolved") 
+      // OR null if no collision.
+      
+      if (result.hit) {
+          return { x: result.x, y: result.y };
       }
       return null;
   }

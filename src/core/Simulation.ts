@@ -92,20 +92,20 @@ export class Simulation implements WeaponParent, CombatParent {
         
         // ECS Init
         this.entityManager = new EntityManager();
-        this.physicsSystem = new PhysicsSystem(this.world);
-        this.fireSystem = new FireSystem();
-        this.inputSystem = new InputSystem();
-        this.aiSystem = new AISystem(this.world);
-        this.contactDamageSystem = new ContactDamageSystem();
-        this.renderSystem = new RenderSystem();
-        this.pluginManager = new PluginManager(this);
-        
         this.spatialGrid = new Quadtree<Entity>({ 
             x: 0, 
             y: 0, 
             w: this.world.getWidthPixels(), 
             h: this.world.getHeightPixels() 
         });
+        
+        this.physicsSystem = new PhysicsSystem(this.world, this.spatialGrid);
+        this.fireSystem = new FireSystem();
+        this.inputSystem = new InputSystem();
+        this.aiSystem = new AISystem(this.world);
+        this.contactDamageSystem = new ContactDamageSystem();
+        this.renderSystem = new RenderSystem();
+        this.pluginManager = new PluginManager(this);
 
         // Initialize Player at center
         const centerX = this.world.getWidthPixels() / 2;
@@ -186,10 +186,26 @@ export class Simulation implements WeaponParent, CombatParent {
         this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
         this.world.setHeatMap(this.heatMap);
 
-        // ECS Reset
+        this.spatialGrid = new Quadtree<Entity>({ 
+            x: 0, 
+            y: 0, 
+            w: this.world.getWidthPixels(), 
+            h: this.world.getHeightPixels() 
+        });
+
         this.entityManager.clear();
-        this.physicsSystem = new PhysicsSystem(this.world);
-        
+        this.physicsSystem = new PhysicsSystem(this.world, this.spatialGrid);
+        // Re-initialize other systems to clear state if necessary, 
+        // though strictly they don't hold state except for AI maybe?
+        // For now, assume they are stateless or safe to reuse.
+        // Actually, AI has timers. Let's recreate them to be safe.
+        this.aiSystem = new AISystem(this.world);
+        this.fireSystem = new FireSystem();
+        this.inputSystem = new InputSystem();
+        this.contactDamageSystem = new ContactDamageSystem();
+        this.renderSystem = new RenderSystem();
+        this.pluginManager = new PluginManager(this);
+
         const centerX = this.world.getWidthPixels() / 2;
         const centerY = this.world.getHeightPixels() / 2;
         

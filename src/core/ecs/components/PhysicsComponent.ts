@@ -7,6 +7,8 @@ export class PhysicsComponent implements Component {
         public vy: number = 0,
         public radius: number = 10,
         public isStatic: boolean = false,
-        public mass: number = 1.0
+        public mass: number = 1.0,
+        public steeringForceX: number = 0,
+        public steeringForceY: number = 0
     ) {}
 }
