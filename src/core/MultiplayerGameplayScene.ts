@@ -279,7 +279,12 @@ export class MultiplayerGameplayScene extends GameplayScene {
                 const hit = this.world!.raycast(rp.x, rp.y, angle, type === 'laser' ? 800 : 500);
                 const endX = hit ? hit.x : rp.x + Math.cos(angle) * (type === 'laser' ? 800 : 500);
                 const endY = hit ? hit.y : rp.y + Math.sin(angle) * (type === 'laser' ? 800 : 500);
-                ctx.beginPath(); ctx.moveTo(rp.interpolatedX, rp.interpolatedY); ctx.lineTo(endX, endY);
+                
+                const alpha = this.simulation.physicsSystem.alpha;
+                const rx = rp.prevX + (rp.x - rp.prevX) * alpha;
+                const ry = rp.prevY + (rp.y - rp.prevY) * alpha;
+
+                ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(endX, endY);
                 ctx.strokeStyle = type === 'laser' ? '#ff0000' : 'rgba(0, 255, 255, 0.8)';
                 ctx.lineWidth = type === 'laser' ? 2 : 15; ctx.stroke();
             }

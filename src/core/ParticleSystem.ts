@@ -665,8 +665,7 @@ export class ParticleSystem {
         }
     }
 
-    public render(ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
-        const alpha = (Entity as any).interpolationAlpha || 0;
+    public render(ctx: CanvasRenderingContext2D, camX: number, camY: number, alpha: number = 0): void {
         const w = ctx.canvas.width;
         const h = ctx.canvas.height;
         const margin = 100;

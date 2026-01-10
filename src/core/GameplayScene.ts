@@ -150,9 +150,13 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     this.simulation.update(dt, this.inputManager);
 
     if (this.player) {
-        SoundManager.getInstance().updateListener(this.player.interpolatedX, this.player.interpolatedY);
-        this.cameraX = this.player.interpolatedX - window.innerWidth / 2;
-        this.cameraY = this.player.interpolatedY - window.innerHeight / 2;
+        const alpha = this.simulation.physicsSystem.alpha;
+        const px = this.player.prevX + (this.player.x - this.player.prevX) * alpha;
+        const py = this.player.prevY + (this.player.y - this.player.prevY) * alpha;
+        
+        SoundManager.getInstance().updateListener(px, py);
+        this.cameraX = px - window.innerWidth / 2;
+        this.cameraY = py - window.innerHeight / 2;
     }
 
     ParticleSystem.getInstance().update(dt, this.world, this.player, [...this.enemies, ...this.remotePlayers]);
@@ -249,7 +253,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     this.simulation.pluginManager.render(ctx);
 
     PerfMonitor.getInstance().begin('render_particles');
-    ParticleSystem.getInstance().render(ctx, this.cameraX, this.cameraY);
+    ParticleSystem.getInstance().render(ctx, this.cameraX, this.cameraY, this.simulation.physicsSystem.alpha);
     PerfMonitor.getInstance().end('render_particles');
 
     if (this.isFiringBeam && this.player) {

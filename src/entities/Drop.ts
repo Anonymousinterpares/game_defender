@@ -26,7 +26,7 @@ export class Drop extends Entity {
     this.bobTime += dt * 5;
   }
 
-  render(ctx: CanvasRenderingContext2D): void {
+  render(ctx: CanvasRenderingContext2D, alpha?: number): void {
     const yOffset = Math.sin(this.bobTime) * 5;
     
     ctx.shadowBlur = 10;

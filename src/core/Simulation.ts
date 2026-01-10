@@ -59,7 +59,7 @@ export class Simulation implements WeaponParent, CombatParent {
     private inputSystem: InputSystem;
     private aiSystem: AISystem;
     private contactDamageSystem: ContactDamageSystem;
-    private renderSystem: RenderSystem;
+    public renderSystem: RenderSystem;
     private customSystems: System[] = [];
 
     public pluginManager: PluginManager;
@@ -131,6 +131,7 @@ export class Simulation implements WeaponParent, CombatParent {
             this.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
             this.entityManager.addComponent(seg.id, new HealthComponent(seg.health, seg.maxHealth));
             this.entityManager.addComponent(seg.id, new FireComponent());
+            this.entityManager.addComponent(seg.id, new RenderComponent('player_segment', '#cfaa6e', seg.radius));
         });
 
         this.initWeapons();
@@ -224,6 +225,7 @@ export class Simulation implements WeaponParent, CombatParent {
             this.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
             this.entityManager.addComponent(seg.id, new HealthComponent(seg.health, seg.maxHealth));
             this.entityManager.addComponent(seg.id, new FireComponent());
+            this.entityManager.addComponent(seg.id, new RenderComponent('player_segment', '#cfaa6e', seg.radius));
         });
         
         // Clear logic state
@@ -261,7 +263,6 @@ export class Simulation implements WeaponParent, CombatParent {
         
         // 2. Physics & Movement (Consolidated)
         this.physicsSystem.update(dt, this.entityManager);
-        Entity.setInterpolationAlpha(this.physicsSystem.alpha);
 
         // Update Custom Systems
         this.customSystems.forEach(s => s.update(dt, this.entityManager));
@@ -330,7 +331,7 @@ export class Simulation implements WeaponParent, CombatParent {
     }
 
     public render(ctx: CanvasRenderingContext2D): void {
-        this.renderSystem.update(0, this.entityManager, ctx);
+        this.renderSystem.update(0, this.entityManager, ctx, this.physicsSystem.alpha);
     }
 
     private updateProjectiles(dt: number): void {

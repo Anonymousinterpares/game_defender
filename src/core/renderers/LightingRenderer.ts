@@ -10,9 +10,11 @@ import { Point } from '../VisibilitySystem';
 import { ConfigManager } from '../../config/MasterConfig';
 import { WeatherManager, WeatherType, CloudType } from '../WeatherManager';
 import { PerfMonitor } from '../../utils/PerfMonitor';
+import { Simulation } from '../Simulation';
 
 export interface LightingParent {
     world: World | null;
+    simulation: Simulation;
     worldRenderer: WorldRenderer;
     player: Player | null;
     enemies: Enemy[];
@@ -296,8 +298,8 @@ export class LightingRenderer {
         this.drawWorldSilhouette(lctx, silColor, worldMeshVersion, fullW, fullH);
         
         lctx.translate(-this.parent.cameraX, -this.parent.cameraY);
-        if (this.parent.player) this.parent.player.renderAsSilhouette(lctx, silColor);
-        this.parent.enemies.forEach(e => e.renderAsSilhouette(lctx, silColor));
+        const alpha = this.parent.simulation.physicsSystem.alpha;
+        this.parent.simulation.renderSystem.renderSilhouettes(this.parent.simulation.entityManager, lctx, alpha, silColor);
         lctx.restore();
 
         // 4. VISION
@@ -655,8 +657,8 @@ export class LightingRenderer {
         // Erase object footprints from shadow mask
         mctx.globalCompositeOperation = 'destination-out';
         if (this.parent.worldRenderer) this.parent.worldRenderer.renderAsSilhouette(mctx, this.parent.cameraX, this.parent.cameraY);
-        if (this.parent.player) this.parent.player.renderAsSilhouette(mctx, '#ffffff');
-        this.parent.enemies.forEach(e => e.renderAsSilhouette(mctx, '#ffffff'));
+        const alphaShadow = this.parent.simulation.physicsSystem.alpha;
+        this.parent.simulation.renderSystem.renderSilhouettes(this.parent.simulation.entityManager, mctx, alphaShadow, '#ffffff');
 
         mctx.restore();
         sctx.restore();

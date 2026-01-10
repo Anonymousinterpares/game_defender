@@ -103,19 +103,6 @@ export abstract class Entity implements PhysicsBody {
   public isStatic: boolean = false;
   public color: string = '#fff';
 
-  private static interpolationAlpha: number = 0;
-
-  public get interpolatedX(): number {
-    return this.prevX + (this.x - this.prevX) * Entity.interpolationAlpha;
-  }
-  public get interpolatedY(): number {
-    return this.prevY + (this.y - this.prevY) * Entity.interpolationAlpha;
-  }
-  
-  public static setInterpolationAlpha(alpha: number): void {
-      Entity.interpolationAlpha = alpha;
-  }
-  
   // Health and Fire State Bindings
   public get health(): number {
       return this._entityManager?.getComponent<HealthComponent>(this.id, 'health')?.health ?? this._rawHealth;
@@ -173,18 +160,11 @@ export abstract class Entity implements PhysicsBody {
   private _rawDamageFlash: number = 0;
   private _rawVisualScale: number = 1.0;
 
-  private static fireAsset: HTMLImageElement | null = null;
-
   constructor(x: number, y: number) {
     this._rawX = x;
     this._rawY = y;
     this._rawPrevX = x;
     this._rawPrevY = y;
-    
-    if (!Entity.fireAsset && ConfigManager.getInstance().get<boolean>('Fire', 'isFireSpritesheet')) {
-        Entity.fireAsset = new Image();
-        Entity.fireAsset.src = `${import.meta.env.BASE_URL}assets/visuals/fire_spritesheet.svg`;
-    }
   }
 
   public takeDamage(amount: number): void {
@@ -227,41 +207,18 @@ export abstract class Entity implements PhysicsBody {
 
   public handleFireLogic(dt: number, fireDPS: number, baseExtinguishChance: number): void {
       // DEPRECATED: Visual timers now handled by FireSystem.
-      // This remains as a placeholder to avoid breaking legacy calls until Phase 5.
   }
 
-  public renderFire(ctx: CanvasRenderingContext2D): void {
-      if (!this.isOnFire || !Entity.fireAsset || !Entity.fireAsset.complete || Entity.fireAsset.naturalWidth === 0) return;
-
-      const ix = this.interpolatedX;
-      const iy = this.interpolatedY;
-
-      const time = performance.now() * 0.001;
-      const frameCount = 8;
-      const frame = Math.floor((time * 15 + parseInt(this.id, 36)) % frameCount);
-      
-      const fw = Entity.fireAsset.width / frameCount;
-      const fh = Entity.fireAsset.height;
-      const fx = frame * fw;
-      
-      // Proportional fire: make it covers the entity radius
-      const displaySize = this.radius * 2.5;
-      ctx.drawImage(
-          Entity.fireAsset, 
-          fx, 0, fw, fh, 
-          ix - displaySize / 2, 
-          iy - displaySize * 0.8, 
-          displaySize, 
-          displaySize
-      );
-
-      // Simple procedural sparks
-      if (Math.random() < 0.2) {
-          ctx.fillStyle = '#fff';
-          ctx.fillRect(ix + (Math.random() - 0.5) * this.radius * 2, iy - Math.random() * this.radius * 2, 2, 2);
-      }
-  }
-
+  // Removed renderFire and interpolated getters.
+  // We still need abstract render because Simulation calls it for legacy support,
+  // but it can be empty for ECS entities.
   abstract update(dt: number, ...args: any[]): void;
-  abstract render(ctx: CanvasRenderingContext2D): void;
+  abstract render(ctx: CanvasRenderingContext2D, alpha?: number): void;
+  
+  // Compatibility: If something still tries to call setInterpolationAlpha on Entity, we should warn or remove it.
+  // Since we removed it from usage, we remove it here.
+  public static setInterpolationAlpha(alpha: number): void {
+      // No-op or removed. Keeping it for a moment if I missed any usage.
+      // I'll remove it.
+  }
 }

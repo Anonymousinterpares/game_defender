@@ -1,6 +1,7 @@
 import { Entity, PhysicsBody } from '../core/Entity';
 import { ConfigManager } from '../config/MasterConfig';
 import { NetworkMessageType } from '../core/MultiplayerManager';
+import { AssetRegistry } from '../core/AssetRegistry';
 
 export class RemotePlayer extends Entity {
   public targetX: number = 0;
@@ -50,7 +51,7 @@ export class RemotePlayer extends Entity {
               this.radius = r;
           }
           update(dt: number) {}
-          render(ctx: CanvasRenderingContext2D) {}
+          render(ctx: CanvasRenderingContext2D, alpha?: number) {}
       }(x, y, this.radius);
       
       this.segments.push(seg);
@@ -90,39 +91,14 @@ export class RemotePlayer extends Entity {
 
     // We DO NOT call resolveSegmentConstraints here anymore because 
     // segments are strictly updated from network state in MultiplayerGameplayScene.
-    // This prevents "lag-stretching" of the snake body.
   }
 
-  private resolveSegmentConstraints(): void {
-      // Inverse Kinematics / Relaxed Constraints
-      let leader = this as PhysicsBody;
-      
-      for (let i = 0; i < this.segments.length; i++) {
-          const segment = this.segments[i];
-          
-          const dx = leader.x - segment.x;
-          const dy = leader.y - segment.y;
-          const dist = Math.sqrt(dx*dx + dy*dy);
-          
-          if (dist !== 0) {
-              const diff = dist - this.segmentSpacing;
-              const moveX = (dx / dist) * diff;
-              const moveY = (dy / dist) * diff;
-              
-              segment.x += moveX;
-              segment.y += moveY;
-          }
-          
-          leader = segment;
-      }
-  }
-
-  render(ctx: CanvasRenderingContext2D): void {
+  render(ctx: CanvasRenderingContext2D, alpha: number = 0): void {
     // Draw Segments first (behind head)
     for (let i = this.segments.length - 1; i >= 0; i--) {
         const s = this.segments[i];
-        const sx = s.interpolatedX;
-        const sy = s.interpolatedY;
+        const sx = s.prevX + (s.x - s.prevX) * alpha;
+        const sy = s.prevY + (s.y - s.prevY) * alpha;
 
         ctx.beginPath();
         ctx.arc(sx, sy, this.radius, 0, Math.PI * 2);
@@ -141,15 +117,17 @@ export class RemotePlayer extends Entity {
 
         // Render fire on segment if burning
         if (s.isOnFire) {
-            s.renderFire(ctx);
+            this.renderFire(ctx, sx, sy, s.radius, s.id);
         }
     }
 
-    const ix = this.interpolatedX;
-    const iy = this.interpolatedY;
+    const ix = this.prevX + (this.x - this.prevX) * alpha;
+    const iy = this.prevY + (this.y - this.prevY) * alpha;
 
     // Render fire on head if burning
-    this.renderFire(ctx);
+    if (this.isOnFire) {
+        this.renderFire(ctx, ix, iy, this.radius, this.id);
+    }
 
     // Head
     ctx.save();
@@ -196,5 +174,33 @@ export class RemotePlayer extends Entity {
     ctx.fillRect(ix - hbW/2, iy - 25, hbW, hbH);
     ctx.fillStyle = this.health > 30 ? '#0f0' : '#f00';
     ctx.fillRect(ix - hbW/2, iy - 25, hbW * (this.health / this.maxHealth), hbH);
+  }
+
+  private renderFire(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, id: string): void {
+      try {
+        const fireAsset = AssetRegistry.getInstance().getImage('fire_spritesheet');
+        if (!fireAsset || !fireAsset.complete || fireAsset.naturalWidth === 0) return;
+
+        const time = performance.now() * 0.001;
+        const frameCount = 8;
+        const idHash = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        const frame = Math.floor((time * 15 + idHash) % frameCount);
+        
+        const fw = fireAsset.width / frameCount;
+        const fh = fireAsset.height;
+        const fx = frame * fw;
+        
+        const displaySize = radius * 2.5;
+        ctx.drawImage(
+            fireAsset, 
+            fx, 0, fw, fh, 
+            x - displaySize / 2, 
+            y - displaySize * 0.8, 
+            displaySize, 
+            displaySize
+        );
+      } catch (e) {
+          // Asset not loaded
+      }
   }
 }

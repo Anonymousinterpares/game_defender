@@ -165,9 +165,9 @@ export class Projectile extends Entity {
     }
   }
 
-  render(ctx: CanvasRenderingContext2D): void {
-    const ix = this.interpolatedX;
-    const iy = this.interpolatedY;
+  render(ctx: CanvasRenderingContext2D, alpha: number = 0): void {
+    const ix = this.prevX + (this.x - this.prevX) * alpha;
+    const iy = this.prevY + (this.y - this.prevY) * alpha;
 
     ctx.save();
     ctx.translate(ix, iy);

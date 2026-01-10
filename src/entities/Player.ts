@@ -37,7 +37,7 @@ export class Player extends Entity {
               this.radius = r;
           }
           update(dt: number) {} // Managed by player
-          render(ctx: CanvasRenderingContext2D) {} // Managed by player
+          render(ctx: CanvasRenderingContext2D) {} // Removed
       }(x - (i + 1) * this.segmentSpacing, y, this.radius);
       
       this.segments.push(seg);
@@ -171,121 +171,6 @@ export class Player extends Entity {
       }
   }
 
-  render(ctx: CanvasRenderingContext2D): void {
-      this.renderInternal(ctx, false);
-  }
-
-  public renderAsSilhouette(ctx: CanvasRenderingContext2D, color: string): void {
-      this.renderInternal(ctx, true, color);
-  }
-
-  private renderInternal(ctx: CanvasRenderingContext2D, silhouette: boolean, silColor?: string): void {
-    // Render Upgrades FIRST (behind segments)
-    if (!silhouette) {
-        this.upgrades.forEach(u => u.render(ctx));
-    }
-
-    // Draw Segments
-    for (let i = this.segments.length - 1; i >= 0; i--) {
-      const s = this.segments[i];
-      const size = this.radius; 
-      const ix = s.interpolatedX;
-      const iy = s.interpolatedY;
-      
-      ctx.save();
-      if (!silhouette && s.visualScale !== 1.0) {
-          ctx.translate(ix, iy);
-          ctx.scale(s.visualScale, s.visualScale);
-          ctx.translate(-ix, -iy);
-      }
-
-      ctx.beginPath();
-      ctx.arc(ix, iy, size, 0, Math.PI * 2);
-      
-      if (silhouette) {
-          ctx.fillStyle = silColor || '#fff';
-      } else {
-          const grad = ctx.createRadialGradient(ix - 5, iy - 5, 2, ix, iy, size);
-          grad.addColorStop(0, '#ebd5b3'); 
-          grad.addColorStop(0.5, '#b58d4a'); 
-          grad.addColorStop(1, '#594326'); 
-          ctx.fillStyle = grad;
-      }
-      
-      ctx.fill();
-      
-      if (!silhouette) {
-          ctx.strokeStyle = '#3d2e1e';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          if (s.damageFlash > 0) {
-              ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (s.damageFlash / 0.2)})`;
-              ctx.fill();
-          }
-      }
-      ctx.restore();
-
-      if (!silhouette && s.isOnFire) {
-          s.renderFire(ctx);
-      }
-    }
-
-    // Draw Head
-    const hix = this.interpolatedX;
-    const hiy = this.interpolatedY;
-
-    ctx.save();
-    if (!silhouette && this.visualScale !== 1.0) {
-        ctx.translate(hix, hiy);
-        ctx.scale(this.visualScale, this.visualScale);
-        ctx.translate(-hix, -hiy);
-    }
-
-    ctx.beginPath();
-    ctx.arc(hix, hiy, this.radius, 0, Math.PI * 2);
-    
-    if (silhouette) {
-        ctx.fillStyle = silColor || '#fff';
-    } else {
-        const headGrad = ctx.createRadialGradient(hix - 5, hiy - 5, 2, hix, hiy, this.radius);
-        headGrad.addColorStop(0, '#ffdf80');
-        headGrad.addColorStop(0.5, '#cfaa6e');
-        headGrad.addColorStop(1, '#8c6a36');
-        ctx.fillStyle = headGrad;
-    }
-    
-    ctx.fill();
-
-    if (!silhouette) {
-        ctx.strokeStyle = '#594326';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        if (this.damageFlash > 0) {
-            ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (this.damageFlash / 0.2)})`;
-            ctx.fill();
-        }
-    }
-    ctx.restore();
-
-    if (!silhouette) {
-        this.renderFire(ctx);
-        const cannonLen = 25;
-        ctx.save();
-        ctx.translate(hix, hiy);
-        ctx.rotate(this.rotation);
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(cannonLen, 0);
-        ctx.strokeStyle = '#222';
-        ctx.lineWidth = 6;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(cannonLen, 0);
-        ctx.strokeStyle = '#434b4d';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.restore();
-    }
-  }
+  // Deprecated render methods removed. Logic now in RenderSystem.
+  render(ctx: CanvasRenderingContext2D, alpha?: number): void {}
 }
