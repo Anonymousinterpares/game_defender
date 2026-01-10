@@ -61,3 +61,14 @@ Refer to `ARCHITECTURAL_INVARIANTS.md` for the complete list. **These must be re
 - `src/core/Game.ts`: The main game loop and initialization.
 - `src/core/MultiplayerManager.ts`: Handles PeerJS connections and message routing.
 - `src/core/ecs/EntityManager.ts`: Manages entity lifecycles.
+
+## 7. Additional Reuirements:
+- YOU ARE FORBIDDEN to assume anything without direct and in-depth verification of the assumption
+- YOU CANNOT start proceeding with a plan without having 100% of the required codebase in your CONTEXT. YOU ARE FORBIDDEN TO VERIFY 'ON A FLY'
+- YOU SHOULD RATHER be overly critical towards your reasoning, triggering addtional analysis, than TOO NAIVE -> producing errors is a DIRECT FAILURE
+- DO NOT assume resulution without user's EXPLICIT confirmation - ALWAYS await a clear success or failure confirmation.
+- you MUST pay particural attention to types of requests from the USER, which are:
+    - ANALYSIS (keywords as 'analyse', 'check', 'verify' etc.) --> DELIVERABLE: a comprehensive, clear and organized REPORT with the findings from the ANALYSIS.
+    - CODE CREATION/MODIFICATION --> DELIVERABLE: 1) clean, robust, error & assumption free code without comments NOT relevant for the codebase. 2) summary of the changes with explanation why they were done in such a way & clear checkpoints for user to check himself if changes are successfull
+    - ANSWER: IF USER asks a question, REGARDLESS to any other keywords triggering analysis or code changes, YOU MUST FIRST ANSWER each of the questions
+- IF THERE IS NO KEYWORD PRESENT IN USER'S INPUT AND THIS IS NOT RELATED TO THE PREVIOUS ACTION, YOU SHOULD FIRST REUEST USER FOR CONFIRMATION WHAT IS REQUIRED FROM YOU.
