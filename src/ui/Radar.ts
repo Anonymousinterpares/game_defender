@@ -4,6 +4,7 @@ import { RemotePlayer } from '../entities/RemotePlayer';
 import { EventBus, GameEvent } from '../core/EventBus';
 
 interface RadarBlip {
+    id: string; // Entity ID for tracking
     x: number;
     y: number;
     type: string;
@@ -109,12 +110,14 @@ export class Radar {
             const distSq = dx*dx + dy*dy;
             
             if (distSq <= this.range * this.range) {
-                const id = entity.constructor.name + "_" + entity.id; // Using entity.id if available, fallback to pos
+                // Use actual entity ID if available, otherwise construct unique key
+                const uniqueId = entity.id; 
                 
                 let specificColor: string | undefined;
                 if (entity instanceof RemotePlayer) specificColor = entity.color;
 
-                this.blips.set(id, {
+                this.blips.set(uniqueId, {
+                    id: uniqueId,
                     x: dx * scale,
                     y: dy * scale,
                     type: entity.constructor.name,
@@ -123,6 +126,17 @@ export class Radar {
                 });
             }
         });
+    }
+
+    // 2.5 Prune Blips of Dead/Removed Entities
+    // Create a Set of current entity IDs for O(1) lookup
+    const activeEntityIds = new Set(entities.map(e => e.id));
+    
+    // Check existing blips
+    for (const [key, blip] of this.blips) {
+        if (!activeEntityIds.has(blip.id)) {
+            this.blips.delete(key);
+        }
     }
 
     // 3. Drawing
