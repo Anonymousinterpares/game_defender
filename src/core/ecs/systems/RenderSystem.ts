@@ -189,53 +189,100 @@ export class RenderSystem implements System {
         health?: HealthComponent,
         ai?: AIComponent
     ): void {
-        // Default visuals if no AI/Dossier
-        const color = ai?.dossier?.visuals.color || '#ff3333';
-        // const shape = ai?.dossier?.visuals.shape || 'circle'; // Assuming circle for now based on old Enemy.ts logic which only did circle
+        const dossier = ai?.dossier;
+        const color = dossier?.visuals.color || '#ff3333';
+        const shape = dossier?.visuals.shape || 'circle';
+        const glowColor = dossier?.visuals.glowColor || 'rgba(255, 69, 0, 0.5)';
 
-        // Original Enemy.ts logic:
-        // Body (Iron/Rust) Gradient
-        const grad = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, radius);
-        grad.addColorStop(0, '#757575');
-        grad.addColorStop(0.6, '#434b4d'); // Iron
-        grad.addColorStop(1, '#2a2a2a');
-        ctx.fillStyle = grad;
-
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fill();
-
+        ctx.save();
+        
+        // Setup common styles
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = glowColor;
+        ctx.lineWidth = 2;
         ctx.strokeStyle = '#222';
+
+        // 1. Draw Shape Body
+        ctx.beginPath();
+        if (shape === 'square') {
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
+            ctx.rect(-radius, -radius, radius * 2, radius * 2);
+            // Gradient for square (Heavy)
+            const grad = ctx.createLinearGradient(-radius, -radius, radius, radius);
+            grad.addColorStop(0, '#555'); 
+            grad.addColorStop(1, color);
+            ctx.fillStyle = grad;
+        } else if (shape === 'triangle') {
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
+            ctx.moveTo(radius, 0);
+            ctx.lineTo(-radius, -radius);
+            ctx.lineTo(-radius, radius);
+            ctx.closePath();
+             // Gradient for triangle (Scout)
+            const grad = ctx.createLinearGradient(-radius, 0, radius, 0);
+            grad.addColorStop(0, '#333'); 
+            grad.addColorStop(1, color);
+            ctx.fillStyle = grad;
+        } else if (shape === 'rocket') {
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
+            ctx.moveTo(radius, 0);
+            ctx.lineTo(-radius, -radius * 0.8);
+            ctx.lineTo(-radius * 0.5, 0);
+            ctx.lineTo(-radius, radius * 0.8);
+            ctx.closePath();
+            ctx.fillStyle = color;
+        } else {
+            // Circle (Default / Iron Style)
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            const grad = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, radius);
+            grad.addColorStop(0, '#757575');
+            grad.addColorStop(0.6, '#434b4d');
+            grad.addColorStop(1, '#2a2a2a');
+            ctx.fillStyle = grad;
+        }
+        
+        ctx.fill();
         ctx.stroke();
 
-        // Eye (Glowing Ember)
-        const eyeX = x + Math.cos(rotation) * 6;
-        const eyeY = y + Math.sin(rotation) * 6;
-        
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = '#ff4500';
-        ctx.fillStyle = '#ff4500';
-        
-        ctx.beginPath();
-        ctx.arc(eyeX, eyeY, 4, 0, Math.PI * 2);
-        ctx.fill();
-        
-        ctx.shadowBlur = 0; // Reset
-
-        // Damage Flash Overlay
+        // 2. Damage Flash Overlay
         if (damageFlash > 0) {
             ctx.save();
-            ctx.beginPath();
-            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.globalCompositeOperation = 'source-atop';
             ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (damageFlash / 0.2)})`;
-            ctx.fill();
+            ctx.fill(); // Re-fills the current path
             ctx.restore();
         }
 
-        // Health Bar (Optional, wasn't in original renderInternal but was in previous RenderSystem)
-        // Original Enemy.ts DID NOT have a health bar in renderInternal.
-        // It's cleaner without it for the "Visual Style" phase, but if we want to keep it:
-        // Let's stick to the Enemy.ts source which did NOT have it.
+        // 3. Eye / Core Detail
+        ctx.shadowBlur = 0;
+        
+        if (shape === 'circle') {
+             // Glowing Ember Eye for Circle
+            const eyeX = x + Math.cos(rotation) * 6;
+            const eyeY = y + Math.sin(rotation) * 6;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#ff4500';
+            ctx.fillStyle = '#ff4500';
+            ctx.beginPath();
+            ctx.arc(eyeX, eyeY, 4, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            // Mechanical Center for others
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.beginPath();
+            if (shape === 'square' || shape === 'triangle' || shape === 'rocket') {
+                // Determine center in local space (0,0)
+                ctx.arc(0, 0, radius * 0.3, 0, Math.PI * 2);
+            } else {
+                ctx.arc(x, y, radius * 0.3, 0, Math.PI * 2);
+            }
+            ctx.fill();
+        }
+
+        ctx.restore();
     }
 
     private drawProjectile(ctx: CanvasRenderingContext2D, x: number, y: number, rotation: number, radius: number): void {
@@ -324,8 +371,32 @@ export class RenderSystem implements System {
                     ctx.fill();
                     break;
                 case 'enemy':
+                    const ai = entityManager.getComponent<AIComponent>(id, 'ai');
+                    const shape = ai?.dossier?.visuals.shape || 'circle';
+                    
                     ctx.beginPath();
-                    ctx.arc(ix, iy, render.radius, 0, Math.PI * 2);
+                    if (shape === 'square') {
+                        ctx.translate(ix, iy);
+                        ctx.rotate(rotation);
+                        ctx.rect(-render.radius, -render.radius, render.radius * 2, render.radius * 2);
+                    } else if (shape === 'triangle') {
+                        ctx.translate(ix, iy);
+                        ctx.rotate(rotation);
+                        ctx.moveTo(render.radius, 0);
+                        ctx.lineTo(-render.radius, -render.radius);
+                        ctx.lineTo(-render.radius, render.radius);
+                        ctx.closePath();
+                    } else if (shape === 'rocket') {
+                        ctx.translate(ix, iy);
+                        ctx.rotate(rotation);
+                        ctx.moveTo(render.radius, 0);
+                        ctx.lineTo(-render.radius, -render.radius * 0.8);
+                        ctx.lineTo(-render.radius * 0.5, 0);
+                        ctx.lineTo(-render.radius, render.radius * 0.8);
+                        ctx.closePath();
+                    } else {
+                        ctx.arc(ix, iy, render.radius, 0, Math.PI * 2);
+                    }
                     ctx.fill();
                     break;
                 case 'projectile':
