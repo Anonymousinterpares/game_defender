@@ -101,10 +101,10 @@ export class PhysicsSystem implements System {
                 physics.steeringForceY = 0;
             }
 
-            // 4. Apply Friction
-            const finalFriction = Math.pow(friction, dt * 60) * physics.frictionMultiplier;
-            physics.vx *= finalFriction;
-            physics.vy *= finalFriction;
+            // 4. Apply Friction (multiplier 1.0 = full friction, 0.0 = no friction)
+            const frictionToApply = 1.0 - (1.0 - Math.pow(friction, dt * 60)) * physics.frictionMultiplier;
+            physics.vx *= frictionToApply;
+            physics.vy *= frictionToApply;
 
             // 5. Predict Position
             let nextX = transform.x + physics.vx * dt;

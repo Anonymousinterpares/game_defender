@@ -37,6 +37,14 @@ export class ProjectileSystem implements System {
                 continue;
             }
 
+            // 1b. Arming Logic (Mines)
+            if (projectile.projectileType === ProjectileType.MINE && !projectile.isArmed) {
+                projectile.armTimer += dt;
+                if (projectile.armTimer >= 1.0) {
+                    projectile.isArmed = true;
+                }
+            }
+
             // 2. Guided Missile Logic
             if (projectile.projectileType === ProjectileType.MISSILE && projectile.targetId) {
                 this.updateMissileGuidance(dt, transform, physics, projectile, entityManager);
@@ -105,7 +113,14 @@ export class ProjectileSystem implements System {
         });
         
         for (const other of neighbors) {
-            if (other.id === id || other.id === projectile.shooterId) continue;
+            if (other.id === id) continue;
+            
+            // Muzzle protection: skip shooter if too close
+            if (other.id === projectile.shooterId) {
+                const dx = transform.x - other.x;
+                const dy = transform.y - other.y;
+                if (dx * dx + dy * dy < 40 * 40) continue;
+            }
             
             const dx = transform.x - other.x;
             const dy = transform.y - other.y;

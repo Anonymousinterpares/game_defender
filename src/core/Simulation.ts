@@ -20,6 +20,8 @@ import { FireSystem } from './ecs/systems/FireSystem';
 import { InputSystem } from './ecs/systems/InputSystem';
 import { AISystem } from './ecs/systems/AISystem';
 import { ContactDamageSystem } from './ecs/systems/ContactDamageSystem';
+import { ProjectileSystem } from './ecs/systems/ProjectileSystem';
+import { DropSystem } from './ecs/systems/DropSystem';
 import { RenderSystem } from './ecs/systems/RenderSystem';
 import { System } from './ecs/System';
 import { TransformComponent } from './ecs/components/TransformComponent';
@@ -59,6 +61,8 @@ export class Simulation implements WeaponParent, CombatParent {
     private inputSystem: InputSystem;
     private aiSystem: AISystem;
     private contactDamageSystem: ContactDamageSystem;
+    private projectileSystem: ProjectileSystem;
+    private dropSystem: DropSystem;
     public renderSystem: RenderSystem;
     private customSystems: System[] = [];
 
@@ -104,6 +108,8 @@ export class Simulation implements WeaponParent, CombatParent {
         this.inputSystem = new InputSystem();
         this.aiSystem = new AISystem(this.world);
         this.contactDamageSystem = new ContactDamageSystem();
+        this.projectileSystem = new ProjectileSystem(this.world, this.heatMap, this.spatialGrid, this.combatSystem);
+        this.dropSystem = new DropSystem(this);
         this.renderSystem = new RenderSystem();
         this.pluginManager = new PluginManager(this);
 
@@ -201,9 +207,10 @@ export class Simulation implements WeaponParent, CombatParent {
         // For now, assume they are stateless or safe to reuse.
         // Actually, AI has timers. Let's recreate them to be safe.
         this.aiSystem = new AISystem(this.world);
-        this.fireSystem = new FireSystem();
-        this.inputSystem = new InputSystem();
         this.contactDamageSystem = new ContactDamageSystem();
+        this.projectileSystem = new ProjectileSystem(this.world, this.heatMap, this.spatialGrid, this.combatSystem);
+        this.dropSystem = new DropSystem(this);
+        this.fireSystem = new FireSystem();
         this.renderSystem = new RenderSystem();
         this.pluginManager = new PluginManager(this);
 
@@ -255,9 +262,11 @@ export class Simulation implements WeaponParent, CombatParent {
         if (this.role !== SimulationRole.CLIENT) {
             this.aiSystem.update(dt, this.entityManager);
             this.contactDamageSystem.update(dt, this.entityManager);
+            this.dropSystem.update(dt, this.entityManager);
         }
 
         this.combatSystem.update(dt);
+        this.projectileSystem.update(dt, this.entityManager);
         
         this.fireSystem.update(dt, this.entityManager);
         

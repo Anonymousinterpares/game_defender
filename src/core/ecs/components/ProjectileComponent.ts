@@ -17,6 +17,7 @@ export class ProjectileComponent implements Component {
         public shooterId: string | null = null,
         public aoeRadius: number = 0,
         public isArmed: boolean = true,
+        public armTimer: number = 0,
         public targetId: string | null = null,
         public turnSpeed: number = 0
     ) {}
