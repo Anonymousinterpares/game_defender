@@ -50,25 +50,18 @@ export class HeatMap {
     private worldRef: any = null;
     private widthTiles: number = 0;
     private heightTiles: number = 0;
-    
-    // Track tiles that became inactive to sync deactivation to clients
     private recentlyDeactivated: Set<string> = new Set();
-
     private scratchCanvas: HTMLCanvasElement | null = null;
     private scratchCtx: CanvasRenderingContext2D | null = null;
 
     constructor(private tileSize: number) {
-        // Pre-load fire spritesheet if configured
-        const useSprite = ConfigManager.getInstance().get<boolean>('Fire', 'isFireSpritesheet');
-        if (useSprite) {
-            this.fireAsset = new Image();
-            this.fireAsset.src = `${import.meta.env.BASE_URL}assets/visuals/fire_spritesheet.svg`;
-            this.fireAsset.onerror = () => {
-                console.warn("Fire spritesheet not found, falling back to procedural.");
-                this.fireAsset = null;
-            };
-        }
+        this.lastSimTime = performance.now();
     }
+
+    public getTileSize(): number {
+        return this.tileSize;
+    }
+
 
     public setWorldRef(world: any): void {
         this.worldRef = world;

@@ -9,6 +9,8 @@ export class PhysicsComponent implements Component {
         public isStatic: boolean = false,
         public mass: number = 1.0,
         public steeringForceX: number = 0,
-        public steeringForceY: number = 0
+        public steeringForceY: number = 0,
+        public frictionMultiplier: number = 1.0,
+        public alignRotationToVelocity: boolean = false
     ) {}
 }

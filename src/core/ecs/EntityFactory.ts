@@ -9,6 +9,8 @@ import { InputComponent } from "./components/InputComponent";
 import { AIComponent } from "./components/AIComponent";
 import { AIBehavior, TRAIT_LIBRARY } from "./components/AIDossier";
 import { ConfigManager } from "../../config/MasterConfig";
+import { ProjectileComponent, ProjectileType } from "./components/ProjectileComponent";
+import { DropComponent, DropType } from "./components/DropComponent";
 import { EnemyRegistry } from "../../entities/enemies/EnemyRegistry";
 
 export class EntityFactory {
@@ -67,15 +69,76 @@ export class EntityFactory {
         return id;
     }
 
-    public static createProjectile(entityManager: EntityManager, x: number, y: number, angle: number, type: string, shooterId: string): string {
+    public static createProjectile(entityManager: EntityManager, x: number, y: number, angle: number, type: ProjectileType, shooterId: string | null): string {
         const entity = entityManager.createEntity();
         const id = entity.id;
 
-        // Simplified projectile for now
+        const config = ConfigManager.getInstance();
+        let damage = 10;
+        let speed = 800;
+        let radius = 4;
+        let aoeRadius = 0;
+        let lifeTime = 2.0;
+        let turnSpeed = 0;
+
+        switch(type) {
+            case ProjectileType.CANNON:
+                damage = config.get<number>('Weapons', 'cannonDamage') || 10;
+                speed = 800;
+                break;
+            case ProjectileType.ROCKET:
+                damage = config.get<number>('Weapons', 'rocketDamage') || 20;
+                speed = 600;
+                aoeRadius = (config.get<number>('Weapons', 'rocketAOE') || 2) * (config.get<number>('World', 'tileSize') || 32);
+                radius = 6;
+                lifeTime = 3.0;
+                break;
+            case ProjectileType.MISSILE:
+                damage = config.get<number>('Weapons', 'missileDamage') || 15;
+                const tileSize = config.get<number>('World', 'tileSize') || 32;
+                speed = (config.get<number>('Weapons', 'missileSpeed') || 15) * tileSize;
+                aoeRadius = (config.get<number>('Weapons', 'missileAOE') || 1.5) * tileSize;
+                turnSpeed = config.get<number>('Weapons', 'missileTurnSpeed') || 2.0;
+                lifeTime = 5.0;
+                break;
+            case ProjectileType.MINE:
+                damage = config.get<number>('Weapons', 'mineDamage') || 40;
+                speed = 0;
+                aoeRadius = (config.get<number>('Weapons', 'mineAOE') || 3) * (config.get<number>('World', 'tileSize') || 32);
+                radius = 8;
+                lifeTime = 30.0;
+                break;
+        }
+
         entityManager.addComponent(id, new TagComponent('projectile'));
         entityManager.addComponent(id, new TransformComponent(x, y, angle));
-        entityManager.addComponent(id, new PhysicsComponent(Math.cos(angle) * 500, Math.sin(angle) * 500, 5));
-        entityManager.addComponent(id, new RenderComponent('custom', '#fff', 5));
+        entityManager.addComponent(id, new PhysicsComponent(
+            Math.cos(angle) * speed, 
+            Math.sin(angle) * speed, 
+            radius, 
+            false, 1.0, 0, 0, 
+            0.0, // Zero friction for projectiles (Requirement d)
+            type !== ProjectileType.MINE // Align rotation to velocity
+        ));
+        entityManager.addComponent(id, new HealthComponent(1, 1)); // Projectiles have 1 HP
+        entityManager.addComponent(id, new ProjectileComponent(type, damage, lifeTime, shooterId, aoeRadius, type !== ProjectileType.MINE, null, turnSpeed));
+        entityManager.addComponent(id, new RenderComponent('projectile', '#fff', radius));
+        
+        return id;
+    }
+
+    public static createDrop(entityManager: EntityManager, x: number, y: number, type: DropType): string {
+        const entity = entityManager.createEntity();
+        const id = entity.id;
+
+        const radius = type === DropType.COIN ? 8 : 12;
+        const value = type === DropType.COIN ? 10 : 0;
+
+        entityManager.addComponent(id, new TagComponent('drop'));
+        entityManager.addComponent(id, new TransformComponent(x, y, 0));
+        entityManager.addComponent(id, new PhysicsComponent(0, 0, radius, false, 1.0, 0, 0, 1.0, false));
+        entityManager.addComponent(id, new DropComponent(type, value));
+        entityManager.addComponent(id, new RenderComponent('drop', type === DropType.COIN ? '#ffd700' : '#3498db', radius));
         
         return id;
     }

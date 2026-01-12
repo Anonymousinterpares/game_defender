@@ -73,14 +73,18 @@ export class PhysicsSystem implements System {
 
             // 2. Handle Input (Consolidated from MovementSystem)
             if (input) {
-                if (tag?.tag !== 'player') {
+                if (tag?.tag === 'player' && (entityManager as any).inputManager) {
+                    const im = (entityManager as any).inputManager;
+                    // Mouse Aiming for player
+                    const dx = im.mouseX - (window.innerWidth / 2); // Assuming camera is centered on player
+                    const dy = im.mouseY - (window.innerHeight / 2);
+                    transform.rotation = Math.atan2(dy, dx);
+                } else if (tag?.tag !== 'player') {
                     transform.rotation += input.turn * turnSpeed * dt;
                 }
+
                 if (input.throttle !== 0) {
                     const speedPx = baseSpeed * tileSize;
-                    // Apply input as force/acceleration instead of direct velocity if possible,
-                    // but for strict game-feel compatibility, we'll keep adding to velocity 
-                    // or treat it as an impulse.
                     physics.vx += Math.cos(transform.rotation) * input.throttle * speedPx * dt * 5;
                     physics.vy += Math.sin(transform.rotation) * input.throttle * speedPx * dt * 5;
                 }
@@ -88,24 +92,31 @@ export class PhysicsSystem implements System {
 
             // 3. Apply Steering Forces (from AI)
             if (physics.steeringForceX !== 0 || physics.steeringForceY !== 0) {
-                // F = ma -> a = F/m
                 const ax = physics.steeringForceX / physics.mass;
                 const ay = physics.steeringForceY / physics.mass;
                 physics.vx += ax * dt;
                 physics.vy += ay * dt;
 
-                // Reset forces
                 physics.steeringForceX = 0;
                 physics.steeringForceY = 0;
             }
 
             // 4. Apply Friction
-            physics.vx *= Math.pow(friction, dt * 60);
-            physics.vy *= Math.pow(friction, dt * 60);
+            const finalFriction = Math.pow(friction, dt * 60) * physics.frictionMultiplier;
+            physics.vx *= finalFriction;
+            physics.vy *= finalFriction;
 
             // 5. Predict Position
             let nextX = transform.x + physics.vx * dt;
             let nextY = transform.y + physics.vy * dt;
+
+            // 6. Align Rotation to Velocity (for Projectiles)
+            if (physics.alignRotationToVelocity) {
+                const speedSq = physics.vx * physics.vx + physics.vy * physics.vy;
+                if (speedSq > 100) { // Only rotate if moving significantly
+                    transform.rotation = Math.atan2(physics.vy, physics.vx);
+                }
+            }
 
             // 6. World Collision (Centralized Logic)
             const wallResult = PhysicsSystem.checkCircleVsTile(this.world, nextX, nextY, physics.radius);

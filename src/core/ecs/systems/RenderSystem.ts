@@ -116,7 +116,12 @@ export class RenderSystem implements System {
                 }
                 break;
             case 'projectile':
-                this.drawProjectile(ctx, x, y, rotation, render.radius);
+                const proj = entityManager.getComponent<any>(id, 'projectile');
+                this.drawProjectile(ctx, x, y, rotation, render.radius, proj?.projectileType, proj?.isArmed);
+                break;
+            case 'drop':
+                const drop = entityManager.getComponent<any>(id, 'drop');
+                this.drawDrop(ctx, x, y, render.radius, drop?.dropType);
                 break;
         }
     }
@@ -290,11 +295,78 @@ export class RenderSystem implements System {
         ctx.restore();
     }
 
-    private drawProjectile(ctx: CanvasRenderingContext2D, x: number, y: number, rotation: number, radius: number): void {
-        ctx.fillStyle = '#fff';
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fill();
+    private drawProjectile(ctx: CanvasRenderingContext2D, x: number, y: number, rotation: number, radius: number, type: string = 'cannon', isArmed: boolean = true): void {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(rotation);
+
+        if (type === 'mine') {
+            const pulse = isArmed ? Math.sin(Date.now() * 0.01) * 2 : 0;
+            ctx.fillStyle = '#333';
+            ctx.beginPath();
+            ctx.arc(0, 0, radius + 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = isArmed ? '#ff3333' : '#ff0000';
+            ctx.beginPath();
+            ctx.arc(0, 0, radius + pulse, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (type === 'rocket' || type === 'missile') {
+            ctx.rotate(Math.PI / 2); 
+            const scale = (radius * 4) / 128;
+            ctx.scale(scale, scale);
+            ctx.translate(-32, -64); 
+
+            const drawPixel = (px: number, py: number, w: number, h: number, fill: string) => {
+                ctx.fillStyle = fill;
+                ctx.fillRect(px, py, w, h);
+            };
+
+            // Simplified pixel art from Projectile.ts
+            drawPixel(30, 4, 4, 4, "#cc2200"); // Nose
+            drawPixel(22, 12, 20, 8, "#cc2200");
+            drawPixel(14, 20, 36, 60, "#e8e8e8"); // Body
+            drawPixel(26, 36, 12, 12, "#3399cc"); // Window
+            drawPixel(6, 84, 8, 16, "#cc2200"); // Fins
+            drawPixel(50, 84, 8, 16, "#cc2200");
+            
+            // Flame
+            if (Math.random() > 0.5) {
+                drawPixel(26, 108, 12, 12, "#ffff00");
+            } else {
+                drawPixel(28, 108, 8, 16, "#ff6600");
+            }
+        } else {
+            ctx.fillStyle = '#ffff00';
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    private drawDrop(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, type: string = 'coin'): void {
+        const time = Date.now() * 0.005;
+        const hover = Math.sin(time) * 3;
+        
+        ctx.save();
+        ctx.translate(x, y + hover);
+        
+        if (type === 'coin') {
+            ctx.fillStyle = '#ffd700';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, radius, radius * Math.cos(time), 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#b8860b';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        } else {
+            // Booster (Box)
+            ctx.fillStyle = '#3498db';
+            ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+            ctx.strokeStyle = '#fff';
+            ctx.strokeRect(-radius, -radius, radius * 2, radius * 2);
+        }
+        ctx.restore();
     }
 
     private drawHealthBar(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, health: number, maxHealth: number): void {
