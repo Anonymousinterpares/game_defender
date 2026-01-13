@@ -7,6 +7,7 @@ import { HealthComponent } from '../components/HealthComponent';
 import { FireComponent } from '../components/FireComponent';
 import { TagComponent } from '../components/TagComponent';
 import { World } from '../../World';
+import { MultiplayerManager, NetworkMessageType } from '../../MultiplayerManager';
 
 export class ParticleSystemECS implements System {
     public readonly id = 'particle_system_ecs';
@@ -30,41 +31,68 @@ export class ParticleSystemECS implements System {
         const playerTarget = playerIds.length > 0 ? this.mapToTarget(playerIds[0], entityManager) : null;
         const enemyTargets = enemyIds.map(id => this.mapToTarget(id, entityManager)).filter(t => t !== null) as ParticleTarget[];
 
-        ParticleSystem.getInstance().update(dt, this.world, playerTarget, enemyTargets);
+        const ps = ParticleSystem.getInstance();
+        ps.update(dt, this.world, playerTarget, enemyTargets);
+
+        const events = ps.consumeEvents();
+        this.processEvents(events, playerIds, enemyIds, entityManager);
+    }
+
+    private processEvents(events: any, playerIds: string[], enemyIds: string[], entityManager: EntityManager): void {
+        events.damageEvents.forEach((ev: any) => {
+            const id = ev.targetIdx === -1 ? playerIds[0] : enemyIds[ev.targetIdx];
+            if (!id) return;
+
+            const health = entityManager.getComponent<HealthComponent>(id, 'health');
+            if (health) {
+                health.health -= ev.damage;
+                health.damageFlash = 0.2;
+                if (health.health <= 0) {
+                    health.health = 0;
+                    health.active = false;
+                }
+            }
+
+            if (Math.random() < 0.2) {
+                const fire = entityManager.getComponent<FireComponent>(id, 'fire');
+                if (fire) fire.isOnFire = true;
+
+                if (ev.targetIdx === -1) {
+                    const mm = (window as any).MultiplayerManagerInstance;
+                    if (mm && mm.myId && mm.myId !== 'pending') {
+                        mm.broadcast(NetworkMessageType.PLAYER_HIT, {
+                            id: mm.myId,
+                            damage: 0,
+                            killerId: 'molten_particle',
+                            ignite: true
+                        });
+                    }
+                }
+            }
+        });
+
+        events.heatEvents.forEach((ev: any) => {
+            const heatMap = this.world.getHeatMap();
+            if (heatMap) {
+                heatMap.addHeat(ev.x, ev.y, ev.intensity, ev.radius);
+            }
+        });
     }
 
     private mapToTarget(id: string, entityManager: EntityManager): ParticleTarget | null {
         const transform = entityManager.getComponent<TransformComponent>(id, 'transform');
         const physics = entityManager.getComponent<PhysicsComponent>(id, 'physics');
         const health = entityManager.getComponent<HealthComponent>(id, 'health');
+        const fire = entityManager.getComponent<FireComponent>(id, 'fire');
 
         if (!transform || !physics) return null;
 
-        // Note: health might be missing for some entities, but ParticleSystem handles it as optional
         return {
             x: transform.x,
             y: transform.y,
             radius: physics.radius,
             active: health ? health.active : true,
-            takeDamage: (dmg: number) => {
-                const h = entityManager.getComponent<HealthComponent>(id, 'health');
-                if (h) {
-                    h.health -= dmg;
-                    h.damageFlash = 0.2;
-                    if (h.health <= 0) {
-                        h.health = 0;
-                        h.active = false;
-                    }
-                }
-            },
-            get isOnFire(): boolean {
-                const f = entityManager.getComponent<FireComponent>(id, 'fire');
-                return f ? f.isOnFire : false;
-            },
-            set isOnFire(val: boolean) {
-                const f = entityManager.getComponent<FireComponent>(id, 'fire');
-                if (f) f.isOnFire = val;
-            }
+            isOnFire: fire ? fire.isOnFire : false
         };
     }
 }

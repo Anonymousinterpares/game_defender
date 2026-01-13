@@ -10,8 +10,7 @@ export interface ParticleTarget {
     y: number;
     radius: number;
     active: boolean;
-    takeDamage?: (dmg: number) => void;
-    isOnFire?: boolean;
+    isOnFire: boolean;
 }
 
 export class ParticleSystem {
@@ -411,9 +410,17 @@ export class ParticleSystem {
         else this.flags[idx] &= ~FLAG_IS_FLAME;
     }
 
+    public consumeEvents(): { damageEvents: { targetIdx: number, damage: number }[], heatEvents: { x: number, y: number, intensity: number, radius: number }[] } {
+        const events = {
+            damageEvents: [...this.pendingDamage],
+            heatEvents: [...this.pendingHeat]
+        };
+        this.pendingDamage = [];
+        this.pendingHeat = [];
+        return events;
+    }
+
     public update(dt: number, world: World | null, player: ParticleTarget | null, enemies: ParticleTarget[]): void {
-        // Process pending events from the worker
-        this.processWorkerEvents(player, enemies, world);
 
         // STOCHASTIC SMOKE EMISSION
         if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke') && world) {
@@ -556,38 +563,6 @@ export class ParticleSystem {
         });
     }
 
-    private processWorkerEvents(player: ParticleTarget | null, enemies: ParticleTarget[], world: World | null): void {
-        while (this.pendingDamage.length > 0) {
-            const ev = this.pendingDamage.shift()!;
-            if (ev.targetIdx === -1 && player) {
-                if (player.takeDamage) player.takeDamage(ev.damage);
-
-                if (Math.random() < 0.2) {
-                    player.isOnFire = true;
-                    const mm = MultiplayerManager.getInstance();
-                    if (mm && mm.myId && mm.myId !== 'pending') {
-                        mm.broadcast(NetworkMessageType.PLAYER_HIT, {
-                            id: mm.myId,
-                            damage: 0,
-                            killerId: 'molten_particle',
-                            ignite: true
-                        });
-                    }
-                }
-            } else if (enemies[ev.targetIdx]) {
-                const target = enemies[ev.targetIdx];
-                if (target.takeDamage) target.takeDamage(ev.damage);
-                if (Math.random() < 0.2) target.isOnFire = true;
-            }
-        }
-
-        while (this.pendingHeat.length > 0) {
-            const ev = this.pendingHeat.shift()!;
-            if (world && (world as any).heatMap) {
-                (world as any).heatMap.addHeat(ev.x, ev.y, ev.intensity, ev.radius);
-            }
-        }
-    }
 
     private updateMainThread(dt: number, world: World | null, player: ParticleTarget | null, enemies: ParticleTarget[]): void {
         const weather = WeatherManager.getInstance().getWeatherState();
@@ -656,7 +631,8 @@ export class ParticleSystem {
                                 const dy = t.y - this.y[i];
                                 const rSum = t.radius + this.radius[i];
                                 if (dx * dx + dy * dy < rSum * rSum) {
-                                    if (t.takeDamage) t.takeDamage(5);
+                                    const targetIdx = (t === player) ? -1 : enemies.indexOf(t);
+                                    this.pendingDamage.push({ targetIdx, damage: 5 });
                                     this.flags[i] &= ~FLAG_ACTIVE;
                                     break;
                                 }
