@@ -118,6 +118,21 @@ export class MultiplayerGameplayScene extends GameplayScene {
         SoundManager.getInstance().init();
         SoundManager.getInstance().setWorld(this.world);
         this.hud.create();
+
+        // Listen for item collection to sync destruction in MP
+        EventBus.getInstance().on(GameEvent.ITEM_COLLECTED, this.onItemCollected);
+    }
+
+    private onItemCollected = (data: any) => {
+        const mm = MultiplayerManager.getInstance();
+        if (mm.isHost && data.dropId) {
+            mm.broadcast(NetworkMessageType.ENTITY_DESTROY, { id: data.dropId });
+        }
+    };
+
+    onExit(): void {
+        super.onExit();
+        EventBus.getInstance().off(GameEvent.ITEM_COLLECTED, this.onItemCollected);
     }
 
     private findPlayerByAnyId(id: string): any | null {

@@ -17,11 +17,12 @@ export class DropSystem implements System {
     constructor(private collector: DropCollector) { }
 
     update(dt: number, entityManager: EntityManager): void {
-        const playerIds = entityManager.query(['tag', 'transform']);
-        const playerId = playerIds.find(id => entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'player');
-        if (!playerId) return;
+        const playerIds = entityManager.query(['tag', 'transform']).filter(id => {
+            const tag = entityManager.getComponent<TagComponent>(id, 'tag')?.tag;
+            return tag === 'player' || tag === 'remote_player';
+        });
+        if (playerIds.length === 0) return;
 
-        const playerTransform = entityManager.getComponent<TransformComponent>(playerId, 'transform')!;
         const dropIds = entityManager.query(['drop', 'transform']);
 
         for (const dropId of dropIds) {
@@ -29,35 +30,38 @@ export class DropSystem implements System {
             if (drop.collected) continue;
 
             const dropTransform = entityManager.getComponent<TransformComponent>(dropId, 'transform')!;
-
-            // Update bobbing animation
             drop.bobTime += dt * 5;
 
-            const dx = playerTransform.x - dropTransform.x;
-            const dy = playerTransform.y - dropTransform.y;
-            const distSq = dx * dx + dy * dy;
+            for (const playerId of playerIds) {
+                const playerTransform = entityManager.getComponent<TransformComponent>(playerId, 'transform')!;
+                const dx = playerTransform.x - dropTransform.x;
+                const dy = playerTransform.y - dropTransform.y;
+                const distSq = dx * dx + dy * dy;
 
-            // Collection radius (approx 30 pixels)
-            if (distSq < 30 * 30) {
-                drop.collected = true;
+                if (distSq < 30 * 30) {
+                    drop.collected = true;
 
-                // Rewards
-                if (drop.dropType === DropType.COIN) {
-                    this.collector.coinsCollected += drop.value;
-                }
+                    // Rewards (only for local player)
+                    const tag = entityManager.getComponent<TagComponent>(playerId, 'tag')?.tag;
+                    if (tag === 'player' && drop.dropType === DropType.COIN) {
+                        this.collector.coinsCollected += drop.value;
+                    }
 
-                // Events
-                EventBus.getInstance().emit(GameEvent.ITEM_COLLECTED, {
-                    x: dropTransform.x,
-                    y: dropTransform.y,
-                    itemType: drop.dropType,
-                    collectorId: this.collector.myId
-                });
+                    // Events
+                    EventBus.getInstance().emit(GameEvent.ITEM_COLLECTED, {
+                        x: dropTransform.x,
+                        y: dropTransform.y,
+                        itemType: drop.dropType,
+                        collectorId: playerId, // The actual entity that collected it
+                        dropId: dropId
+                    });
 
-                // Deactivate immediately to stop physics and rendering
-                const health = entityManager.getComponent<HealthComponent>(dropId, 'health');
-                if (health) {
-                    health.active = false;
+                    // Deactivate immediately
+                    const health = entityManager.getComponent<HealthComponent>(dropId, 'health');
+                    if (health) {
+                        health.active = false;
+                    }
+                    break; // Move to next drop
                 }
             }
         }

@@ -5,20 +5,20 @@ export enum GameEvent {
     // Entity Events
     ENTITY_HIT = 'entity:hit',
     ENTITY_DEATH = 'entity:death',
-    
+
     // Weapon/Combat Events
     WEAPON_FIRED = 'weapon:fired',
     WEAPON_RELOAD = 'weapon:reload',
     PROJECTILE_HIT = 'projectile:hit',
     EXPLOSION = 'explosion',
     MATERIAL_HIT = 'material:hit',
-    
+
     // Item Events
     ITEM_COLLECTED = 'item:collected',
-    
+
     // UI Events
     UI_CLICK = 'ui:click',
-    
+
     // Sound System Direct Control (for cases where we don't have a specific game event)
     SOUND_PLAY = 'sound:play',
     SOUND_PLAY_SPATIAL = 'sound:play_spatial',
@@ -35,7 +35,7 @@ export interface EventPayloads {
     [GameEvent.PROJECTILE_HIT]: { x: number, y: number, projectileType: string, hitType: 'entity' | 'wall' | 'indestructible' };
     [GameEvent.EXPLOSION]: { x: number, y: number, radius: number, type: 'small' | 'large', moltenCount?: number };
     [GameEvent.MATERIAL_HIT]: { x: number, y: number, material: string };
-    [GameEvent.ITEM_COLLECTED]: { x: number, y: number, itemType: string, collectorId: string };
+    [GameEvent.ITEM_COLLECTED]: { x: number, y: number, itemType: string, collectorId: string, dropId?: string };
     [GameEvent.UI_CLICK]: { buttonId?: string };
     [GameEvent.SOUND_PLAY]: { soundId: string, volume?: number };
     [GameEvent.SOUND_PLAY_SPATIAL]: { soundId: string, x: number, y: number, volume?: number };
@@ -48,7 +48,7 @@ export class EventBus {
     private static instance: EventBus;
     private listeners: Map<string, EventCallback[]> = new Map();
 
-    private constructor() {}
+    private constructor() { }
 
     public static getInstance(): EventBus {
         if (!EventBus.instance) {
