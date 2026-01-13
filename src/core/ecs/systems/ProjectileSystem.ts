@@ -74,7 +74,7 @@ export class ProjectileSystem implements System {
                 if (hit || hitBorder) {
                     const cx = hit ? hit.x : transform.x;
                     const cy = hit ? hit.y : transform.y;
-                    this.handleHit(cx, cy, id, projectile, health, 'wall', null, entityManager);
+                    this.handleHit(cx, cy, id, projectile, physics, health, 'wall', null, entityManager);
                     continue;
                 }
             }
@@ -163,19 +163,19 @@ export class ProjectileSystem implements System {
 
             if (distSq < radSum * radSum) {
                 if (projectile.projectileType === ProjectileType.MINE && !projectile.isArmed) continue;
-                this.handleHit(transform.x, transform.y, id, projectile, health, 'entity', other.id, entityManager);
+                this.handleHit(transform.x, transform.y, id, projectile, physics, health, 'entity', other.id, entityManager);
                 break;
             }
         }
     }
 
-    private handleHit(x: number, y: number, id: string, projectile: ProjectileComponent, health: HealthComponent | undefined, hitType: 'wall' | 'entity', targetId: string | null, entityManager: EntityManager): void {
+    private handleHit(x: number, y: number, id: string, projectile: ProjectileComponent, physics: PhysicsComponent, health: HealthComponent | undefined, hitType: 'wall' | 'entity', targetId: string | null, entityManager: EntityManager): void {
         if (projectile.aoeRadius > 0) {
             this.combatSystem.createExplosion(x, y, projectile.aoeRadius, projectile.damage, projectile.shooterId, projectile.projectileType as any);
 
             // Still trigger procedural world hit if we hit a wall
             if (hitType === 'wall') {
-                this.onWorldHitProcedural(x, y, projectile);
+                this.onWorldHitProcedural(x, y, projectile, physics);
             }
         } else {
             if (hitType === 'entity' && targetId) {
@@ -221,7 +221,7 @@ export class ProjectileSystem implements System {
                     }
                 }
             } else {
-                this.onWorldHitProcedural(x, y, projectile);
+                this.onWorldHitProcedural(x, y, projectile, physics);
             }
 
             EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, {
@@ -234,27 +234,54 @@ export class ProjectileSystem implements System {
         this.deactivateEntity(id, health);
     }
 
-    private onWorldHitProcedural(hitX: number, hitY: number, projectile: ProjectileComponent): void {
+    private metalHitTracker: Map<string, number> = new Map();
+
+    private onWorldHitProcedural(hitX: number, hitY: number, projectile: ProjectileComponent, physics: PhysicsComponent): void {
         const mat = this.heatMap.getMaterialAt(hitX, hitY);
         const subSize = this.heatMap.getTileSize() / 10;
 
         switch (projectile.projectileType) {
             case ProjectileType.CANNON:
                 if (mat === MaterialType.WOOD) {
-                    this.heatMap.destroyArea(hitX, hitY, 12, true);
+                    this.heatMap.destroyArea(hitX, hitY, physics.radius, true);
+                    EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'wood' });
                 } else if (mat === MaterialType.BRICK) {
                     this.heatMap.destroyArea(hitX, hitY, subSize * 2);
-                } else {
+                    EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'brick' });
+                } else if (mat === MaterialType.STONE) {
                     this.heatMap.destroyArea(hitX, hitY, subSize * 1);
+                    EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'stone' });
+                } else if (mat === MaterialType.METAL) {
+                    const key = `${Math.floor(hitX / 4)},${Math.floor(hitY / 4)}`;
+                    const hits = (this.metalHitTracker.get(key) || 0) + 1;
+                    if (hits >= 2) {
+                        this.heatMap.destroyArea(hitX, hitY, subSize * 1);
+                        this.metalHitTracker.delete(key);
+                        EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'metal' });
+                    } else {
+                        this.metalHitTracker.set(key, hits);
+                        EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'metal' });
+                    }
                 }
                 break;
-            default:
-                this.heatMap.destroyArea(hitX, hitY, subSize * 5, true);
-                break;
-        }
 
-        if (mat !== MaterialType.NONE) {
-            EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: MaterialType[mat].toLowerCase() });
+            case ProjectileType.ROCKET:
+            case ProjectileType.MISSILE:
+            case ProjectileType.MINE:
+                if (mat === MaterialType.WOOD) {
+                    this.heatMap.destroyArea(hitX, hitY, subSize * 20, true);
+                    EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'wood' });
+                } else if (mat === MaterialType.BRICK) {
+                    this.heatMap.destroyArea(hitX, hitY, subSize * 10);
+                    EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'brick' });
+                } else if (mat === MaterialType.STONE) {
+                    this.heatMap.destroyArea(hitX, hitY, subSize * 5);
+                    EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'stone' });
+                } else if (mat === MaterialType.METAL) {
+                    this.heatMap.destroyArea(hitX, hitY, subSize * 3);
+                    EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: 'metal' });
+                }
+                break;
         }
     }
 

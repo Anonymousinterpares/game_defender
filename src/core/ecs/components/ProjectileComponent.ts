@@ -15,7 +15,7 @@ export class ProjectileComponent implements Component {
         public armTimer: number = 0,
         public targetId: string | null = null,
         public turnSpeed: number = 0,
-        public trackingRange: number = 500,
+        public trackingRange: number = 50,
         public speed: number = 0
     ) { }
 }
