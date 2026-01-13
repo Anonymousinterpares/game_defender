@@ -124,7 +124,7 @@ export class EntityFactory {
             type !== ProjectileType.MINE // Align rotation to velocity
         ));
         entityManager.addComponent(id, new HealthComponent(1, 1)); // Projectiles have 1 HP
-        const trackingRange = (type === ProjectileType.MISSILE) ? 500 : 0;
+        const trackingRange = (type === ProjectileType.MISSILE) ? (config.get<number>('Weapons', 'missileTrackingRange') || 500) : 0;
         entityManager.addComponent(id, new ProjectileComponent(type, damage, lifeTime, shooterId, aoeRadius, type !== ProjectileType.MINE, 0, null, turnSpeed, trackingRange, speed));
         entityManager.addComponent(id, new RenderComponent('projectile', '#fff', radius));
 

@@ -58,6 +58,7 @@ export const MasterConfig: GameConfigSchema = {
     missileAOE: { value: 2.5, type: 'number', min: 1, max: 10, step: 0.5, description: 'Guided Missile AOE Radius' },
     missileSpeed: { value: 8, type: 'number', min: 2, max: 20, step: 1, description: 'Guided Missile Speed' },
     missileTurnSpeed: { value: 8.0, type: 'number', min: 0.1, max: 20.0, step: 0.1, description: 'Guided Missile Agility' },
+    missileTrackingRange: { value: 500, type: 'number', min: 0, max: 2000, step: 50, description: 'Guided Missile Tracking Range' },
 
     mineDamage: { value: 80, type: 'number', min: 10, max: 1000, step: 10, description: 'Mine Damage' },
     mineMaxAmmo: { value: 20, type: 'number', min: 1, max: 200, step: 1, description: 'Mine Mag Size' },
