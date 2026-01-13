@@ -22,6 +22,7 @@ import { AISystem } from './ecs/systems/AISystem';
 import { ContactDamageSystem } from './ecs/systems/ContactDamageSystem';
 import { ProjectileSystem } from './ecs/systems/ProjectileSystem';
 import { DropSystem } from './ecs/systems/DropSystem';
+import { PlayerSegmentSystem } from './ecs/systems/PlayerSegmentSystem';
 import { RenderSystem } from './ecs/systems/RenderSystem';
 import { System } from './ecs/System';
 import { TransformComponent } from './ecs/components/TransformComponent';
@@ -30,6 +31,7 @@ import { HealthComponent } from './ecs/components/HealthComponent';
 import { FireComponent } from './ecs/components/FireComponent';
 import { TagComponent } from './ecs/components/TagComponent';
 import { RenderComponent } from './ecs/components/RenderComponent';
+import { SegmentComponent } from './ecs/components/SegmentComponent';
 import { EntityFactory } from './ecs/EntityFactory';
 import { EnemyRegistry } from '../entities/enemies/EnemyRegistry';
 
@@ -63,6 +65,7 @@ export class Simulation implements WeaponParent, CombatParent {
     private contactDamageSystem: ContactDamageSystem;
     public projectileSystem: ProjectileSystem;
     private dropSystem: DropSystem;
+    private playerSegmentSystem: PlayerSegmentSystem;
     public renderSystem: RenderSystem;
     private customSystems: System[] = [];
 
@@ -110,6 +113,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.contactDamageSystem = new ContactDamageSystem();
         this.projectileSystem = new ProjectileSystem(this.world, this.heatMap, this.spatialGrid, this.combatSystem);
         this.dropSystem = new DropSystem(this);
+        this.playerSegmentSystem = new PlayerSegmentSystem();
         this.renderSystem = new RenderSystem();
         this.pluginManager = new PluginManager(this);
 
@@ -129,6 +133,7 @@ export class Simulation implements WeaponParent, CombatParent {
         }
 
         // Link segments
+        let leaderId = this.player.id;
         this.player.segments.forEach(seg => {
             seg.setEntityManager(this.entityManager);
             this.entityManager.addComponent(seg.id, new TransformComponent(seg.x, seg.y, seg.rotation));
@@ -136,6 +141,8 @@ export class Simulation implements WeaponParent, CombatParent {
             this.entityManager.addComponent(seg.id, new HealthComponent(seg.health, seg.maxHealth));
             this.entityManager.addComponent(seg.id, new FireComponent());
             this.entityManager.addComponent(seg.id, new RenderComponent('player_segment', '#cfaa6e', seg.radius));
+            this.entityManager.addComponent(seg.id, new SegmentComponent(leaderId, 35));
+            leaderId = seg.id;
         });
 
         this.initWeapons();
@@ -219,6 +226,7 @@ export class Simulation implements WeaponParent, CombatParent {
         }
 
         // Link segments
+        let leaderId = this.player.id;
         this.player.segments.forEach(seg => {
             seg.setEntityManager(this.entityManager);
             this.entityManager.addComponent(seg.id, new TransformComponent(seg.x, seg.y, seg.rotation));
@@ -226,6 +234,8 @@ export class Simulation implements WeaponParent, CombatParent {
             this.entityManager.addComponent(seg.id, new HealthComponent(seg.health, seg.maxHealth));
             this.entityManager.addComponent(seg.id, new FireComponent());
             this.entityManager.addComponent(seg.id, new RenderComponent('player_segment', '#cfaa6e', seg.radius));
+            this.entityManager.addComponent(seg.id, new SegmentComponent(leaderId, 35));
+            leaderId = seg.id;
         });
 
         this.entities = [this.player, ...this.remotePlayers];
@@ -252,6 +262,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.projectileSystem.update(dt, this.entityManager);
         this.fireSystem.update(dt, this.entityManager);
         this.physicsSystem.update(dt, this.entityManager);
+        this.playerSegmentSystem.update(dt, this.entityManager);
 
         this.customSystems.forEach(s => s.update(dt, this.entityManager));
 
@@ -338,6 +349,8 @@ export class Simulation implements WeaponParent, CombatParent {
     private updateSpatialGrid(): void {
         this.spatialGrid.clear();
         this.spatialGrid.insert(this.player);
+        this.player.segments.forEach(s => this.spatialGrid.insert(s));
+
         this.enemies.forEach(e => this.spatialGrid.insert(e));
         this.projectiles.forEach(p => this.spatialGrid.insert(p));
         this.remotePlayers.forEach(rp => {

@@ -23,6 +23,7 @@ import { ProjectileComponent } from './ecs/components/ProjectileComponent';
 import { FireComponent } from './ecs/components/FireComponent';
 import { RenderComponent } from './ecs/components/RenderComponent';
 import { TagComponent } from './ecs/components/TagComponent';
+import { SegmentComponent } from './ecs/components/SegmentComponent';
 
 export class MultiplayerGameplayScene extends GameplayScene {
     private remotePlayersMap: Map<string, RemotePlayer> = new Map();
@@ -117,18 +118,33 @@ export class MultiplayerGameplayScene extends GameplayScene {
         this.hud.create();
     }
 
+    private findPlayerByAnyId(id: string): any | null {
+        // 1. Check local player
+        if (id === this.myId || (this.player && this.player.id === id)) return this.player;
+        if (this.player && this.player.segments.some(s => s.id === id)) return this.player;
+
+        // 2. Check remote players
+        const rp = this.remotePlayersMap.get(id);
+        if (rp) return rp;
+
+        for (const remote of this.remotePlayersMap.values()) {
+            if (remote.segments.some(s => s.id === id)) return remote;
+        }
+
+        return null;
+    }
+
     private handlePlayerHit(data: any): void {
         const { id, damage, killerId, ignite } = data;
-        if (id === this.myId && this.player) {
-            this.player.takeDamage(damage);
-            if (ignite) this.player.isOnFire = true;
-            if (this.player.health <= 0) this.lastKilledBy = killerId;
-        } else {
-            const rp = this.remotePlayersMap.get(id);
-            if (rp) {
-                rp.takeDamage(damage);
-                if (ignite) rp.isOnFire = true;
-            }
+        const target = this.findPlayerByAnyId(id);
+
+        if (!target) return;
+
+        target.takeDamage(damage);
+        if (ignite) target.isOnFire = true;
+
+        if (target === this.player) {
+            if (target.health <= 0) this.lastKilledBy = killerId;
         }
     }
 
@@ -490,14 +506,18 @@ export class MultiplayerGameplayScene extends GameplayScene {
                 this.simulation.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
                 this.simulation.entityManager.addComponent(seg.id, new HealthComponent(100, 100));
                 this.simulation.entityManager.addComponent(seg.id, new FireComponent());
+
+                // Add SegmentComponent for smooth interpolation in ECS
+                const leaderId = i === 0 ? rp.id : rp.segments[i - 1].id;
+                this.simulation.entityManager.addComponent(seg.id, new SegmentComponent(leaderId, 35));
             }
         });
 
         if (segs && segs.length === rp.segments.length) {
             for (let i = 0; i < segs.length; i++) {
                 const s = rp.segments[i];
-                s.prevX = s.x; s.prevY = s.y; // Prepare for interpolation
-                s.x = segs[i].x; s.y = segs[i].y;
+                // Position and interpolation now handled STICKTLY by ECS PlayerSegmentSystem
+                // to avoid jitter/fighting with network snapping. 
                 if (segs[i].f !== undefined) s.isOnFire = segs[i].f;
             }
         }

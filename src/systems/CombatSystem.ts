@@ -8,6 +8,7 @@ import { ConfigManager } from '../config/MasterConfig';
 import { Drop, DropType } from '../entities/Drop';
 import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
 import { EventBus, GameEvent } from '../core/EventBus';
+import { SegmentComponent } from '../core/ecs/components/SegmentComponent';
 
 export interface CombatParent {
     enemies: Enemy[];
@@ -224,12 +225,19 @@ export class CombatSystem {
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
                 if (dist < radius + other.radius) {
-                    // Find the actual entity ID (sometimes segments share parent ID or have their own)
-                    // We need to apply damage to the HealthComponent of this entity
-                    const health = this.parent.entityManager.getComponent(other.id, 'health');
+                    // REDIRECT: Find the actual root head
+                    const rootId = this.findRootId(other.id);
+
+                    // Don't damage the same root twice in one explosion
+                    if (affectedEntities.has(rootId)) continue;
+                    affectedEntities.add(rootId);
+
+                    const health = this.parent.entityManager.getComponent(rootId, 'health');
                     if (health && health.active) {
                         const falloff = 1 - (Math.max(0, dist - other.radius) / radius);
                         const rawDmg = damage * Math.max(0, falloff);
+
+                        // Use the original other.id for armored calculations since it's position/orientation dependent
                         const finalDmg = this.calculateDamage(other.id, rawDmg, x, y);
 
                         health.health -= finalDmg;
@@ -240,11 +248,11 @@ export class CombatSystem {
                         }
 
                         // Sync for multiplayer
-                        const tag = this.parent.entityManager.getComponent(other.id, 'tag')?.tag;
+                        const tag = this.parent.entityManager.getComponent(rootId, 'tag')?.tag;
                         if (isMyExplosion && (tag === 'remote_player' || (tag === 'player' && this.parent.myId !== 'local'))) {
                             if (mm) {
                                 mm.broadcast('ph', {
-                                    id: other.id,
+                                    id: rootId,
                                     damage: finalDmg,
                                     killerId: shooterId || 'local'
                                 });
@@ -254,5 +262,22 @@ export class CombatSystem {
                 }
             }
         }
+    }
+
+    private findRootId(id: string): string {
+        if (!this.parent.entityManager) return id;
+        let currentId = id;
+        let visited = new Set<string>();
+        while (visited.size < 100) {
+            if (visited.has(currentId)) break;
+            visited.add(currentId);
+            const segment = this.parent.entityManager.getComponent(currentId, 'segment');
+            if (segment && segment.leaderId) {
+                currentId = segment.leaderId;
+            } else {
+                break;
+            }
+        }
+        return currentId;
     }
 }

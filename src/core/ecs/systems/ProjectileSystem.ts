@@ -11,6 +11,7 @@ import { Quadtree } from "../../../utils/Quadtree";
 import { Entity } from "../../Entity";
 import { CombatSystem } from "../../../systems/CombatSystem";
 import { ConfigManager } from "../../../config/MasterConfig";
+import { SegmentComponent } from "../components/SegmentComponent";
 
 export class ProjectileSystem implements System {
     public readonly id = 'projectile_system';
@@ -179,11 +180,16 @@ export class ProjectileSystem implements System {
             }
         } else {
             if (hitType === 'entity' && targetId) {
-                const targetHealth = entityManager.getComponent<HealthComponent>(targetId, 'health');
+                // REDIRECT: If hit a segment, find the root head
+                const rootId = this.findRootId(entityManager, targetId);
+                const targetHealth = entityManager.getComponent<HealthComponent>(rootId, 'health');
+
                 if (targetHealth) {
                     let finalDamage = projectile.damage;
 
                     // Armored Trait Logic (was calculateDamage in CombatSystem)
+                    // Note: We use the actual targetId (the segment or head) to check for armor,
+                    // as armor can be specific to segments or the head's orientation.
                     const targetAI = entityManager.getComponent<any>(targetId, 'ai');
                     const targetTransform = entityManager.getComponent<TransformComponent>(targetId, 'transform');
                     if (targetAI && targetAI.dossier && targetAI.dossier.traits.includes('armored') && targetTransform) {
@@ -208,12 +214,12 @@ export class ProjectileSystem implements System {
                     }
 
                     // Multiplayer Sync for RemotePlayer hits
-                    const tag = entityManager.getComponent<any>(targetId, 'tag')?.tag;
+                    const tag = entityManager.getComponent<any>(rootId, 'tag')?.tag;
                     if (tag === 'remote_player' && projectile.shooterId === 'local') {
-                        const mm = (window as any).MultiplayerManagerInstance; // Accessing singleton
+                        const mm = (window as any).MultiplayerManagerInstance;
                         if (mm) {
                             mm.broadcast('ph', {
-                                id: targetId,
+                                id: rootId,
                                 damage: finalDamage,
                                 killerId: 'local'
                             });
@@ -232,6 +238,27 @@ export class ProjectileSystem implements System {
         }
 
         this.deactivateEntity(id, health);
+    }
+
+    /**
+     * Follows the chain of SegmentComponents to find the non-segment root (the head).
+     */
+    private findRootId(entityManager: EntityManager, id: string): string {
+        let currentId = id;
+        let visited = new Set<string>();
+
+        while (visited.size < 100) { // Safety cap for circular dependencies
+            if (visited.has(currentId)) break;
+            visited.add(currentId);
+
+            const segment = entityManager.getComponent<SegmentComponent>(currentId, 'segment');
+            if (segment && segment.leaderId) {
+                currentId = segment.leaderId;
+            } else {
+                break;
+            }
+        }
+        return currentId;
     }
 
     private metalHitTracker: Map<string, number> = new Map();
