@@ -25,10 +25,10 @@ export class BenchmarkScene extends GameplayScene {
             this.handleCommand('dev_on');
             this.handleCommand('spawn_off');
             ConfigManager.getInstance().set('Benchmark', 'showPerfMetrics', true);
-            
+
             // 2. Invincibility
             if (this.player) {
-                this.player.takeDamage = () => {}; // Override with NOOP
+                this.player.takeDamage = () => { }; // Override with NOOP
             }
 
             // 3. Clear existing world state
@@ -56,7 +56,7 @@ export class BenchmarkScene extends GameplayScene {
         }
 
         this.benchmarkTimer += dt;
-        
+
         // Automated Player Movement (Circle)
         if (this.player) {
             const centerX = this.world!.getWidthPixels() / 2;
@@ -65,45 +65,45 @@ export class BenchmarkScene extends GameplayScene {
             const speed = 1.5;
             this.player.x = centerX + Math.cos(this.benchmarkTimer * speed) * radius;
             this.player.y = centerY + Math.sin(this.benchmarkTimer * speed) * radius;
-            this.player.rotation = this.benchmarkTimer * speed + Math.PI/2;
+            this.player.rotation = this.benchmarkTimer * speed + Math.PI / 2;
         }
 
         // --- PREDETERMINED SEQUENCE ---
-        
+
         // Phase 0: Clear Weather, Base Physics (0-5s)
         if (this.benchmarkTimer < 5) {
             this.currentPhase = 0;
-        } 
+        }
         // Phase 1: Heavy Rain (5-10s)
         else if (this.benchmarkTimer < 10) {
             if (this.currentPhase !== 1) {
                 this.currentPhase = 1;
                 WeatherManager.getInstance().setWeather(WeatherType.RAIN);
             }
-        } 
+        }
         // Phase 2: Heavy Snow + Parallax (10-15s)
         else if (this.benchmarkTimer < 15) {
             if (this.currentPhase !== 2) {
                 this.currentPhase = 2;
                 WeatherManager.getInstance().setWeather(WeatherType.SNOW);
             }
-        } 
+        }
         // Phase 3: Massive Explosions & High Particle Count (15-25s)
         else if (this.benchmarkTimer < 25) {
             this.currentPhase = 3;
             // Stress lighting and particles simultaneously
             if (this.benchmarkTimer % 0.3 < dt) {
-                const ox = (Math.random()-0.5) * 800;
-                const oy = (Math.random()-0.5) * 800;
+                const ox = (Math.random() - 0.5) * 800;
+                const oy = (Math.random() - 0.5) * 800;
                 this.spawnMassiveExplosion(this.player!.x + ox, this.player!.y + oy);
             }
             // Background molten stress
-            for(let i=0; i<30; i++) {
-                const rx = this.player!.x + (Math.random()-0.5)*1200;
-                const ry = this.player!.y + (Math.random()-0.5)*1200;
-                ParticleSystem.getInstance().spawnMoltenMetal(rx, ry, (Math.random()-0.5)*100, (Math.random()-0.5)*100);
+            for (let i = 0; i < 30; i++) {
+                const rx = this.player!.x + (Math.random() - 0.5) * 1200;
+                const ry = this.player!.y + (Math.random() - 0.5) * 1200;
+                ParticleSystem.getInstance().spawnMoltenMetal(rx, ry, (Math.random() - 0.5) * 100, (Math.random() - 0.5) * 100);
             }
-        } 
+        }
         // Phase 4: Night + Fog + Shadow Stress (25-35s)
         else if (this.benchmarkTimer < 35) {
             if (this.currentPhase !== 4) {
@@ -133,16 +133,19 @@ export class BenchmarkScene extends GameplayScene {
         ParticleSystem.getInstance().update(dt, this.world, this.player, this.enemies);
         this.heatMap?.update(dt);
         this.enemies.forEach(e => e.update(dt, this.player || undefined));
-        (this.simulation as any).projectiles = this.projectiles.filter(p => { p.update(dt); return p.active; });
+
+        // Use ECS ProjectileSystem to update projectiles
+        this.simulation.projectileSystem.update(dt, this.simulation.entityManager);
+        (this.simulation as any).projectiles = this.projectiles.filter(p => p.active);
         PerfMonitor.getInstance().end('update_total');
     }
 
     private spawnMassiveExplosion(x: number, y: number): void {
         ParticleSystem.getInstance().spawnFlash(x, y, 400);
-        for(let i=0; i<200; i++) {
+        for (let i = 0; i < 200; i++) {
             const angle = Math.random() * Math.PI * 2;
             const spd = 50 + Math.random() * 400;
-            ParticleSystem.getInstance().spawnParticle(x, y, '#ff8800', Math.cos(angle)*spd, Math.sin(angle)*spd, 1.0);
+            ParticleSystem.getInstance().spawnParticle(x, y, '#ff8800', Math.cos(angle) * spd, Math.sin(angle) * spd, 1.0);
         }
         LightManager.getInstance().addTransientLight('explosion', x, y);
         SoundManager.getInstance().playSoundSpatial('explosion_large', x, y);
@@ -153,7 +156,7 @@ export class BenchmarkScene extends GameplayScene {
         const ex = this.player!.x + Math.cos(angle) * 300;
         const ey = this.player!.y + Math.sin(angle) * 300;
         const e = new Enemy(ex, ey);
-        e.takeDamage = () => {}; // Invincible
+        e.takeDamage = () => { }; // Invincible
         this.simulation.enemies.push(e);
     }
 
@@ -166,7 +169,7 @@ export class BenchmarkScene extends GameplayScene {
 
     render(ctx: CanvasRenderingContext2D): void {
         super.render(ctx);
-        
+
         const w = ctx.canvas.width;
         const h = ctx.canvas.height;
 
@@ -176,7 +179,7 @@ export class BenchmarkScene extends GameplayScene {
             ctx.fillStyle = '#ffff00';
             ctx.font = 'bold 24px monospace';
             ctx.textAlign = 'center';
-            ctx.fillText(`BENCHMARK RUNNING - PHASE ${this.currentPhase}/4 - ${this.benchmarkTimer.toFixed(1)}s`, w/2, 40);
+            ctx.fillText(`BENCHMARK RUNNING - PHASE ${this.currentPhase}/4 - ${this.benchmarkTimer.toFixed(1)}s`, w / 2, 40);
         } else {
             // Darken background
             ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
@@ -191,11 +194,11 @@ export class BenchmarkScene extends GameplayScene {
             ctx.strokeStyle = '#00ff00';
             ctx.lineWidth = 2;
             ctx.strokeRect(px, py, pw, ph);
-            
+
             ctx.fillStyle = '#00ff00';
             ctx.font = 'bold 28px monospace';
             ctx.textAlign = 'center';
-            ctx.fillText("PERFORMANCE SCORECARD", w/2, py + 40);
+            ctx.fillText("PERFORMANCE SCORECARD", w / 2, py + 40);
 
             ctx.font = '16px monospace';
             ctx.textAlign = 'left';
@@ -208,7 +211,7 @@ export class BenchmarkScene extends GameplayScene {
 
             ctx.fillStyle = '#fff';
             ctx.textAlign = 'center';
-            ctx.fillText("Press SPACE or ENTER to return to menu", w/2, py + ph - 30);
+            ctx.fillText("Press SPACE or ENTER to return to menu", w / 2, py + ph - 30);
         }
     }
 }

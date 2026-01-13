@@ -125,7 +125,7 @@ export class ProjectileSystem implements System {
                 const turn = Math.max(-maxTurn, Math.min(maxTurn, angleDiff));
 
                 const newAngle = currentVelocityAngle + turn;
-                const speed = Math.sqrt(physics.vx * physics.vx + physics.vy * physics.vy);
+                const speed = projectile.speed > 0 ? projectile.speed : Math.sqrt(physics.vx * physics.vx + physics.vy * physics.vy);
                 physics.vx = Math.cos(newAngle) * speed;
                 physics.vy = Math.sin(newAngle) * speed;
 

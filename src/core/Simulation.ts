@@ -61,7 +61,7 @@ export class Simulation implements WeaponParent, CombatParent {
     private inputSystem: InputSystem;
     private aiSystem: AISystem;
     private contactDamageSystem: ContactDamageSystem;
-    private projectileSystem: ProjectileSystem;
+    public projectileSystem: ProjectileSystem;
     private dropSystem: DropSystem;
     public renderSystem: RenderSystem;
     private customSystems: System[] = [];
