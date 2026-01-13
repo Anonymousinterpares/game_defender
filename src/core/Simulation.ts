@@ -23,6 +23,7 @@ import { DropSystem } from './ecs/systems/DropSystem';
 import { DropComponent, DropType } from './ecs/components/DropComponent';
 import { PlayerSegmentSystem } from './ecs/systems/PlayerSegmentSystem';
 import { RenderSystem } from './ecs/systems/RenderSystem';
+import { ParticleSystemECS } from './ecs/systems/ParticleSystemECS';
 import { System } from './ecs/System';
 import { TransformComponent } from './ecs/components/TransformComponent';
 import { PhysicsComponent } from './ecs/components/PhysicsComponent';
@@ -118,6 +119,7 @@ export class Simulation implements WeaponParent, CombatParent {
     private dropSystem: DropSystem;
     private playerSegmentSystem: PlayerSegmentSystem;
     public renderSystem: RenderSystem;
+    private particleSystemECS: ParticleSystemECS;
     private customSystems: System[] = [];
 
     public pluginManager: PluginManager;
@@ -166,7 +168,12 @@ export class Simulation implements WeaponParent, CombatParent {
         this.dropSystem = new DropSystem(this);
         this.playerSegmentSystem = new PlayerSegmentSystem();
         this.renderSystem = new RenderSystem();
+        this.particleSystemECS = new ParticleSystemECS(this.world);
         this.pluginManager = new PluginManager(this);
+
+        // Particle Worker Init
+        const roleStr = role === SimulationRole.HOST ? 'host' : (role === SimulationRole.CLIENT ? 'client' : 'single');
+        ParticleSystem.getInstance().initWorker(this.world, roleStr);
 
         // Initialize Player at center
         const centerX = this.world.getWidthPixels() / 2;
@@ -262,8 +269,13 @@ export class Simulation implements WeaponParent, CombatParent {
         this.projectileSystem = new ProjectileSystem(this.world, this.heatMap, this.spatialGrid, this.combatSystem);
         this.dropSystem = new DropSystem(this);
         this.fireSystem = new FireSystem();
+        this.particleSystemECS = new ParticleSystemECS(this.world);
         this.renderSystem = new RenderSystem();
         this.pluginManager = new PluginManager(this);
+
+        // Particle Worker Init
+        const roleStr = this.role === SimulationRole.HOST ? 'host' : (this.role === SimulationRole.CLIENT ? 'client' : 'single');
+        ParticleSystem.getInstance().initWorker(this.world, roleStr);
 
         const centerX = this.world.getWidthPixels() / 2;
         const centerY = this.world.getHeightPixels() / 2;
@@ -311,6 +323,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.fireSystem.update(dt, this.entityManager);
         this.physicsSystem.update(dt, this.entityManager);
         this.playerSegmentSystem.update(dt, this.entityManager);
+        this.particleSystemECS.update(dt, this.entityManager);
 
         this.customSystems.forEach(s => s.update(dt, this.entityManager));
 

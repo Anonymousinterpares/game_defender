@@ -130,12 +130,12 @@ export class BenchmarkScene extends GameplayScene {
         PerfMonitor.getInstance().begin('update_total');
         WorldClock.getInstance().update(dt);
         this.hud.update(dt);
-        ParticleSystem.getInstance().update(dt, this.world, this.player, this.enemies);
         this.heatMap?.update(dt);
         this.enemies.forEach(e => e.update(dt, this.player || undefined));
 
         // Use ECS ProjectileSystem to update projectiles
         this.simulation.projectileSystem.update(dt, this.simulation.entityManager);
+        (this.simulation as any).particleSystemECS.update(dt, this.simulation.entityManager);
         (this.simulation as any).projectiles = this.projectiles.filter(p => p.active);
         PerfMonitor.getInstance().end('update_total');
     }

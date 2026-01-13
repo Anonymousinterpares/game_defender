@@ -17,7 +17,7 @@ import { GameplayHUD, HUDParent } from '../ui/GameplayHUD';
 import { LightingRenderer, LightingParent } from './renderers/LightingRenderer';
 import { WeatherManager, WeatherType } from './WeatherManager';
 import { ParticleSystem } from './ParticleSystem';
-import { MoltenMetalParticle } from '../entities/Particle';
+import { ParticleType } from './ParticleConstants';
 import { PerfMonitor } from '../utils/PerfMonitor';
 import { BenchmarkSystem } from '../utils/BenchmarkSystem';
 import { Rect } from '../utils/Quadtree';
@@ -95,7 +95,6 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         this.worldRenderer = new WorldRenderer(this.simulation.world);
 
         ParticleSystem.getInstance().clear();
-        ParticleSystem.getInstance().initWorker(this.simulation.world);
 
         this.radar = new Radar();
         this.hud.create();
@@ -159,7 +158,6 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
             this.cameraY = py - window.innerHeight / 2;
         }
 
-        ParticleSystem.getInstance().update(dt, this.world, this.player, [...this.enemies, ...this.remotePlayers]);
         if (this.radar && this.player) this.radar.update(dt);
 
         const timeState = WorldClock.getInstance().getTimeState();
@@ -178,7 +176,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         const lm = LightManager.getInstance();
         lm.clearConstantLights();
         ParticleSystem.getInstance().getParticles().forEach((p) => {
-            if (p instanceof MoltenMetalParticle && p.active) {
+            if (p.type === ParticleType.MOLTEN && p.active) {
                 const intensity = (p as any).z < 0 ? 0.8 : 0.6 * (p.life / 7.0);
                 if (intensity > 0.1) {
                     lm.addConstantLight({

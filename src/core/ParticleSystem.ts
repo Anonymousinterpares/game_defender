@@ -1,4 +1,3 @@
-import { Entity } from './Entity';
 import { World } from './World';
 import { ParticleType, FLAG_ACTIVE, FLAG_IS_FLAME, MAX_PARTICLES } from './ParticleConstants';
 import { EventBus, GameEvent } from './EventBus';
@@ -6,9 +5,18 @@ import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
 import { WeatherManager } from './WeatherManager';
 import { ConfigManager } from '../config/MasterConfig';
 
+export interface ParticleTarget {
+    x: number;
+    y: number;
+    radius: number;
+    active: boolean;
+    takeDamage?: (dmg: number) => void;
+    isOnFire?: boolean;
+}
+
 export class ParticleSystem {
     private static instance: ParticleSystem;
-    
+
     private sharedBuffer: SharedArrayBuffer;
     private x: Float32Array;
     private y: Float32Array;
@@ -31,7 +39,7 @@ export class ParticleSystem {
     private nextFreeIdx: number = 0;
     private activeIndices: Uint32Array;
     private activeCount: number = 0;
-    
+
     private smokeInterval: number = 0;
 
     // Bucket map for O(N) rendering: Map<hash, bucket>
@@ -47,7 +55,7 @@ export class ParticleSystem {
 
     private worker: Worker;
     private isWorkerBusy: boolean = false;
-    
+
     // For handling events from worker
     private pendingDamage: { targetIdx: number, damage: number }[] = [];
     private pendingHeat: { x: number, y: number, intensity: number, radius: number }[] = [];
@@ -59,9 +67,9 @@ export class ParticleSystem {
         const f32Size = count * 4;
         const u32Size = count * 4;
         const u8SizeAligned = (count + 3) & ~3;
-        
+
         const totalSize = (13 * f32Size) + (1 * u32Size) + (2 * u8SizeAligned);
-        
+
         try {
             this.sharedBuffer = new (window.SharedArrayBuffer || ArrayBuffer)(totalSize) as any;
         } catch (e) {
@@ -123,7 +131,7 @@ export class ParticleSystem {
 
             // 1. Initial Flash
             this.spawnFlash(x, y, radius * 2.5);
-            
+
             // 2. Shockwave
             this.spawnShockwave(x, y, radius * 1.8);
 
@@ -153,7 +161,7 @@ export class ParticleSystem {
                 for (let i = 0; i < actualParticles; i++) {
                     const angle = Math.random() * Math.PI * 2;
                     const dist = 64 + Math.random() * 96;
-                    const speed = (dist / 0.75); 
+                    const speed = (dist / 0.75);
                     this.spawnMoltenMetal(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed);
                 }
             }
@@ -169,7 +177,7 @@ export class ParticleSystem {
             }
             // Small puff of smoke on impact
             if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke')) {
-                this.spawnSmoke(data.x, data.y, (Math.random()-0.5)*30, (Math.random()-0.5)*30, 1.0, 10, '#555');
+                this.spawnSmoke(data.x, data.y, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, 1.0, 10, '#555');
             }
         });
 
@@ -204,11 +212,11 @@ export class ParticleSystem {
                         const spread = (Math.random() - 0.5) * 0.5;
                         const speed = 100 + Math.random() * 100;
                         this.spawnSmoke(
-                            data.x, data.y, 
-                            Math.cos(backAngle + spread) * speed, 
-                            Math.sin(backAngle + spread) * speed, 
-                            0.8 + Math.random() * 0.4, 
-                            12 + Math.random() * 10, 
+                            data.x, data.y,
+                            Math.cos(backAngle + spread) * speed,
+                            Math.sin(backAngle + spread) * speed,
+                            0.8 + Math.random() * 0.4,
+                            12 + Math.random() * 10,
                             '#888'
                         );
                     }
@@ -403,7 +411,7 @@ export class ParticleSystem {
         else this.flags[idx] &= ~FLAG_IS_FLAME;
     }
 
-    public update(dt: number, world: World | null, player: Entity | null, enemies: Entity[]): void {
+    public update(dt: number, world: World | null, player: ParticleTarget | null, enemies: ParticleTarget[]): void {
         // Process pending events from the worker
         this.processWorkerEvents(player, enemies, world);
 
@@ -436,15 +444,15 @@ export class ParticleSystem {
             // Fallback: Run same logic as worker but on main thread
             this.updateMainThread(dt, world, player, enemies);
         }
-        
+
         // Populate activeIndices and handle main-thread color shifts
         this.activeCount = 0;
         for (let i = 0; i < MAX_PARTICLES; i++) {
             if (!(this.flags[i] & FLAG_ACTIVE)) continue;
-            
+
             // Track active particle for faster rendering
             this.activeIndices[this.activeCount++] = i;
-            
+
             const lifeRatio = this.life[i] / this.maxLife[i];
             if (this.flags[i] & FLAG_IS_FLAME) {
                 if (lifeRatio > 0.7) this.colorIdx[i] = this.getColorIndex('#fffbe6');
@@ -488,7 +496,7 @@ export class ParticleSystem {
 
                 if (burningCount > 0) {
                     const fireIntensity = burningCount / fData.length; // 0.0 to 1.0
-                    
+
                     // Always emit smoke if anything is burning
                     if (Math.random() < fireIntensity * 0.9 + 0.3) {
                         const count = 1 + Math.floor(fireIntensity * 4);
@@ -497,15 +505,15 @@ export class ParticleSystem {
                             const life = 3.0 + Math.random() * 2.0;
                             // Smoke size is much larger now
                             const size = (tileSize * 2.5) + (fireIntensity * tileSize * 2.5);
-                            
+
                             this.spawnSmoke(
-                                centerX + offset, 
-                                centerY + offset, 
-                                (Math.random() - 0.5) * 30, 
+                                centerX + offset,
+                                centerY + offset,
+                                (Math.random() - 0.5) * 30,
                                 -30 - Math.random() * 50, // Stronger upward drift
-                                life, 
-                                size, 
-                                '#000' 
+                                life,
+                                size,
+                                '#000'
                             );
                         }
                     }
@@ -534,7 +542,7 @@ export class ParticleSystem {
         });
     }
 
-    private emitEntitySmoke(player: Entity | null, enemies: Entity[]): void {
+    private emitEntitySmoke(player: ParticleTarget | null, enemies: ParticleTarget[]): void {
         const targets = player ? [player, ...enemies] : enemies;
         targets.forEach(t => {
             if (t.active && (t as any).isOnFire) {
@@ -542,23 +550,23 @@ export class ParticleSystem {
                 for (let i = 0; i < 2; i++) {
                     const wx = t.x + (Math.random() - 0.5) * t.radius;
                     const wy = t.y + (Math.random() - 0.5) * t.radius;
-                    this.spawnSmoke(wx, wy, (Math.random()-0.5)*20, (Math.random()-0.5)*20, 1.5 + Math.random(), 18 + Math.random()*12, '#000');
+                    this.spawnSmoke(wx, wy, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, 1.5 + Math.random(), 18 + Math.random() * 12, '#000');
                 }
             }
         });
     }
 
-    private processWorkerEvents(player: Entity | null, enemies: Entity[], world: World | null): void {
+    private processWorkerEvents(player: ParticleTarget | null, enemies: ParticleTarget[], world: World | null): void {
         while (this.pendingDamage.length > 0) {
             const ev = this.pendingDamage.shift()!;
             if (ev.targetIdx === -1 && player) {
-                player.takeDamage(ev.damage);
-                
+                if (player.takeDamage) player.takeDamage(ev.damage);
+
                 if (Math.random() < 0.2) {
                     player.isOnFire = true;
                     const mm = MultiplayerManager.getInstance();
                     if (mm && mm.myId && mm.myId !== 'pending') {
-                         mm.broadcast(NetworkMessageType.PLAYER_HIT, {
+                        mm.broadcast(NetworkMessageType.PLAYER_HIT, {
                             id: mm.myId,
                             damage: 0,
                             killerId: 'molten_particle',
@@ -568,7 +576,7 @@ export class ParticleSystem {
                 }
             } else if (enemies[ev.targetIdx]) {
                 const target = enemies[ev.targetIdx];
-                target.takeDamage(ev.damage);
+                if (target.takeDamage) target.takeDamage(ev.damage);
                 if (Math.random() < 0.2) target.isOnFire = true;
             }
         }
@@ -581,7 +589,7 @@ export class ParticleSystem {
         }
     }
 
-    private updateMainThread(dt: number, world: World | null, player: Entity | null, enemies: Entity[]): void {
+    private updateMainThread(dt: number, world: World | null, player: ParticleTarget | null, enemies: ParticleTarget[]): void {
         const weather = WeatherManager.getInstance().getWeatherState();
         const windX = weather.windDir.x * weather.windSpeed;
         const windY = weather.windDir.y * weather.windSpeed;
@@ -594,7 +602,7 @@ export class ParticleSystem {
             this.prevZ[i] = this.z[i];
 
             const pType = this.type[i];
-            
+
             if (pType === ParticleType.SMOKE) {
                 const driftY = -15; // Rising heat
                 const time = Date.now() * 0.001 + i;
@@ -606,7 +614,7 @@ export class ParticleSystem {
 
                 this.x[i] += this.vx[i] * dt;
                 this.y[i] += this.vy[i] * dt;
-                
+
                 const lifeRatio = this.life[i] / this.maxLife[i];
                 this.radius[i] = this.startRadius[i] + (1.0 - lifeRatio) * (this.startRadius[i] * 2);
             }
@@ -614,7 +622,7 @@ export class ParticleSystem {
                 const nextX = this.x[i] + this.vx[i] * dt;
                 const nextY = this.y[i] + this.vy[i] * dt;
                 const isFlame = this.flags[i] & FLAG_IS_FLAME;
-                
+
                 if (world && world.isWall(nextX, nextY)) {
                     if (isFlame) {
                         this.vx[i] = 0; this.vy[i] = 0; this.life[i] *= 0.5;
@@ -648,7 +656,7 @@ export class ParticleSystem {
                                 const dy = t.y - this.y[i];
                                 const rSum = t.radius + this.radius[i];
                                 if (dx * dx + dy * dy < rSum * rSum) {
-                                    t.takeDamage(5);
+                                    if (t.takeDamage) t.takeDamage(5);
                                     this.flags[i] &= ~FLAG_ACTIVE;
                                     break;
                                 }
@@ -674,7 +682,7 @@ export class ParticleSystem {
         let currentGCO = 'source-over';
         ctx.globalAlpha = 1.0;
         ctx.globalCompositeOperation = 'source-over';
-        
+
         // Reset Buckets
         // We use a flattened array for buckets to avoid GC: buckets[colorIdx * 6 + alphaIdx]
         // 6 Alpha buckets: 0.2, 0.4, 0.6, 0.8, 1.0, >1.0
@@ -685,16 +693,16 @@ export class ParticleSystem {
         if (!this.buckets) {
             this.buckets = new Map();
         }
-        
+
         // Clear existing buckets
         this.buckets.forEach(bucket => bucket.count = 0);
 
         for (let j = 0; j < this.activeCount; j++) {
             const i = this.activeIndices[j];
-            
+
             const ix = this.prevX[i] + (this.x[i] - this.prevX[i]) * alpha;
             const iy = this.prevY[i] + (this.y[i] - this.prevY[i]) * alpha;
-            
+
             const screenX = ix - camX;
             const screenY = iy - camY;
             if (screenX < -margin || screenX > w + margin || screenY < -margin || screenY > h + margin) {
@@ -726,8 +734,8 @@ export class ParticleSystem {
                 } else if (pType === ParticleType.SMOKE) {
                     const colorStr = this.colorPalette[colorIdx];
                     const isBlack = colorStr === '#000' || colorStr === '#111';
-                    
-                    const targetAlpha = Math.max(0, lifeRatio * (isBlack ? 0.4 : 0.25)); 
+
+                    const targetAlpha = Math.max(0, lifeRatio * (isBlack ? 0.4 : 0.25));
                     if (Math.abs(currentAlpha - targetAlpha) > 0.01) {
                         ctx.globalAlpha = currentAlpha = targetAlpha;
                     }
@@ -739,10 +747,10 @@ export class ParticleSystem {
                     if (sprite) {
                         const r = this.radius[i];
                         ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
-                        
+
                         // Triple-layer for extreme density if it's very fresh black smoke
                         if (isBlack && lifeRatio > 0.7) {
-                             ctx.drawImage(sprite, ix - r * 0.6, iy - r * 0.6, r * 1.2, r * 1.2);
+                            ctx.drawImage(sprite, ix - r * 0.6, iy - r * 0.6, r * 1.2, r * 1.2);
                         }
                     }
                 } else {
@@ -750,19 +758,19 @@ export class ParticleSystem {
                     const pAlpha = Math.max(0, lifeRatio);
                     const alphaIdx = Math.min(5, Math.ceil(pAlpha * 5)); // 1..5
                     const bucketKey = (colorIdx << 3) | alphaIdx; // Simple hash
-                    
+
                     let bucket = this.buckets.get(bucketKey);
                     if (!bucket) {
                         bucket = { count: 0, x: new Float32Array(MAX_PARTICLES), y: new Float32Array(MAX_PARTICLES), r: new Float32Array(MAX_PARTICLES) };
                         this.buckets.set(bucketKey, bucket);
                     }
-                    
+
                     bucket.x[bucket.count] = ix;
                     bucket.y[bucket.count] = iy;
                     bucket.r[bucket.count] = this.radius[i];
                     bucket.count++;
                 }
-            } 
+            }
             else if (pType === ParticleType.SHOCKWAVE) {
                 const ratio = 1 - lifeRatio;
                 const currentRadius = this.radius[i] * Math.pow(ratio, 0.5);
@@ -808,7 +816,7 @@ export class ParticleSystem {
                     }
                     ctx.drawImage(sprite, ix - glowRadius, ry - glowRadius, glowRadius * 2, glowRadius * 2);
                 }
-                
+
                 if (currentAlpha !== 1.0) {
                     ctx.globalAlpha = currentAlpha = 1.0;
                 }
@@ -826,7 +834,7 @@ export class ParticleSystem {
 
         this.buckets.forEach((bucket, key) => {
             if (bucket.count === 0) return;
-            
+
             const colorIdx = key >> 3;
             const alphaIdx = key & 7;
             const bucketAlpha = alphaIdx / 5; // 0.2, 0.4 ...
@@ -834,7 +842,7 @@ export class ParticleSystem {
             ctx.fillStyle = this.colorPalette[colorIdx];
             ctx.globalAlpha = Math.min(1.0, bucketAlpha);
             ctx.beginPath();
-            
+
             for (let k = 0; k < bucket.count; k++) {
                 ctx.moveTo(bucket.x[k] + bucket.r[k], bucket.y[k]);
                 ctx.arc(bucket.x[k], bucket.y[k], bucket.r[k], 0, Math.PI * 2);
@@ -855,7 +863,9 @@ export class ParticleSystem {
                     vx: this.vx[i], vy: this.vy[i], vz: this.vz[i],
                     life: this.life[i],
                     color: this.colorPalette[this.colorIdx[i]],
-                    id: `p_${i}`
+                    id: `p_${i}`,
+                    type: this.type[i],
+                    active: true
                 });
             }
         }
