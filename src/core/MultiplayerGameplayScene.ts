@@ -24,6 +24,8 @@ import { FireComponent } from './ecs/components/FireComponent';
 import { RenderComponent } from './ecs/components/RenderComponent';
 import { TagComponent } from './ecs/components/TagComponent';
 import { SegmentComponent } from './ecs/components/SegmentComponent';
+import { WeatherTimePlugin } from './plugins/WeatherTimePlugin';
+import { ChaosPlugin } from './plugins/ChaosPlugin';
 
 export class MultiplayerGameplayScene extends GameplayScene {
     private remotePlayersMap: Map<string, RemotePlayer> = new Map();
@@ -191,6 +193,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
     private recreateWorld(seed: number): void {
         this.simulation.reset(seed);
+        this.simulation.pluginManager.install(new WeatherTimePlugin());
         this.simulation.player.inputManager = this.inputManager;
         this.worldRenderer = new WorldRenderer(this.simulation.world);
         this.lightingRenderer.clearCache();
