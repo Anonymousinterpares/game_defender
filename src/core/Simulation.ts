@@ -44,16 +44,16 @@ export enum SimulationRole {
 export class Simulation implements WeaponParent, CombatParent {
     public world: World;
     public heatMap: HeatMap;
-    public player: Player; // KEEPING for compatibility for now, but will transition
+    public player: Player;
     public playerEntityId: string = '';
     public spatialGrid: Quadtree<Entity>;
-    
+
     public entities: Entity[] = [];
     public enemies: Enemy[] = [];
     public remotePlayers: RemotePlayer[] = [];
     public drops: Drop[] = [];
     public projectiles: Projectile[] = [];
-    
+
     // ECS
     public entityManager: EntityManager;
     public physicsSystem: PhysicsSystem;
@@ -67,14 +67,14 @@ export class Simulation implements WeaponParent, CombatParent {
     private customSystems: System[] = [];
 
     public pluginManager: PluginManager;
-    
+
     public weaponSystem: WeaponSystem;
     public combatSystem: CombatSystem;
-    
+
     public coinsCollected: number = 0;
     public lastShotTime: number = 0;
     public shootCooldown: number = 0.2;
-    
+
     public weaponAmmo: Map<string, number> = new Map();
     public unlockedWeapons: Set<string> = new Set(['cannon']);
     public weaponReloading: Map<string, boolean> = new Map();
@@ -88,21 +88,21 @@ export class Simulation implements WeaponParent, CombatParent {
         this.role = role;
         this.world = new World(seed);
         this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
-        
+
         this.world.setHeatMap(this.heatMap);
-        
+
         this.weaponSystem = new WeaponSystem(this);
         this.combatSystem = new CombatSystem(this);
-        
+
         // ECS Init
         this.entityManager = new EntityManager();
-        this.spatialGrid = new Quadtree<Entity>({ 
-            x: 0, 
-            y: 0, 
-            w: this.world.getWidthPixels(), 
-            h: this.world.getHeightPixels() 
+        this.spatialGrid = new Quadtree<Entity>({
+            x: 0,
+            y: 0,
+            w: this.world.getWidthPixels(),
+            h: this.world.getHeightPixels()
         });
-        
+
         this.physicsSystem = new PhysicsSystem(this.world, this.spatialGrid);
         this.fireSystem = new FireSystem();
         this.inputSystem = new InputSystem();
@@ -116,13 +116,11 @@ export class Simulation implements WeaponParent, CombatParent {
         // Initialize Player at center
         const centerX = this.world.getWidthPixels() / 2;
         const centerY = this.world.getHeightPixels() / 2;
-        
-        // LEGACY PLAYER (Still needed for some parts)
-        this.player = new Player(centerX, centerY, null as any); 
-        this.player.setEntityManager(this.entityManager); // LINKING
+
+        this.player = new Player(centerX, centerY, null as any);
+        this.player.setEntityManager(this.entityManager);
         this.entities.push(this.player);
 
-        // ECS PLAYER (Created for all roles, as every simulation has a 'local' player)
         this.playerEntityId = EntityFactory.createPlayer(this.entityManager, centerX, centerY);
         const ecsPlayer = this.entityManager.query(['tag']).find(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'player');
         if (ecsPlayer && ecsPlayer !== this.player.id) {
@@ -148,7 +146,7 @@ export class Simulation implements WeaponParent, CombatParent {
     private initWeapons(): void {
         const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine', 'flamethrower'];
         const alwaysOn = ConfigManager.getInstance().get<boolean>('Debug', 'devModeAlwaysOn');
-        
+
         weapons.forEach(w => {
             const configKey = w === 'laser' || w === 'ray' || w === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
             const max = ConfigManager.getInstance().get<number>('Weapons', w + configKey);
@@ -161,7 +159,7 @@ export class Simulation implements WeaponParent, CombatParent {
 
     public get myId(): string {
         if (this.role === SimulationRole.SINGLEPLAYER) return 'local';
-        return MultiplayerManager.getInstance().myId || 'pending';
+        return (window as any).MultiplayerManagerInstance?.myId || 'pending';
     }
 
     public setRole(role: SimulationRole): void {
@@ -176,7 +174,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.customSystems = this.customSystems.filter(s => (s as any).id !== systemId);
     }
 
-    private reassignEntityId(oldId: string, newId: string): void {
+    public reassignEntityId(oldId: string, newId: string): void {
         const comps = ['transform', 'physics', 'health', 'fire', 'render', 'tag', 'input', 'ai'];
         comps.forEach(type => {
             const c = this.entityManager.getComponent(oldId, type);
@@ -193,19 +191,15 @@ export class Simulation implements WeaponParent, CombatParent {
         this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
         this.world.setHeatMap(this.heatMap);
 
-        this.spatialGrid = new Quadtree<Entity>({ 
-            x: 0, 
-            y: 0, 
-            w: this.world.getWidthPixels(), 
-            h: this.world.getHeightPixels() 
+        this.spatialGrid = new Quadtree<Entity>({
+            x: 0,
+            y: 0,
+            w: this.world.getWidthPixels(),
+            h: this.world.getHeightPixels()
         });
 
         this.entityManager.clear();
         this.physicsSystem = new PhysicsSystem(this.world, this.spatialGrid);
-        // Re-initialize other systems to clear state if necessary, 
-        // though strictly they don't hold state except for AI maybe?
-        // For now, assume they are stateless or safe to reuse.
-        // Actually, AI has timers. Let's recreate them to be safe.
         this.aiSystem = new AISystem(this.world);
         this.contactDamageSystem = new ContactDamageSystem();
         this.projectileSystem = new ProjectileSystem(this.world, this.heatMap, this.spatialGrid, this.combatSystem);
@@ -216,8 +210,7 @@ export class Simulation implements WeaponParent, CombatParent {
 
         const centerX = this.world.getWidthPixels() / 2;
         const centerY = this.world.getHeightPixels() / 2;
-        
-        // Re-init local player ECS components
+
         this.playerEntityId = EntityFactory.createPlayer(this.entityManager, centerX, centerY);
         const ecsPlayer = this.entityManager.query(['tag']).find(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'player');
         if (ecsPlayer && ecsPlayer !== this.player.id) {
@@ -234,31 +227,21 @@ export class Simulation implements WeaponParent, CombatParent {
             this.entityManager.addComponent(seg.id, new FireComponent());
             this.entityManager.addComponent(seg.id, new RenderComponent('player_segment', '#cfaa6e', seg.radius));
         });
-        
-        // Clear logic state
+
         this.entities = [this.player, ...this.remotePlayers];
         this.enemies = [];
         this.drops = [];
         this.projectiles = [];
-        
-        this.spatialGrid = new Quadtree<Entity>({ 
-            x: 0, 
-            y: 0, 
-            w: this.world.getWidthPixels(), 
-            h: this.world.getHeightPixels() 
-        });
     }
 
     public update(dt: number, inputManager?: any): void {
-        // Plugin Update
         this.pluginManager.update(dt);
 
-        // 1. Systems Update
         if (inputManager) {
             this.inputSystem.update(dt, this.entityManager, inputManager);
             this.weaponSystem.update(dt, inputManager);
         }
-        
+
         if (this.role !== SimulationRole.CLIENT) {
             this.aiSystem.update(dt, this.entityManager);
             this.contactDamageSystem.update(dt, this.entityManager);
@@ -267,141 +250,75 @@ export class Simulation implements WeaponParent, CombatParent {
 
         this.combatSystem.update(dt);
         this.projectileSystem.update(dt, this.entityManager);
-        
         this.fireSystem.update(dt, this.entityManager);
-        
-        // 2. Physics & Movement (Consolidated)
         this.physicsSystem.update(dt, this.entityManager);
 
-        // Update Custom Systems
         this.customSystems.forEach(s => s.update(dt, this.entityManager));
 
-        // 3. Spawning (Only SP or Host)
         if (this.role !== SimulationRole.CLIENT) {
             this.updateSpawning(dt);
         }
 
-        // 4. Entity Updates
         this.player.update(dt);
         this.enemies.forEach(e => e.update(dt, this.player));
 
-        // 5. Entity Visual Updates (legacy cleanup/flash timers only)
         const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
         const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
         const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
 
         [this.player, ...this.enemies, ...this.remotePlayers].forEach(e => {
             e.handleFireLogic(dt, fireDPS, baseExtinguish);
-            
-            // Environmental Fire: Catch fire from burning tiles, high heat, or molten surfaces
             if (e.active && !e.isOnFire && this.heatMap) {
                 const bodies = e.getAllBodies();
                 let isDangerous = false;
-
                 for (const b of bodies) {
-                    const isTouchingFire = this.heatMap.checkFireArea(b.x, b.y, b.radius);
-                    const heatIntensity = this.heatMap.getMaxIntensityArea(b.x, b.y, b.radius);
-                    const moltenIntensity = this.heatMap.getMaxMoltenArea(b.x, b.y, b.radius);
-                    
-                    if (isTouchingFire || heatIntensity > 0.8 || moltenIntensity > 0.1) {
+                    if (this.heatMap.checkFireArea(b.x, b.y, b.radius) ||
+                        this.heatMap.getMaxIntensityArea(b.x, b.y, b.radius) > 0.8) {
                         isDangerous = true;
                         break;
                     }
                 }
-
                 if (isDangerous && Math.random() < catchChance * dt) {
                     e.isOnFire = true;
-                    // If it's the local player, broadcast this to others
-                    if (e === this.player && this.role !== SimulationRole.SINGLEPLAYER) {
-                        MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
-                            id: this.myId,
-                            damage: 0,
-                            killerId: 'environment',
-                            ignite: true
-                        });
-                    }
                 }
             }
         });
-
         this.drops.forEach(d => d.update(dt));
         this.remotePlayers.forEach(rp => rp.update(dt));
 
-        // Projectile world hits
-        this.updateProjectiles(dt);
+        // Cleanup Inactive Entities
+        this.enemies = this.enemies.filter(e => {
+            if (!e.active) {
+                this.combatSystem.createExplosion(e.x, e.y, 20, 0);
+                this.entityManager.removeEntity(e.id);
+            }
+            return e.active;
+        });
 
-        // 5. Cleanup
-        this.cleanupEntities();
+        this.projectiles = this.projectiles.filter(p => {
+            const health = this.entityManager.getComponent<HealthComponent>(p.id, 'health');
+            if (health && !health.active) {
+                this.entityManager.removeEntity(p.id);
+                return false;
+            }
+            return p.active;
+        });
 
-        // 6. Spatial Grid Update
+        this.drops = this.drops.filter(d => {
+            const health = this.entityManager.getComponent<HealthComponent>(d.id, 'health');
+            if (health && !health.active) {
+                this.entityManager.removeEntity(d.id);
+                return false;
+            }
+            return d.active;
+        });
+
         this.updateSpatialGrid();
-
         this.heatMap.update(dt);
     }
 
     public render(ctx: CanvasRenderingContext2D): void {
         this.renderSystem.update(0, this.entityManager, ctx, this.physicsSystem.alpha);
-    }
-
-    private updateProjectiles(dt: number): void {
-        this.projectiles = this.projectiles.filter(p => {
-            const oldX = p.x;
-            const oldY = p.y;
-            p.update(dt);
-
-            if (p.active && this.world) {
-                const dx = p.x - oldX;
-                const dy = p.y - oldY;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                const angle = Math.atan2(dy, dx);
-                const hit = dist > 1 ? this.world.raycast(oldX, oldY, angle, dist) : null;
-                const hitPoint = hit || this.world.checkWallCollision(p.x, p.y, p.radius);
-                const hitBorder = p.x < 0 || p.x > this.world.getWidthPixels() || p.y < 0 || p.y > this.world.getHeightPixels();
-
-                if (hitPoint || hitBorder) {
-                    const cx = hitPoint ? hitPoint.x : p.x;
-                    const cy = hitPoint ? hitPoint.y : p.y;
-                    p.active = false;
-                    if (this.role !== SimulationRole.CLIENT || p.shooterId === this.myId) {
-                        this.handleProjectileWorldHit(p, cx, cy);
-                    }
-                }
-            }
-            return p.active;
-        });
-    }
-
-    private handleProjectileWorldHit(p: Projectile, x: number, y: number): void {
-        if (p.aoeRadius > 0) {
-            this.combatSystem.createExplosion(x, y, p.aoeRadius, p.damage, p.shooterId, p.type);
-        } else {
-            p.onWorldHit(this.heatMap, x, y);
-            EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
-                x, y, 
-                projectileType: p.type, 
-                hitType: 'wall' 
-            });
-
-            // Sync for Multiplayer
-            if (this.role === SimulationRole.CLIENT) {
-                const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-                const tx = Math.floor(x / tileSize);
-                const ty = Math.floor(y / tileSize);
-                MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_DAMAGE_REQUEST, {
-                    tx, ty, m: this.world.getTile(tx, ty), pt: p.type, hx: x, hy: y
-                });
-            } else if (this.role === SimulationRole.HOST) {
-                const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-                const tx = Math.floor(x / tileSize);
-                const ty = Math.floor(y / tileSize);
-                const hpData = this.heatMap.getTileHP(tx, ty);
-                MultiplayerManager.getInstance().broadcast(NetworkMessageType.WORLD_UPDATE, {
-                    tx, ty, m: this.world.getTile(tx, ty),
-                    hp: hpData ? Array.from(hpData) : null,
-                    pt: p.type, hx: x, hy: y
-                });
-            }
-        }
     }
 
     private updateSpawning(dt: number): void {
@@ -412,30 +329,10 @@ export class Simulation implements WeaponParent, CombatParent {
         }
 
         this.nextEnemySpawn -= dt;
-        if (this.nextEnemySpawn <= 0) {
-            if (ConfigManager.getInstance().get<boolean>('Debug', 'enableEnemySpawning')) {
-                this.spawnEnemy();
-            }
+        if (this.nextEnemySpawn <= 0 && ConfigManager.getInstance().get<boolean>('Debug', 'enableEnemySpawning')) {
+            this.spawnEnemy();
             this.nextEnemySpawn = 4 + Math.random() * 4;
         }
-    }
-
-    private cleanupEntities(): void {
-        this.enemies = this.enemies.filter(e => {
-            if (!e.active) {
-                // Death Animation: small explosion, no damage
-                this.combatSystem.createExplosion(e.x, e.y, 20, 0);
-
-                if (this.role === SimulationRole.HOST) {
-                    MultiplayerManager.getInstance().broadcast(NetworkMessageType.ENTITY_DESTROY, { type: 'enemy', id: e.id });
-                }
-                
-                // Remove from ECS
-                this.entityManager.removeEntity(e.id);
-            }
-            return e.active;
-        });
-        this.drops = this.drops.filter(d => d.active);
     }
 
     private updateSpatialGrid(): void {
@@ -454,9 +351,8 @@ export class Simulation implements WeaponParent, CombatParent {
     public removeProjectileAt(x: number, y: number, radius: number): number {
         let count = 0;
         this.projectiles.forEach(p => {
-            const dx = p.x - x;
-            const dy = p.y - y;
-            if (p.active && Math.sqrt(dx*dx + dy*dy) < radius) {
+            const dx = p.x - x, dy = p.y - y;
+            if (p.active && Math.sqrt(dx * dx + dy * dy) < radius) {
                 p.active = false;
                 count++;
             }
@@ -465,18 +361,15 @@ export class Simulation implements WeaponParent, CombatParent {
     }
 
     public spawnEnemy(): void {
-        for(let i=0; i<10; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const dist = 400 + Math.random() * 400;
-            const ex = this.player.x + Math.cos(angle) * dist;
-            const ey = this.player.y + Math.sin(angle) * dist;
+        for (let i = 0; i < 10; i++) {
+            const angle = Math.random() * Math.PI * 2, dist = 400 + Math.random() * 400;
+            const ex = this.player.x + Math.cos(angle) * dist, ey = this.player.y + Math.sin(angle) * dist;
             if (!this.world.isWall(ex, ey)) {
                 const type = EnemyRegistry.getInstance().getRandomName();
                 const id = EntityFactory.createEnemy(this.entityManager, ex, ey, type);
-                
                 const e = new Enemy(ex, ey);
-                e.id = id; 
-                e.setEntityManager(this.entityManager); // LINKING
+                e.id = id;
+                e.setEntityManager(this.entityManager);
                 this.enemies.push(e);
                 break;
             }
@@ -485,33 +378,40 @@ export class Simulation implements WeaponParent, CombatParent {
 
     public spawnDrop(): void {
         const pos = this.getRandomValidPos();
-        this.drops.push(new Drop(pos.x, pos.y, Math.random() < 0.8 ? DropType.COIN : DropType.BOOSTER));
+        const type = Math.random() < 0.8 ? DropType.COIN : DropType.BOOSTER;
+        const id = EntityFactory.createDrop(this.entityManager, pos.x, pos.y, type);
+        const d = new Drop(pos.x, pos.y, type);
+        d.id = id;
+        d.setEntityManager(this.entityManager);
+        this.drops.push(d);
     }
 
-    private getRandomValidPos(): {x: number, y: number} {
-        for(let i=0; i<20; i++) {
-            const rx = Math.random() * this.world.getWidthPixels();
-            const ry = Math.random() * this.world.getHeightPixels();
-            if (!this.world.isWall(rx, ry)) return {x: rx, y: ry};
+    public spawnDropWithId(id: string, x: number, y: number, type: DropType): void {
+        EntityFactory.createDrop(this.entityManager, x, y, type);
+        const ecsDrops = this.entityManager.query(['tag']).filter(eid => this.entityManager.getComponent<TagComponent>(eid, 'tag')?.tag === 'drop');
+        const lastDrop = ecsDrops[ecsDrops.length - 1];
+        if (lastDrop) this.reassignEntityId(lastDrop, id);
+    }
+
+    private getRandomValidPos(): { x: number, y: number } {
+        for (let i = 0; i < 20; i++) {
+            const rx = Math.random() * this.world.getWidthPixels(), ry = Math.random() * this.world.getHeightPixels();
+            if (!this.world.isWall(rx, ry)) return { x: rx, y: ry };
         }
-        return {x: 100, y: 100};
+        return { x: 100, y: 100 };
     }
 
-    // WeaponParent implementation
     public setLastShotTime(time: number): void { this.lastShotTime = time; }
     public startReload(weapon: string): void {
         if (this.weaponReloading.get(weapon)) return;
         const reloadTime = ConfigManager.getInstance().get<number>('Weapons', weapon + 'ReloadTime');
+        const configKey = weapon === 'laser' || weapon === 'ray' || weapon === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
         if (reloadTime <= 0) {
-            const configKey = weapon === 'laser' || weapon === 'ray' || weapon === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
             this.weaponAmmo.set(weapon, ConfigManager.getInstance().get<number>('Weapons', weapon + configKey));
             return;
         }
         this.weaponReloading.set(weapon, true);
         this.weaponReloadTimer.set(weapon, reloadTime);
-        EventBus.getInstance().emit(GameEvent.WEAPON_RELOAD, { 
-            x: this.player.x, y: this.player.y, 
-            ownerId: this.myId 
-        });
+        EventBus.getInstance().emit(GameEvent.WEAPON_RELOAD, { x: this.player.x, y: this.player.y, ownerId: this.myId });
     }
 }

@@ -4,6 +4,7 @@ import { TransformComponent } from "../components/TransformComponent";
 import { PhysicsComponent } from "../components/PhysicsComponent";
 import { InputComponent } from "../components/InputComponent";
 import { TagComponent } from "../components/TagComponent";
+import { HealthComponent } from "../components/HealthComponent";
 import { ConfigManager } from "../../../config/MasterConfig";
 import { World } from "../../World";
 import { WeatherManager, WeatherType } from "../../WeatherManager";
@@ -17,12 +18,12 @@ interface PhysicsEntity extends QuadtreeItem {
 
 export class PhysicsSystem implements System {
     public readonly id = 'physics';
-    
+
     private accumulator: number = 0;
     private readonly fixedTimeStep: number = 1 / 60;
     public alpha: number = 0;
 
-    constructor(private world: World, private spatialGrid: Quadtree<Entity>) {}
+    constructor(private world: World, private spatialGrid: Quadtree<Entity>) { }
 
     update(dt: number, entityManager: EntityManager): void {
         // Prevent "Spiral of Death"
@@ -52,7 +53,7 @@ export class PhysicsSystem implements System {
         else if (weather.type === WeatherType.SNOW) friction *= 0.85;
 
         const entityIds = entityManager.query(['transform', 'physics']);
-        
+
         // 1. Prepare entities for Quadtree updates (handled in Simulation usually, but let's ensure we use current positions)
         // Actually, Simulation.ts calls `updateSpatialGrid()` at the end of the frame. 
         // For Physics, we might want to query the LAST frame's grid or update it?
@@ -64,8 +65,9 @@ export class PhysicsSystem implements System {
             const physics = entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
             const input = entityManager.getComponent<InputComponent>(id, 'input');
             const tag = entityManager.getComponent<TagComponent>(id, 'tag');
+            const health = entityManager.getComponent<HealthComponent>(id, 'health');
 
-            if (physics.isStatic) continue;
+            if (physics.isStatic || (health && !health.active)) continue;
 
             // Store state for interpolation
             transform.prevX = transform.x;
@@ -119,32 +121,30 @@ export class PhysicsSystem implements System {
             }
 
             // 6. World Collision (Centralized Logic)
-            const wallResult = PhysicsSystem.checkCircleVsTile(this.world, nextX, nextY, physics.radius);
-            nextX = wallResult.x;
-            nextY = wallResult.y;
-            
-            // Adjust velocity if hit wall
-            if (wallResult.hit) {
-               // Simple reflection/slide logic is inside checkCircleVsTile implicitly by returning corrected pos,
-               // but we should also kill velocity into the wall.
-               // For now, we just accept the position fix.
-               // Ideally, we'd project velocity.
-               if (wallResult.nx !== 0 || wallResult.ny !== 0) {
-                   const dot = physics.vx * wallResult.nx + physics.vy * wallResult.ny;
-                   if (dot < 0) {
-                       physics.vx -= dot * wallResult.nx;
-                       physics.vy -= dot * wallResult.ny;
-                   }
-               }
-            }
+            if (tag?.tag !== 'projectile') {
+                const wallResult = PhysicsSystem.checkCircleVsTile(this.world, nextX, nextY, physics.radius);
+                nextX = wallResult.x;
+                nextY = wallResult.y;
 
-            // Map Bounds
-            const mapW = this.world.getWidthPixels();
-            const mapH = this.world.getHeightPixels();
-            if (nextX < physics.radius) { nextX = physics.radius; physics.vx = 0; }
-            if (nextX > mapW - physics.radius) { nextX = mapW - physics.radius; physics.vx = 0; }
-            if (nextY < physics.radius) { nextY = physics.radius; physics.vy = 0; }
-            if (nextY > mapH - physics.radius) { nextY = mapH - physics.radius; physics.vy = 0; }
+                // Adjust velocity if hit wall
+                if (wallResult.hit) {
+                    if (wallResult.nx !== 0 || wallResult.ny !== 0) {
+                        const dot = physics.vx * wallResult.nx + physics.vy * wallResult.ny;
+                        if (dot < 0) {
+                            physics.vx -= dot * wallResult.nx;
+                            physics.vy -= dot * wallResult.ny;
+                        }
+                    }
+                }
+
+                // Map Bounds
+                const mapW = this.world.getWidthPixels();
+                const mapH = this.world.getHeightPixels();
+                if (nextX < physics.radius) { nextX = physics.radius; physics.vx = 0; }
+                if (nextX > mapW - physics.radius) { nextX = mapW - physics.radius; physics.vx = 0; }
+                if (nextY < physics.radius) { nextY = physics.radius; physics.vy = 0; }
+                if (nextY > mapH - physics.radius) { nextY = mapH - physics.radius; physics.vy = 0; }
+            }
 
             // 7. Entity vs Entity (Separation via Quadtree)
             const separation = this.calculateSeparation(id, nextX, nextY, physics, entityManager);
@@ -152,8 +152,8 @@ export class PhysicsSystem implements System {
             nextY += separation.y;
             // Also apply separation to velocity to prevent re-entry
             if (separation.x !== 0 || separation.y !== 0) {
-                 physics.vx += separation.x * 5; // Impulse
-                 physics.vy += separation.y * 5;
+                physics.vx += separation.x * 5; // Impulse
+                physics.vy += separation.y * 5;
             }
 
             // 8. Commit Final Position
@@ -168,7 +168,7 @@ export class PhysicsSystem implements System {
         const checkRadius = radius;
         const subDiv = 10;
         const subSize = tileSize / subDiv;
-        
+
         const minTX = Math.floor((px - checkRadius) / tileSize);
         const maxTX = Math.floor((px + checkRadius) / tileSize);
         const minTY = Math.floor((py - checkRadius) / tileSize);
@@ -186,7 +186,7 @@ export class PhysicsSystem implements System {
         for (let ty = minTY; ty <= maxTY; ty++) {
             for (let tx = minTX; tx <= maxTX; tx++) {
                 const material = world.getTile(tx, ty);
-                if (material === 0) continue; 
+                if (material === 0) continue;
 
                 const hasHeatMapData = heatMap && heatMap.hasTileData(tx, ty);
 
@@ -208,7 +208,7 @@ export class PhysicsSystem implements System {
 
                     const tileWX = tx * tileSize;
                     const tileWY = ty * tileSize;
-                    
+
                     const localMinSX = Math.max(0, Math.floor((finalX - checkRadius - tileWX) / subSize));
                     const localMaxSX = Math.min(subDiv - 1, Math.floor((finalX + checkRadius - tileWX) / subSize));
                     const localMinSY = Math.max(0, Math.floor((finalY - checkRadius - tileWY) / subSize));
@@ -218,10 +218,10 @@ export class PhysicsSystem implements System {
                         for (let sx = localMinSX; sx <= localMaxSX; sx++) {
                             if (hpData[sy * subDiv + sx] > 0) {
                                 const result = PhysicsSystem.resolveAABBCollision(
-                                    finalX, finalY, 
-                                    tileWX + sx * subSize, 
-                                    tileWY + sy * subSize, 
-                                    subSize, 
+                                    finalX, finalY,
+                                    tileWX + sx * subSize,
+                                    tileWY + sy * subSize,
+                                    subSize,
                                     checkRadius
                                 );
                                 if (result.hit) {
@@ -238,9 +238,9 @@ export class PhysicsSystem implements System {
                 }
             }
         }
-        
+
         if (hitCount > 0) {
-            const len = Math.sqrt(avgNX*avgNX + avgNY*avgNY) || 1;
+            const len = Math.sqrt(avgNX * avgNX + avgNY * avgNY) || 1;
             avgNX /= len;
             avgNY /= len;
         }
@@ -248,7 +248,7 @@ export class PhysicsSystem implements System {
         return { x: finalX, y: finalY, hit: hitAny, nx: avgNX, ny: avgNY };
     }
 
-    private static resolveAABBCollision(px: number, py: number, rx: number, ry: number, rSize: number, radius: number): {x: number, y: number, hit: boolean, nx: number, ny: number} {
+    private static resolveAABBCollision(px: number, py: number, rx: number, ry: number, rSize: number, radius: number): { x: number, y: number, hit: boolean, nx: number, ny: number } {
         const closestX = Math.max(rx, Math.min(px, rx + rSize));
         const closestY = Math.max(ry, Math.min(py, ry + rSize));
 
@@ -267,17 +267,23 @@ export class PhysicsSystem implements System {
         return { x: px, y: py, hit: false, nx: 0, ny: 0 };
     }
 
-    private calculateSeparation(id: string, nextX: number, nextY: number, physics: PhysicsComponent, entityManager: EntityManager): {x: number, y: number} {
-        const range = physics.radius * 2.5; 
+    private calculateSeparation(id: string, nextX: number, nextY: number, physics: PhysicsComponent, entityManager: EntityManager): { x: number, y: number } {
+        const range = physics.radius * 2.5;
         const neighbors = this.spatialGrid.retrieve({ x: nextX - range, y: nextY - range, w: range * 2, h: range * 2 });
-        
+
         let sepX = 0;
         let sepY = 0;
         let count = 0;
 
         for (const other of neighbors) {
+            // For now, let's assume we can get the tag from EntityManager.
+            // If it's a projectile, it should NOT push others and others should NOT push it (they should explode)
+            const otherTag = entityManager.getComponent<TagComponent>(other.id, 'tag')?.tag;
+            const myTag = entityManager.getComponent<TagComponent>(id, 'tag')?.tag;
+
             if (other.id === id) continue;
-            
+            if (otherTag === 'projectile' || myTag === 'projectile') continue;
+
             // Check if ECS entity (prefer Transform/Physics components if available)
             // But Quadtree stores Entity instances (which map to ECS IDs if we set them up right).
             // However, Quadtree in Simulation stores 'Entity' objects (the class). 
@@ -285,7 +291,7 @@ export class PhysicsSystem implements System {
             // Assumption: The 'Entity' class objects IN the Quadtree have an 'id' that matches the ECS id (if they are ECS entities).
             // OR they are legacy entities. 
             // We'll treat them as circles.
-            
+
             const dx = nextX - other.x;
             const dy = nextY - other.y;
             const distSq = dx * dx + dy * dy;
@@ -295,7 +301,7 @@ export class PhysicsSystem implements System {
                 const dist = Math.sqrt(distSq);
                 const overlap = radSum - dist;
                 const push = Math.min(overlap, 2.0); // Limit push per frame to avoid instability
-                
+
                 sepX += (dx / dist) * push;
                 sepY += (dy / dist) * push;
                 count++;

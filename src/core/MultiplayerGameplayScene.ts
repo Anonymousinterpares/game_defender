@@ -1,4 +1,5 @@
 import { GameplayScene } from './GameplayScene';
+import { EntityFactory } from './ecs/EntityFactory';
 import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
 import { RemotePlayer } from '../entities/RemotePlayer';
 import { SceneManager } from './SceneManager';
@@ -18,8 +19,10 @@ import { WorldRenderer } from './renderers/WorldRenderer';
 import { TransformComponent } from './ecs/components/TransformComponent';
 import { PhysicsComponent } from './ecs/components/PhysicsComponent';
 import { HealthComponent } from './ecs/components/HealthComponent';
+import { ProjectileComponent } from './ecs/components/ProjectileComponent';
 import { FireComponent } from './ecs/components/FireComponent';
 import { RenderComponent } from './ecs/components/RenderComponent';
+import { TagComponent } from './ecs/components/TagComponent';
 
 export class MultiplayerGameplayScene extends GameplayScene {
     private remotePlayersMap: Map<string, RemotePlayer> = new Map();
@@ -316,11 +319,25 @@ export class MultiplayerGameplayScene extends GameplayScene {
             }
             return;
         }
+        const id = EntityFactory.createProjectile(
+            this.simulation.entityManager,
+            data.x, data.y, data.a, data.type, data.sid
+        );
+
         const p = new Projectile(data.x, data.y, data.a, data.type);
+        p.id = id;
+        p.setEntityManager(this.simulation.entityManager);
         if (data.sid) p.shooterId = data.sid;
 
         if (p.type === ProjectileType.MISSILE) {
-            p.target = this.simulation.combatSystem.findNearestTarget(p.x, p.y, p.shooterId);
+            const target = this.simulation.combatSystem.findNearestTarget(p.x, p.y, p.shooterId);
+            p.target = target;
+
+            // Sync to ECS
+            const pComp = this.simulation.entityManager.getComponent<ProjectileComponent>(id, 'projectile');
+            if (pComp) {
+                pComp.targetId = target?.id || null;
+            }
         }
 
         this.simulation.projectiles.push(p);
@@ -337,9 +354,18 @@ export class MultiplayerGameplayScene extends GameplayScene {
         }
         if (data.drops) {
             data.drops.forEach((dd: any) => {
-                if (!this.drops.find(d => d.id === dd.id)) {
-                    const newDrop = new Drop(dd.x, dd.y, dd.t); newDrop.id = dd.id; this.drops.push(newDrop);
+                let drop = this.drops.find(d => d.id === dd.id);
+                if (!drop) {
+                    drop = new Drop(dd.x, dd.y, dd.t);
+                    drop.id = dd.id;
+                    drop.setEntityManager(this.simulation.entityManager);
+
+                    // Create in ECS
+                    this.simulation.spawnDropWithId(dd.id, dd.x, dd.y, dd.t);
+
+                    this.drops.push(drop);
                 }
+                drop.x = dd.x; drop.y = dd.y;
             });
         }
     }
@@ -438,6 +464,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
             // ECS Link for Remote Player
             rp.setEntityManager(this.simulation.entityManager);
+            this.simulation.entityManager.addComponent(rp.id, new TagComponent('remote_player'));
             this.simulation.entityManager.addComponent(rp.id, new TransformComponent(x, y, r / 1000));
             this.simulation.entityManager.addComponent(rp.id, new PhysicsComponent(0, 0, rp.radius));
             this.simulation.entityManager.addComponent(rp.id, new HealthComponent(h, 100));

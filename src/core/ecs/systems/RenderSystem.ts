@@ -5,6 +5,8 @@ import { RenderComponent, RenderType } from "../components/RenderComponent";
 import { HealthComponent } from "../components/HealthComponent";
 import { FireComponent } from "../components/FireComponent";
 import { AIComponent } from "../components/AIComponent";
+import { ProjectileType } from "../components/ProjectileComponent";
+import { DropType } from "../components/DropComponent";
 import { AssetRegistry } from "../../AssetRegistry";
 
 export class RenderSystem implements System {
@@ -51,7 +53,7 @@ export class RenderSystem implements System {
             const ix = transform.prevX + (transform.x - transform.prevX) * alpha;
             const iy = transform.prevY + (transform.y - transform.prevY) * alpha;
             const rotation = transform.rotation;
-            
+
             // Sync visual properties from HealthComponent if available (Legacy/Compat)
             // Ideally RenderComponent should hold these, but logic updates HealthComponent currently.
             // Let's copy them over for the frame or just use HealthComponent directly.
@@ -61,7 +63,7 @@ export class RenderSystem implements System {
             const damageFlash = health?.damageFlash ?? render.damageFlash;
 
             ctx.save();
-            
+
             // Apply scale if needed
             if (scale !== 1.0) {
                 ctx.translate(ix, iy);
@@ -87,16 +89,16 @@ export class RenderSystem implements System {
     }
 
     private drawByType(
-        ctx: CanvasRenderingContext2D, 
+        ctx: CanvasRenderingContext2D,
         id: string,
         entityManager: EntityManager,
-        render: RenderComponent, 
-        x: number, 
-        y: number, 
-        rotation: number, 
+        render: RenderComponent,
+        x: number,
+        y: number,
+        rotation: number,
         scale: number,
         damageFlash: number,
-        health?: HealthComponent, 
+        health?: HealthComponent,
         fire?: FireComponent
     ): void {
         switch (render.renderType) {
@@ -109,7 +111,7 @@ export class RenderSystem implements System {
             case 'enemy':
                 const ai = entityManager.getComponent<AIComponent>(id, 'ai');
                 this.drawEnemy(ctx, x, y, rotation, render.radius, damageFlash, health, ai);
-                
+
                 // NPC Health Bar: Only show if damaged
                 if (health && health.health < health.maxHealth && health.active) {
                     this.drawHealthBar(ctx, x, y, render.radius, health.health, health.maxHealth);
@@ -136,7 +138,7 @@ export class RenderSystem implements System {
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
-        
+
         ctx.strokeStyle = '#594326';
         ctx.lineWidth = 3;
         ctx.stroke();
@@ -150,35 +152,35 @@ export class RenderSystem implements System {
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(rotation);
-        
+
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.lineTo(25, 0);
         ctx.strokeStyle = '#222';
         ctx.lineWidth = 6;
         ctx.stroke();
-        
+
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.lineTo(25, 0);
         ctx.strokeStyle = '#434b4d';
         ctx.lineWidth = 2;
         ctx.stroke();
-        
+
         ctx.restore();
     }
 
     private drawPlayerSegment(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, damageFlash: number): void {
         const grad = ctx.createRadialGradient(x - 5, y - 5, 2, x, y, radius);
-        grad.addColorStop(0, '#ebd5b3'); 
-        grad.addColorStop(0.5, '#b58d4a'); 
-        grad.addColorStop(1, '#594326'); 
+        grad.addColorStop(0, '#ebd5b3');
+        grad.addColorStop(0.5, '#b58d4a');
+        grad.addColorStop(1, '#594326');
         ctx.fillStyle = grad;
 
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
-        
+
         ctx.strokeStyle = '#3d2e1e';
         ctx.lineWidth = 2;
         ctx.stroke();
@@ -190,11 +192,11 @@ export class RenderSystem implements System {
     }
 
     private drawEnemy(
-        ctx: CanvasRenderingContext2D, 
-        x: number, 
-        y: number, 
-        rotation: number, 
-        radius: number, 
+        ctx: CanvasRenderingContext2D,
+        x: number,
+        y: number,
+        rotation: number,
+        radius: number,
         damageFlash: number,
         health?: HealthComponent,
         ai?: AIComponent
@@ -205,7 +207,7 @@ export class RenderSystem implements System {
         const glowColor = dossier?.visuals.glowColor || 'rgba(255, 69, 0, 0.5)';
 
         ctx.save();
-        
+
         // Setup common styles
         ctx.shadowBlur = 10;
         ctx.shadowColor = glowColor;
@@ -220,7 +222,7 @@ export class RenderSystem implements System {
             ctx.rect(-radius, -radius, radius * 2, radius * 2);
             // Gradient for square (Heavy)
             const grad = ctx.createLinearGradient(-radius, -radius, radius, radius);
-            grad.addColorStop(0, '#555'); 
+            grad.addColorStop(0, '#555');
             grad.addColorStop(1, color);
             ctx.fillStyle = grad;
         } else if (shape === 'triangle') {
@@ -230,9 +232,9 @@ export class RenderSystem implements System {
             ctx.lineTo(-radius, -radius);
             ctx.lineTo(-radius, radius);
             ctx.closePath();
-             // Gradient for triangle (Scout)
+            // Gradient for triangle (Scout)
             const grad = ctx.createLinearGradient(-radius, 0, radius, 0);
-            grad.addColorStop(0, '#333'); 
+            grad.addColorStop(0, '#333');
             grad.addColorStop(1, color);
             ctx.fillStyle = grad;
         } else if (shape === 'rocket') {
@@ -253,7 +255,7 @@ export class RenderSystem implements System {
             grad.addColorStop(1, '#2a2a2a');
             ctx.fillStyle = grad;
         }
-        
+
         ctx.fill();
         ctx.stroke();
 
@@ -268,9 +270,9 @@ export class RenderSystem implements System {
 
         // 3. Eye / Core Detail
         ctx.shadowBlur = 0;
-        
+
         if (shape === 'circle') {
-             // Glowing Ember Eye for Circle
+            // Glowing Ember Eye for Circle
             const eyeX = x + Math.cos(rotation) * 6;
             const eyeY = y + Math.sin(rotation) * 6;
             ctx.shadowBlur = 10;
@@ -295,12 +297,12 @@ export class RenderSystem implements System {
         ctx.restore();
     }
 
-    private drawProjectile(ctx: CanvasRenderingContext2D, x: number, y: number, rotation: number, radius: number, type: string = 'cannon', isArmed: boolean = true): void {
+    private drawProjectile(ctx: CanvasRenderingContext2D, x: number, y: number, rotation: number, radius: number, type: ProjectileType = ProjectileType.CANNON, isArmed: boolean = true): void {
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(rotation);
 
-        if (type === 'mine') {
+        if (type === ProjectileType.MINE) {
             const pulse = isArmed ? Math.sin(Date.now() * 0.01) * 2 : 0;
             ctx.fillStyle = '#333';
             ctx.beginPath();
@@ -310,11 +312,11 @@ export class RenderSystem implements System {
             ctx.beginPath();
             ctx.arc(0, 0, radius + pulse, 0, Math.PI * 2);
             ctx.fill();
-        } else if (type === 'rocket' || type === 'missile') {
-            ctx.rotate(Math.PI / 2); 
+        } else if (type === ProjectileType.ROCKET || type === ProjectileType.MISSILE) {
+            ctx.rotate(Math.PI / 2);
             const scale = (radius * 4) / 128;
             ctx.scale(scale, scale);
-            ctx.translate(-32, -64); 
+            ctx.translate(-32, -64);
 
             const drawPixel = (px: number, py: number, w: number, h: number, fill: string) => {
                 ctx.fillStyle = fill;
@@ -328,7 +330,7 @@ export class RenderSystem implements System {
             drawPixel(26, 36, 12, 12, "#3399cc"); // Window
             drawPixel(6, 84, 8, 16, "#cc2200"); // Fins
             drawPixel(50, 84, 8, 16, "#cc2200");
-            
+
             // Flame
             if (Math.random() > 0.5) {
                 drawPixel(26, 108, 12, 12, "#ffff00");
@@ -344,17 +346,17 @@ export class RenderSystem implements System {
         ctx.restore();
     }
 
-    private drawDrop(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, type: string = 'coin'): void {
+    private drawDrop(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, type: DropType = DropType.COIN): void {
         const time = Date.now() * 0.005;
         const hover = Math.sin(time) * 3;
-        
+
         ctx.save();
         ctx.translate(x, y + hover);
-        
-        if (type === 'coin') {
+
+        if (type === DropType.COIN) {
             ctx.fillStyle = '#ffd700';
             ctx.beginPath();
-            ctx.ellipse(0, 0, radius, radius * Math.cos(time), 0, 0, Math.PI * 2);
+            ctx.ellipse(0, 0, radius, Math.abs(radius * Math.cos(time)), 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.strokeStyle = '#b8860b';
             ctx.lineWidth = 2;
@@ -407,19 +409,19 @@ export class RenderSystem implements System {
         // Use a hash of ID to offset animation
         const idHash = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
         const frame = Math.floor((time * 15 + idHash) % frameCount);
-        
+
         const fw = this.fireAsset.width / frameCount;
         const fh = this.fireAsset.height;
         const fx = frame * fw;
-        
+
         // Proportional fire: make it covers the entity radius
         const displaySize = radius * 2.5;
         ctx.drawImage(
-            this.fireAsset, 
-            fx, 0, fw, fh, 
-            x - displaySize / 2, 
-            y - displaySize * 0.8, 
-            displaySize, 
+            this.fireAsset,
+            fx, 0, fw, fh,
+            x - displaySize / 2,
+            y - displaySize * 0.8,
+            displaySize,
             displaySize
         );
 
@@ -449,7 +451,7 @@ export class RenderSystem implements System {
             const scale = health?.visualScale ?? render.visualScale;
 
             ctx.save();
-            
+
             if (scale !== 1.0) {
                 ctx.translate(ix, iy);
                 ctx.scale(scale, scale);
@@ -458,7 +460,7 @@ export class RenderSystem implements System {
 
             // Draw Silhouette
             ctx.fillStyle = color;
-            
+
             switch (render.renderType) {
                 case 'player':
                     // Head
@@ -480,7 +482,7 @@ export class RenderSystem implements System {
                 case 'enemy':
                     const ai = entityManager.getComponent<AIComponent>(id, 'ai');
                     const shape = ai?.dossier?.visuals.shape || 'circle';
-                    
+
                     ctx.beginPath();
                     if (shape === 'square') {
                         ctx.translate(ix, iy);
@@ -507,12 +509,12 @@ export class RenderSystem implements System {
                     ctx.fill();
                     break;
                 case 'projectile':
-                     // Projectiles usually don't cast shadows/block light in this game? 
-                     // But if they do:
-                     ctx.beginPath();
-                     ctx.arc(ix, iy, render.radius, 0, Math.PI * 2);
-                     ctx.fill();
-                     break;
+                    // Projectiles usually don't cast shadows/block light in this game? 
+                    // But if they do:
+                    ctx.beginPath();
+                    ctx.arc(ix, iy, render.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    break;
             }
 
             ctx.restore();

@@ -1,6 +1,9 @@
 import { ConfigManager } from '../config/MasterConfig';
+import { EntityFactory } from '../core/ecs/EntityFactory';
+import { EntityManager } from '../core/ecs/EntityManager';
 import { Player } from '../entities/Player';
 import { Projectile, ProjectileType } from '../entities/Projectile';
+import { ProjectileComponent } from '../core/ecs/components/ProjectileComponent';
 import { Enemy } from '../entities/Enemy';
 import { CombatSystem } from './CombatSystem';
 import { Entity } from '../core/Entity';
@@ -27,6 +30,7 @@ export interface WeaponParent {
     setLastShotTime(time: number): void;
     startReload(weapon: string): void;
     combatSystem: CombatSystem;
+    entityManager: EntityManager; // Properly typed
 }
 
 export class WeaponSystem {
@@ -38,11 +42,11 @@ export class WeaponSystem {
     private netIgniteAccumulator: Map<string, boolean> = new Map(); // targetId -> ignite
     private netBroadcastTimer: number = 0;
 
-    constructor(private parent: WeaponParent) {}
+    constructor(private parent: WeaponParent) { }
 
     public update(dt: number, inputManager: any): void {
         const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
-        
+
         // Update all reload timers (moved from Scene)
         this.parent.weaponReloadTimer.forEach((timer, w) => {
             if (this.parent.weaponReloading.get(w)) {
@@ -81,12 +85,12 @@ export class WeaponSystem {
                     }
 
                     // BROADCAST visual state
-                    if (Math.random() < 0.3) { 
+                    if (Math.random() < 0.3) {
                         MultiplayerManager.getInstance().broadcast(NetworkMessageType.PROJECTILE, {
-                            type: weapon, 
+                            type: weapon,
                             x: this.parent.player.x,
                             y: this.parent.player.y,
-                            a: this.parent.player.rotation, 
+                            a: this.parent.player.rotation,
                             sid: this.parent.myId
                         });
                     }
@@ -94,11 +98,11 @@ export class WeaponSystem {
                     const loopSfx = weapon === 'laser' ? 'shoot_laser' : (weapon === 'ray' ? 'shoot_ray' : 'shoot_flamethrower');
                     EventBus.getInstance().emit(GameEvent.SOUND_LOOP_START, { soundId: loopSfx, x: this.parent.player.x, y: this.parent.player.y });
                     EventBus.getInstance().emit(GameEvent.SOUND_LOOP_MOVE, { soundId: loopSfx, x: this.parent.player.x, y: this.parent.player.y });
-                    
+
                     const depletion = ConfigManager.getInstance().get<number>('Weapons', weapon + 'DepletionRate');
                     const newAmmo = Math.max(0, currentAmmo - depletion * dt);
                     this.parent.weaponAmmo.set(weapon, newAmmo);
-                    
+
                     if (newAmmo <= 0) {
                         this.parent.startReload(weapon);
                     }
@@ -115,7 +119,7 @@ export class WeaponSystem {
             eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'hit_laser' });
             eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'hit_ray' });
         }
-        
+
         if (!this.isFiringFlamethrower) {
             EventBus.getInstance().emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'shoot_flamethrower' });
         }
@@ -125,7 +129,7 @@ export class WeaponSystem {
         if (this.netBroadcastTimer >= 0.1) {
             // Combine damage and ignite for all targets that have either
             const allTargets = new Set([...this.netDamageAccumulator.keys(), ...this.netIgniteAccumulator.keys()]);
-            
+
             allTargets.forEach(targetId => {
                 const dmg = this.netDamageAccumulator.get(targetId) || 0;
                 const ignite = this.netIgniteAccumulator.get(targetId) || false;
@@ -154,14 +158,25 @@ export class WeaponSystem {
             'missile': ProjectileType.MISSILE,
             'mine': ProjectileType.MINE
         };
-        
+
         const pType = weaponToType[weapon] || ProjectileType.CANNON;
+        const id = EntityFactory.createProjectile(
+            this.parent.entityManager,
+            player.x + Math.cos(player.rotation) * 25,
+            player.y + Math.sin(player.rotation) * 25,
+            player.rotation,
+            pType,
+            this.parent.myId
+        );
+
         const p = new Projectile(
             player.x + Math.cos(player.rotation) * 25,
             player.y + Math.sin(player.rotation) * 25,
             player.rotation,
             pType
         );
+        p.id = id;
+        p.setEntityManager(this.parent.entityManager);
         p.shooterId = this.parent.myId;
 
         // BROADCAST to network
@@ -175,17 +190,23 @@ export class WeaponSystem {
         });
 
         if (pType === ProjectileType.MISSILE) {
-            p.target = this.parent.combatSystem.findNearestTarget(p.x, p.y, this.parent.myId);
-        }
+            const target = this.parent.combatSystem.findNearestTarget(p.x, p.y, this.parent.myId);
+            p.target = target;
 
+            // Sync to ECS
+            const pComp = this.parent.entityManager.getComponent<ProjectileComponent>(id, 'projectile');
+            if (pComp) {
+                pComp.targetId = target?.id || null;
+            }
+        }
         this.parent.projectiles.push(p);
         this.parent.weaponAmmo.set(weapon, currentAmmo - 1);
-        
-        EventBus.getInstance().emit(GameEvent.WEAPON_FIRED, { 
-            x: player.x, y: player.y, 
+
+        EventBus.getInstance().emit(GameEvent.WEAPON_FIRED, {
+            x: player.x, y: player.y,
             rotation: player.rotation,
-            weaponType: weapon, 
-            ownerId: this.parent.myId 
+            weaponType: weapon,
+            ownerId: this.parent.myId
         });
 
         if (this.parent.weaponAmmo.get(weapon)! <= 0 && weapon !== 'cannon') {
@@ -195,19 +216,19 @@ export class WeaponSystem {
 
     private handleBeamFiring(type: string, dt: number): void {
         if (!this.parent.player || !this.parent.world || !this.parent.heatMap) return;
-        
+
         const player = this.parent.player;
         const maxDist = type === 'laser' ? 800 : 500;
         const wallHit = this.parent.world.raycast(player.x, player.y, player.rotation, maxDist);
-        
+
         let dist = 0;
         let hitEntity: Entity | null = null;
         let hitSomething = !!wallHit;
         let finalX = wallHit ? wallHit.x : player.x + Math.cos(player.rotation) * maxDist;
         let finalY = wallHit ? wallHit.y : player.y + Math.sin(player.rotation) * maxDist;
 
-        const actualMaxDist = wallHit ? Math.sqrt((wallHit.x - player.x)**2 + (wallHit.y - player.y)**2) : maxDist;
-        
+        const actualMaxDist = wallHit ? Math.sqrt((wallHit.x - player.x) ** 2 + (wallHit.y - player.y) ** 2) : maxDist;
+
         // Unified Entity check (Enemies and Remote Players) using checkHitbox
         const targets: Entity[] = [...this.parent.enemies, ...this.parent.remotePlayers];
         const step = 8;
@@ -233,11 +254,11 @@ export class WeaponSystem {
         }
 
         this.beamEndPos = { x: finalX, y: finalY };
-        
+
         if (hitEntity) {
-            const dmg = type === 'laser' ? ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt : 
-                        (ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage') / (1 + (dist/32)**2)) * dt;
-            
+            const dmg = type === 'laser' ? ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt :
+                (ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage') / (1 + (dist / 32) ** 2)) * dt;
+
             if ((hitEntity as any).id && (hitEntity as any).id !== this.parent.myId && !(hitEntity instanceof Enemy)) {
                 const current = this.netDamageAccumulator.get((hitEntity as any).id) || 0;
                 this.netDamageAccumulator.set((hitEntity as any).id, current + dmg);
@@ -245,18 +266,18 @@ export class WeaponSystem {
                 hitEntity.takeDamage(dmg);
             }
         }
-        
+
         const hitSfx = type === 'laser' ? 'hit_laser' : 'hit_ray';
 
         if (hitSomething || hitEntity) {
             const eb = EventBus.getInstance();
             eb.emit(GameEvent.SOUND_LOOP_START, { soundId: hitSfx, x: this.beamEndPos.x, y: this.beamEndPos.y });
             eb.emit(GameEvent.SOUND_LOOP_MOVE, { soundId: hitSfx, x: this.beamEndPos.x, y: this.beamEndPos.y });
-            
+
             if (!hitEntity) {
                 const heatAmount = type === 'laser' ? 0.4 : 0.6;
                 this.parent.heatMap.addHeat(this.beamEndPos.x, this.beamEndPos.y, heatAmount * dt * 5, 12);
-                
+
                 if (this.parent.heatMap.getIntensityAt(this.beamEndPos.x, this.beamEndPos.y) > 0.8 && Math.random() < 0.3) {
                     EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, {
                         x: this.beamEndPos.x, y: this.beamEndPos.y,
@@ -281,7 +302,7 @@ export class WeaponSystem {
         const coneAngle = Math.PI / 4;
 
         const targets: Entity[] = [...this.parent.enemies, ...this.parent.remotePlayers];
-        
+
         // Improved Flamethrower detection: check multiple points in the cone against entity hitboxes
         targets.forEach(e => {
             if (!e.active) return;
@@ -291,8 +312,8 @@ export class WeaponSystem {
             for (const b of bodies) {
                 const dx = b.x - player.x;
                 const dy = b.y - player.y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
                 if (dist < range) {
                     const angleToTarget = Math.atan2(dy, dx);
                     let diff = angleToTarget - player.rotation;
@@ -310,7 +331,7 @@ export class WeaponSystem {
                 if ((e as any).id && (e as any).id !== this.parent.myId && !(e instanceof Enemy)) {
                     const current = this.netDamageAccumulator.get((e as any).id) || 0;
                     this.netDamageAccumulator.set((e as any).id, current + damage * dt);
-                    
+
                     // 50% chance to catch fire per second
                     if (Math.random() < 0.5 * dt) {
                         this.netIgniteAccumulator.set((e as any).id, true);
@@ -332,7 +353,7 @@ export class WeaponSystem {
             const dist = (i / steps) * range;
             const tx = player.x + Math.cos(player.rotation) * dist;
             const ty = player.y + Math.sin(player.rotation) * dist;
-            
+
             if (this.parent.world.isWall(tx, ty)) {
                 finalRange = dist;
                 const mat = this.parent.heatMap.getMaterialAt(tx, ty);
@@ -354,10 +375,10 @@ export class WeaponSystem {
         for (let i = 0; i < flameCount; i++) {
             const angleOffset = (Math.random() - 0.5) * coneAngle;
             const pAngle = player.rotation + angleOffset;
-            const speed = (finalRange / 0.5) * (0.8 + Math.random() * 0.4); 
+            const speed = (finalRange / 0.5) * (0.8 + Math.random() * 0.4);
             const vx = Math.cos(pAngle) * speed + player.vx * 0.5;
             const vy = Math.sin(pAngle) * speed + player.vy * 0.5;
-            
+
             const idx = ParticleSystem.getInstance().spawnParticle(
                 player.x + Math.cos(player.rotation) * 15,
                 player.y + Math.sin(player.rotation) * 15,
@@ -372,7 +393,7 @@ export class WeaponSystem {
     private finishReload(weapon: string): void {
         this.parent.weaponReloading.set(weapon, false);
         this.parent.weaponReloadTimer.set(weapon, 0);
-        
+
         const configKey = weapon === 'laser' || weapon === 'ray' || weapon === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
         const max = ConfigManager.getInstance().get<number>('Weapons', weapon + configKey);
         this.parent.weaponAmmo.set(weapon, max);

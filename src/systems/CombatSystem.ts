@@ -19,60 +19,77 @@ export interface CombatParent {
     coinsCollected: number;
     world: World | null;
     myId?: string;
+    playerEntityId?: string;
+    spatialGrid: any;
+    entityManager?: any;
     onExplosion?: (x: number, y: number, radius: number, damage: number) => void;
     lastKilledBy?: string | null;
 }
 
 export class CombatSystem {
-    constructor(private parent: any) {} 
+    constructor(private parent: CombatParent) { }
 
     public update(dt: number): void {
-        this.resolveProjectileCollisions();
-        this.resolveDropCollection();
+        // Redundant - Logic moved to ProjectileSystem and DropSystem
     }
 
     public findNearestTarget(x: number, y: number, shooterId: string | null, maxDist: number = 1000): any | null {
-        const { enemies, remotePlayers, player } = this.parent;
+        if (!this.parent.entityManager || !this.parent.spatialGrid) return null;
+
+        const neighbors = this.parent.spatialGrid.retrieve({
+            x: x - maxDist,
+            y: y - maxDist,
+            w: maxDist * 2,
+            h: maxDist * 2
+        });
+
+        if (neighbors.length > 0 && ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs')) {
+            console.log(`[CombatSystem] findNearestTarget for ${shooterId}. Neighbors: ${neighbors.length}`);
+        }
+
         let nearest: any = null;
-        let minDist = maxDist;
+        let minDistSq = maxDist * maxDist;
 
-        // Check enemies
-        if (enemies) {
-            enemies.forEach((e: Enemy) => {
-                if (!e.active) return;
-                const d = Math.sqrt((e.x - x)**2 + (e.y - y)**2);
-                if (d < minDist) {
-                    minDist = d;
-                    nearest = e;
-                }
-            });
+        for (const other of neighbors) {
+            const id = other.id;
+
+            // CORRECT EXCLUSION: Skip based on ID or the mapped playerEntityId
+            if (id === shooterId) continue;
+            if (shooterId === 'local' && id === this.parent.playerEntityId) continue;
+            if (shooterId === this.parent.myId && id === this.parent.playerEntityId) continue;
+
+            const tag = this.parent.entityManager.getComponent(id, 'tag')?.tag;
+            if (tag !== 'enemy' && tag !== 'remote_player' && tag !== 'player') continue;
+
+            const transform = this.parent.entityManager.getComponent(id, 'transform');
+            if (!transform) continue;
+
+            const health = this.parent.entityManager.getComponent(id, 'health');
+            if (health && !health.active) continue;
+
+            const dx = transform.x - x;
+            const dy = transform.y - y;
+            const distSq = dx * dx + dy * dy;
+
+            if (distSq < minDistSq) {
+                minDistSq = distSq;
+                nearest = { id, x: transform.x, y: transform.y, rotation: transform.rotation };
+            }
         }
 
-        // Check remote players
-        if (remotePlayers) {
-            remotePlayers.forEach((rp: RemotePlayer) => {
-                if (!rp.active || rp.id === shooterId) return;
-                const d = Math.sqrt((rp.x - x)**2 + (rp.y - y)**2);
-                if (d < minDist) {
-                    minDist = d;
-                    nearest = rp;
-                }
-            });
-        }
-
-        // Check local player
-        if (player && player.active && (this.parent.myId || 'local') !== shooterId) {
-            const d = Math.sqrt((player.x - x)**2 + (player.y - y)**2);
-            if (d < minDist) {
-                minDist = d;
-                nearest = player;
+        if (nearest) {
+            // console.log(`[CombatSystem] Found nearest target: ${nearest.id} at distance ${Math.sqrt(minDistSq).toFixed(1)}`);
+        } else {
+            // Log if spatial grid returned anything at all
+            if (neighbors.length > 0 && ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs')) {
+                console.log(`[CombatSystem] No valid targets among ${neighbors.length} neighbors in query range.`);
             }
         }
 
         return nearest;
     }
 
-    private checkCollision(a: {x: number, y: number, radius: number}, b: {x: number, y: number, radius: number}): boolean {
+    private checkCollision(a: { x: number, y: number, radius: number }, b: { x: number, y: number, radius: number }): boolean {
         const dx = a.x - b.x;
         const dy = a.y - b.y;
         const distSq = dx * dx + dy * dy;
@@ -80,179 +97,26 @@ export class CombatSystem {
         return distSq < radSum * radSum;
     }
 
-    private resolveDropCollection(): void {
-        const { player, drops } = this.parent;
-        if (!player) return;
+    private calculateDamage(id: string, rawDamage: number, sourceX: number, sourceY: number): number {
+        if (!this.parent.entityManager) return rawDamage;
 
-        for (const d of drops) {
-            if (this.checkCollision(player, d)) {
-                d.active = false;
-                EventBus.getInstance().emit(GameEvent.ITEM_COLLECTED, { x: d.x, y: d.y, itemType: 'coin', collectorId: this.parent.myId || 'local' });
-                if (d.type === DropType.COIN) {
-                    this.parent.coinsCollected += 10;
-                }
-                
-                if (this.parent.onDropCollected) {
-                    this.parent.onDropCollected(d);
-                }
-            }
-        }
-    }
-
-    private calculateDamage(target: any, rawDamage: number, sourceX: number, sourceY: number): number {
-        // Only enemies have traits/dossiers for now
-        if (!target.id || !this.parent.entityManager) return rawDamage;
-        
-        const ai = this.parent.entityManager.getComponent(target.id, 'ai');
-        if (ai && ai.dossier && ai.dossier.traits.includes('armored')) {
-            const dx = sourceX - target.x;
-            const dy = sourceY - target.y;
+        const ai = this.parent.entityManager.getComponent(id, 'ai');
+        const transform = this.parent.entityManager.getComponent(id, 'transform');
+        if (ai && ai.dossier && ai.dossier.traits.includes('armored') && transform) {
+            const dx = sourceX - transform.x;
+            const dy = sourceY - transform.y;
             const angleToSource = Math.atan2(dy, dx);
-            
-            // Normalize angles
-            let diff = angleToSource - target.rotation;
+
+            let diff = angleToSource - transform.rotation;
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
-            
-            // If hit is from front (within 45 degrees of rotation)
+
             if (Math.abs(diff) < Math.PI / 4) {
                 return rawDamage * 0.3; // 70% reduction
             }
         }
-        
+
         return rawDamage;
-    }
-
-    private resolveProjectileCollisions(): void {
-        const { world, projectiles, enemies, remotePlayers, player } = this.parent;
-        if (!world || !player) return;
-
-        for (const p of projectiles) {
-            // Projectile vs Entities (Enemies & RemotePlayers)
-            if (p.active) {
-                let hit = false;
-                
-                // Check Enemies
-                for (const e of enemies) {
-                    if (this.checkCollision(p, e)) {
-                        if (p.type === ProjectileType.MINE && !p.isArmed) continue;
-                        
-                        if (p.aoeRadius > 0) {
-                            this.createExplosion(p.x, p.y, p.aoeRadius, p.damage);
-                        } else {
-                            const finalDamage = this.calculateDamage(e, p.damage, p.x, p.y);
-                            e.takeDamage(finalDamage);
-                            EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
-                                x: p.x, y: p.y, 
-                                projectileType: p.type, 
-                                hitType: 'entity' 
-                            });
-                        }
-                        p.active = false;
-                        hit = true;
-                        break;
-                    }
-                }
-                
-                if (hit) continue;
-
-                // Check local player
-                if (player && player.active) {
-                    const bodies = player.getAllBodies();
-                    let hitLocal = false;
-                    for (const b of bodies) {
-                        if (this.checkCollision(p, b)) {
-                            // IGNORE direct hits from self
-                            const isSelf = p.shooterId === this.parent.myId;
-                            
-                            const distToMuzzle = Math.sqrt((p.x - player.x)**2 + (p.y - player.y)**2);
-                            if ((isSelf || !p.shooterId) && distToMuzzle < 32 && p.aoeRadius <= 0) continue; 
-
-                            if (isSelf && p.aoeRadius <= 0) continue; 
-
-                            if (p.type === ProjectileType.MINE && !p.isArmed) continue;
-
-                            if (p.aoeRadius > 0) {
-                                this.createExplosion(p.x, p.y, p.aoeRadius, p.damage, p.shooterId);
-                            } else {
-                                EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
-                                    x: p.x, y: p.y, 
-                                    projectileType: p.type, 
-                                    hitType: 'entity' 
-                                });
-                                if (player && player.color) {
-                                    EventBus.getInstance().emit(GameEvent.ENTITY_HIT, {
-                                        x: p.x, y: p.y,
-                                        damage: p.damage,
-                                        targetId: 'local',
-                                        sourceId: p.shooterId || '',
-                                        color: player.color
-                                    });
-                                }
-                            }
-
-                            if (this.parent.myId === 'local') {
-                                player.takeDamage(p.damage);
-                            } 
-
-                            p.active = false;
-                            hitLocal = true;
-                            break;
-                        }
-                    }
-                    if (hitLocal) continue;
-                }
-
-                // Check RemotePlayers
-                if (remotePlayers) {
-                    for (const rp of remotePlayers) {
-                        if (!rp.active) continue;
-                        if (p.shooterId === rp.id && p.aoeRadius <= 0) continue;
-
-                        const distToHead = Math.sqrt((p.x - rp.x)**2 + (p.y - rp.y)**2);
-                        if (distToHead > 300) continue; 
-
-                        const bodies = rp.getAllBodies();
-                        for (const b of bodies) {
-                            if (this.checkCollision(p, b)) {
-                                if (p.type === ProjectileType.MINE && !p.isArmed) continue;
-
-                                if (p.aoeRadius > 0) {
-                                    this.createExplosion(p.x, p.y, p.aoeRadius, p.damage, p.shooterId);
-                                } else {
-                                    EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
-                                        x: p.x, y: p.y, 
-                                        projectileType: p.type, 
-                                        hitType: 'entity' 
-                                    });
-                                    
-                                    EventBus.getInstance().emit(GameEvent.ENTITY_HIT, {
-                                        x: p.x, y: p.y,
-                                        damage: p.damage,
-                                        targetId: rp.id,
-                                        sourceId: p.shooterId || '',
-                                        color: rp.color
-                                    });
-
-                                    if (p.shooterId === this.parent.myId) {
-                                        const mm = MultiplayerManager.getInstance();
-                                        mm.broadcast(NetworkMessageType.PLAYER_HIT, { 
-                                            id: rp.id, 
-                                            damage: p.damage, 
-                                            killerId: this.parent.myId 
-                                        });
-                                    }
-                                }
-                                p.active = false;
-                                hit = true;
-                                break;
-                            }
-                        }
-                        if (hit) break;
-                    }
-                }
-            }
-        }
     }
 
     public createExplosion(x: number, y: number, radius: number, damage: number, shooterId: string | null = null, projectileType: ProjectileType | null = null, moltenCountOverride: number | null = null): void {
@@ -260,36 +124,36 @@ export class CombatSystem {
             this.parent.onExplosion(x, y, radius, damage);
         }
 
-        const mm = MultiplayerManager.getInstance();
-        const isMyExplosion = shooterId === this.parent.myId;
+        const mm = (window as any).MultiplayerManagerInstance;
+        const isMyExplosion = shooterId === (this.parent.myId || 'local');
 
         let shrapnelCount = moltenCountOverride !== null ? moltenCountOverride : 0;
-        
+
         if (this.parent.heatMap) {
             this.parent.heatMap.addHeat(x, y, 0.8, radius * 1.5);
-            
-            // --- MATERIAL & SHRAPNEL LOGIC (Calculate BEFORE destruction if not overridden) ---
+
+            // --- MATERIAL & SHRAPNEL LOGIC ---
             if (moltenCountOverride === null) {
                 const centerMat = this.parent.heatMap.getMaterialAt(x, y);
                 if (centerMat !== MaterialType.NONE) {
-                    EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { 
-                        x, y, 
-                        material: MaterialType[centerMat].toLowerCase() 
+                    EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, {
+                        x, y,
+                        material: MaterialType[centerMat].toLowerCase()
                     });
                 }
 
-                const scanRadius = Math.max(radius, 32); 
+                const scanRadius = Math.max(radius, 32);
                 const step = 8;
                 for (let dy = -scanRadius; dy <= scanRadius; dy += step) {
                     for (let dx = -scanRadius; dx <= scanRadius; dx += step) {
-                        const distSq = dx*dx + dy*dy;
-                        if (distSq <= scanRadius*scanRadius) {
+                        const distSq = dx * dx + dy * dy;
+                        if (distSq <= scanRadius * scanRadius) {
                             const worldX = x + dx;
                             const worldY = y + dy;
                             const mat = this.parent.heatMap.getMaterialAt(worldX, worldY);
                             const inst = this.parent.heatMap.getIntensityAt(worldX, worldY);
                             const moltenVal = this.parent.heatMap.getMoltenAt(worldX, worldY);
-                            
+
                             if (moltenVal > 0.1 || (mat === MaterialType.METAL && inst > 0.5)) {
                                 shrapnelCount++;
                             }
@@ -299,17 +163,14 @@ export class CombatSystem {
             }
 
             // --- WORLD DAMAGE LOGIC ---
-            if (this.parent.myId === 'local' || mm.isHost) {
-                // Determine destruction intensity based on explosion radius
+            if ((this.parent.myId || 'local') === 'local' || (mm && mm.isHost)) {
                 this.parent.heatMap.destroyArea(x, y, radius, true);
-                
-                // If Host, sync the results of this destruction via a SINGLE atomic message
-                if (mm.isHost) {
+
+                if (mm && mm.isHost) {
                     const world = this.parent.world;
                     const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
                     const tx = Math.floor(x / tileSize);
                     const ty = Math.floor(y / tileSize);
-                    // Use a slightly larger radius to ensure all modified tiles (including noise) are synced
                     const tileRadius = Math.ceil((radius + 32) / tileSize);
                     const affectedTiles: any[] = [];
 
@@ -319,7 +180,6 @@ export class CombatSystem {
                             const nty = ty + ry;
                             if (world && ntx >= 0 && ntx < world.getWidth() && nty >= 0 && nty < world.getHeight()) {
                                 const hpData = this.parent.heatMap.getTileHP(ntx, nty);
-                                // Only send tiles that have damage or were destroyed
                                 if (hpData || world.getTile(ntx, nty) === MaterialType.NONE) {
                                     affectedTiles.push({
                                         tx: ntx, ty: nty,
@@ -331,7 +191,7 @@ export class CombatSystem {
                         }
                     }
 
-                    mm.broadcast(NetworkMessageType.EXPLOSION, {
+                    mm.broadcast('ex', {
                         x, y, radius,
                         mc: Math.min(150, shrapnelCount),
                         pt: projectileType,
@@ -341,78 +201,58 @@ export class CombatSystem {
             }
         }
 
-        // Emit Unified Explosion Event
-        EventBus.getInstance().emit(GameEvent.EXPLOSION, { 
-            x, y, radius, 
-            type: 'large', 
+        EventBus.getInstance().emit(GameEvent.EXPLOSION, {
+            x, y, radius,
+            type: 'large',
             moltenCount: Math.min(150, shrapnelCount)
         });
 
-        // --- DAMAGE LOGIC (Authoritative) ---
-        this.parent.enemies.forEach((e: Enemy) => {
-            const dx = e.x - x;
-            const dy = e.y - y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            if (dist < radius) {
-                const falloff = 1 - (dist / radius);
-                const rawDmg = damage * falloff;
-                const finalDmg = this.calculateDamage(e, rawDmg, x, y);
-                e.takeDamage(finalDmg);
-            }
-        });
-
-        if (this.parent.player) {
-            const bodies = this.parent.player.getAllBodies();
-            let maxDmg = 0;
-            for (const b of bodies) {
-                const dx = b.x - x;
-                const dy = b.y - y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                if (dist < radius) {
-                    const falloff = 1 - (dist / radius);
-                    maxDmg = Math.max(maxDmg, damage * falloff);
-                }
-            }
-
-            if (maxDmg > 0) {
-                if (this.parent.myId === 'local') {
-                    this.parent.player.takeDamage(maxDmg);
-                } else if (isMyExplosion) {
-                    mm.broadcast(NetworkMessageType.PLAYER_HIT, { 
-                        id: this.parent.myId, 
-                        damage: maxDmg, 
-                        killerId: shooterId 
-                    });
-                }
-            }
-        }
-
-        if (this.parent.remotePlayers) {
-            this.parent.remotePlayers.forEach((rp: RemotePlayer) => {
-                if (!rp.active) return;
-                
-                const bodies = rp.getAllBodies();
-                let maxDmg = 0;
-                for (const b of bodies) {
-                    const dx = b.x - x;
-                    const dy = b.y - y;
-                    const dist = Math.sqrt(dx*dx + dy*dy);
-                    if (dist < radius) {
-                        const falloff = 1 - (dist / radius);
-                        maxDmg = Math.max(maxDmg, damage * falloff);
-                    }
-                }
-
-                if (maxDmg > 0) {
-                    if (isMyExplosion) {
-                        mm.broadcast(NetworkMessageType.PLAYER_HIT, { 
-                            id: rp.id, 
-                            damage: maxDmg, 
-                            killerId: shooterId 
-                        });
-                    }
-                }
+        // --- DAMAGE LOGIC (ECS based) ---
+        if (this.parent.entityManager && this.parent.spatialGrid) {
+            const neighbors = this.parent.spatialGrid.retrieve({
+                x: x - radius,
+                y: y - radius,
+                w: radius * 2,
+                h: radius * 2
             });
+
+            const affectedEntities = new Set<string>();
+
+            for (const other of neighbors) {
+                const dx = other.x - x;
+                const dy = other.y - y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < radius + other.radius) {
+                    // Find the actual entity ID (sometimes segments share parent ID or have their own)
+                    // We need to apply damage to the HealthComponent of this entity
+                    const health = this.parent.entityManager.getComponent(other.id, 'health');
+                    if (health && health.active) {
+                        const falloff = 1 - (Math.max(0, dist - other.radius) / radius);
+                        const rawDmg = damage * Math.max(0, falloff);
+                        const finalDmg = this.calculateDamage(other.id, rawDmg, x, y);
+
+                        health.health -= finalDmg;
+                        health.damageFlash = 0.2;
+                        if (health.health <= 0) {
+                            health.health = 0;
+                            health.active = false;
+                        }
+
+                        // Sync for multiplayer
+                        const tag = this.parent.entityManager.getComponent(other.id, 'tag')?.tag;
+                        if (isMyExplosion && (tag === 'remote_player' || (tag === 'player' && this.parent.myId !== 'local'))) {
+                            if (mm) {
+                                mm.broadcast('ph', {
+                                    id: other.id,
+                                    damage: finalDmg,
+                                    killerId: shooterId || 'local'
+                                });
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

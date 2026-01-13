@@ -43,7 +43,7 @@ export class EntityFactory {
         // Apply trait modifiers to base stats
         let finalHp = dossier.baseStats.hp;
         let finalSpeed = dossier.baseStats.speed;
-        
+
         dossier.traits.forEach(traitId => {
             const trait = TRAIT_LIBRARY[traitId];
             if (trait && trait.modifiers) {
@@ -61,7 +61,7 @@ export class EntityFactory {
         entityManager.addComponent(id, new HealthComponent(finalHp, finalHp));
         entityManager.addComponent(id, new FireComponent());
         entityManager.addComponent(id, new RenderComponent('enemy', dossier.visuals.color, dossier.baseStats.radius));
-        
+
         const aiComp = new AIComponent(dossier.behavior, null, finalSpeed);
         aiComp.dossier = dossier;
         entityManager.addComponent(id, aiComp);
@@ -70,6 +70,9 @@ export class EntityFactory {
     }
 
     public static createProjectile(entityManager: EntityManager, x: number, y: number, angle: number, type: ProjectileType, shooterId: string | null): string {
+        if (ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs')) {
+            console.log(`[EntityFactory] Creating projectile of type: ${type} for shooter: ${shooterId}`);
+        }
         const entity = entityManager.createEntity();
         const id = entity.id;
 
@@ -81,7 +84,7 @@ export class EntityFactory {
         let lifeTime = 2.0;
         let turnSpeed = 0;
 
-        switch(type) {
+        switch (type) {
             case ProjectileType.CANNON:
                 damage = config.get<number>('Weapons', 'cannonDamage') || 10;
                 speed = 800;
@@ -98,7 +101,7 @@ export class EntityFactory {
                 const tileSize = config.get<number>('World', 'tileSize') || 32;
                 speed = (config.get<number>('Weapons', 'missileSpeed') || 15) * tileSize;
                 aoeRadius = (config.get<number>('Weapons', 'missileAOE') || 1.5) * tileSize;
-                turnSpeed = config.get<number>('Weapons', 'missileTurnSpeed') || 2.0;
+                turnSpeed = config.get<number>('Weapons', 'missileTurnSpeed') || 8.0;
                 lifeTime = 5.0;
                 break;
             case ProjectileType.MINE:
@@ -113,17 +116,18 @@ export class EntityFactory {
         entityManager.addComponent(id, new TagComponent('projectile'));
         entityManager.addComponent(id, new TransformComponent(x, y, angle));
         entityManager.addComponent(id, new PhysicsComponent(
-            Math.cos(angle) * speed, 
-            Math.sin(angle) * speed, 
-            radius, 
-            false, 1.0, 0, 0, 
-            0.0, // Zero friction for projectiles (Requirement d)
+            Math.cos(angle) * speed,
+            Math.sin(angle) * speed,
+            radius,
+            false, 1.0, 0, 0,
+            0.0, // Friction multiplier 0.0 for projectiles
             type !== ProjectileType.MINE // Align rotation to velocity
         ));
         entityManager.addComponent(id, new HealthComponent(1, 1)); // Projectiles have 1 HP
-        entityManager.addComponent(id, new ProjectileComponent(type, damage, lifeTime, shooterId, aoeRadius, type !== ProjectileType.MINE, 0, null, turnSpeed));
+        const trackingRange = (type === ProjectileType.MISSILE) ? 1500 : 0;
+        entityManager.addComponent(id, new ProjectileComponent(type, damage, lifeTime, shooterId, aoeRadius, type !== ProjectileType.MINE, 0, null, turnSpeed, trackingRange));
         entityManager.addComponent(id, new RenderComponent('projectile', '#fff', radius));
-        
+
         return id;
     }
 
@@ -139,7 +143,7 @@ export class EntityFactory {
         entityManager.addComponent(id, new PhysicsComponent(0, 0, radius, false, 1.0, 0, 0, 1.0, false));
         entityManager.addComponent(id, new DropComponent(type, value));
         entityManager.addComponent(id, new RenderComponent('drop', type === DropType.COIN ? '#ffd700' : '#3498db', radius));
-        
+
         return id;
     }
 }

@@ -1,7 +1,7 @@
 export interface ConfigItem<T> {
   value: T;
   secondary?: T; // For secondary keybindings
-  type: 'number' | 'boolean' | 'string' | 'object' | 'color'; 
+  type: 'number' | 'boolean' | 'string' | 'object' | 'color';
   min?: number;
   max?: number;
   step?: number;
@@ -57,7 +57,7 @@ export const MasterConfig: GameConfigSchema = {
     missileReloadTime: { value: 4.0, type: 'number', min: 1, max: 20, step: 1, description: 'Guided Missile Reload (s)' },
     missileAOE: { value: 2.5, type: 'number', min: 1, max: 10, step: 0.5, description: 'Guided Missile AOE Radius' },
     missileSpeed: { value: 8, type: 'number', min: 2, max: 20, step: 1, description: 'Guided Missile Speed' },
-    missileTurnSpeed: { value: 0.1, type: 'number', min: 0.01, max: 0.5, step: 0.01, description: 'Guided Missile Agility' },
+    missileTurnSpeed: { value: 8.0, type: 'number', min: 0.1, max: 20.0, step: 0.1, description: 'Guided Missile Agility' },
 
     mineDamage: { value: 80, type: 'number', min: 10, max: 1000, step: 10, description: 'Mine Damage' },
     mineMaxAmmo: { value: 20, type: 'number', min: 1, max: 200, step: 1, description: 'Mine Mag Size' },
@@ -72,12 +72,12 @@ export const MasterConfig: GameConfigSchema = {
     flamethrowerReloadTime: { value: 4.0, type: 'number', min: 1, max: 20, step: 1, description: 'Refuel Time (s)' }
   },
   Upgrades: {
-      hullRepairCost: { value: 50, type: 'number', description: 'Repair Cost' },
-      speedUpgradeCost: { value: 100, type: 'number', description: 'Engine Tune Cost' },
-      fireRateUpgradeCost: { value: 150, type: 'number', description: 'Weapon Upgrade Cost' },
-      slotUpgradeCost: { value: 300, type: 'number', description: 'New Slot Cost' },
-      turretUpgradeCost: { value: 200, type: 'number', description: 'Turret Cost' },
-      shieldUpgradeCost: { value: 250, type: 'number', description: 'Shield Cost' }
+    hullRepairCost: { value: 50, type: 'number', description: 'Repair Cost' },
+    speedUpgradeCost: { value: 100, type: 'number', description: 'Engine Tune Cost' },
+    fireRateUpgradeCost: { value: 150, type: 'number', description: 'Weapon Upgrade Cost' },
+    slotUpgradeCost: { value: 300, type: 'number', description: 'New Slot Cost' },
+    turretUpgradeCost: { value: 200, type: 'number', description: 'Turret Cost' },
+    shieldUpgradeCost: { value: 250, type: 'number', description: 'Shield Cost' }
   },
   Physics: {
     friction: { value: 0.9, type: 'number', min: 0.1, max: 1.0, step: 0.01, description: 'Movement Friction' },
@@ -103,7 +103,7 @@ export const MasterConfig: GameConfigSchema = {
   },
   Audio: {
     masterVolume: { value: 0.5, type: 'number', min: 0, max: 1, step: 0.05, description: 'Master Volume' },
-    
+
     // Per-sound base volumes
     vol_shoot_cannon: { value: 0.4, type: 'number', description: 'Cannon Shot Volume' },
     vol_shoot_laser: { value: 0.3, type: 'number', description: 'Laser Loop Volume' },
@@ -112,12 +112,12 @@ export const MasterConfig: GameConfigSchema = {
     vol_shoot_missile: { value: 0.4, type: 'number', description: 'Missile Shot Volume' },
     vol_place_mine: { value: 0.4, type: 'number', description: 'Mine Place Volume' },
     vol_shoot_flamethrower: { value: 0.5, type: 'number', description: 'Flamethrower Volume' },
-    
+
     vol_hit_cannon: { value: 0.4, type: 'number', description: 'Cannon Hit Volume' },
     vol_hit_missile: { value: 0.4, type: 'number', description: 'Missile Hit Volume' },
     vol_hit_laser: { value: 0.2, type: 'number', description: 'Laser Hit Volume' },
     vol_hit_ray: { value: 0.3, type: 'number', description: 'Ray Hit Volume' },
-    
+
     vol_explosion_large: { value: 0.8, type: 'number', description: 'Explosion Volume' },
     vol_weapon_reload: { value: 0.5, type: 'number', description: 'Reload Volume' },
     vol_hit_material: { value: 0.3, type: 'number', description: 'Material Hit Volume' },
@@ -148,14 +148,14 @@ export const MasterConfig: GameConfigSchema = {
     moonColor: { value: '#aaccff', type: 'color', description: 'Color of moonlight' },
     moonShadowMinLen: { value: 50, type: 'number', description: 'Minimum moon shadow length' },
     moonShadowMaxLen: { value: 250, type: 'number', description: 'Maximum moon shadow length' },
-    transientLights: { 
-        value: {
-            muzzle: { color: '#ffcc66', intensity: 1.2, radius: 180, ttl: 0.06 },
-            impact: { color: '#ffffff', intensity: 1.5, radius: 120, ttl: 0.1 },
-            explosion: { color: '#ff7700', intensity: 6.0, radius: 600, ttl: 0.6 }
-        }, 
-        type: 'object',
-        description: 'Settings for short-lived light sources (Muzzle flash, Impacts, Explosions)' 
+    transientLights: {
+      value: {
+        muzzle: { color: '#ffcc66', intensity: 1.2, radius: 180, ttl: 0.06 },
+        impact: { color: '#ffffff', intensity: 1.5, radius: 120, ttl: 0.1 },
+        explosion: { color: '#ff7700', intensity: 6.0, radius: 600, ttl: 0.6 }
+      },
+      type: 'object',
+      description: 'Settings for short-lived light sources (Muzzle flash, Impacts, Explosions)'
     }
   },
   TimeSystem: {
@@ -167,19 +167,19 @@ export const MasterConfig: GameConfigSchema = {
     randomMoonPhase: { value: false, type: 'boolean', description: 'Randomize starting moon phase' }
   },
   Keybindings: {
-      moveUp: { value: 'KeyW', secondary: 'ArrowUp', type: 'string', description: 'Throttle Forward' },
-      moveDown: { value: 'KeyS', secondary: 'ArrowDown', type: 'string', description: 'Reverse Gear' },
-      moveLeft: { value: 'KeyA', secondary: 'ArrowLeft', type: 'string', description: 'Steer Left' },
-      moveRight: { value: 'KeyD', secondary: 'ArrowRight', type: 'string', description: 'Steer Right' },
-      fire: { value: 'Space', type: 'string', description: 'Fire Primary Cannon' },
-      openDock: { value: 'KeyP', type: 'string', description: 'Open Engineering Dock' }
+    moveUp: { value: 'KeyW', secondary: 'ArrowUp', type: 'string', description: 'Throttle Forward' },
+    moveDown: { value: 'KeyS', secondary: 'ArrowDown', type: 'string', description: 'Reverse Gear' },
+    moveLeft: { value: 'KeyA', secondary: 'ArrowLeft', type: 'string', description: 'Steer Left' },
+    moveRight: { value: 'KeyD', secondary: 'ArrowRight', type: 'string', description: 'Steer Right' },
+    fire: { value: 'Space', type: 'string', description: 'Fire Primary Cannon' },
+    openDock: { value: 'KeyP', type: 'string', description: 'Open Engineering Dock' }
   },
   Weather: {
-    initialWeather: { 
-        value: 'rain', 
-        type: 'string', 
-        description: 'Initial weather type',
-        options: ['clear', 'cloudy', 'fog', 'rain', 'snow', 'random'] 
+    initialWeather: {
+      value: 'rain',
+      type: 'string',
+      description: 'Initial weather type',
+      options: ['clear', 'cloudy', 'fog', 'rain', 'snow', 'random']
     },
     transitionSpeed: { value: 0.05, type: 'number', min: 0.01, max: 1.0, step: 0.01, description: 'Speed of weather transitions' },
     windMinSpeed: { value: 0.5, type: 'number', min: 0, max: 10, step: 0.1, description: 'Minimum wind speed' },
@@ -196,11 +196,11 @@ export const MasterConfig: GameConfigSchema = {
  */
 export class ConfigManager {
   private static instance: ConfigManager;
-  
+
   // Flattened simplified config for direct access
   // access like ConfigManager.get('World', 'width')
-  
-  private constructor() {}
+
+  private constructor() { }
 
   public static getInstance(): ConfigManager {
     if (!ConfigManager.instance) {
@@ -213,7 +213,7 @@ export class ConfigManager {
     // @ts-ignore
     const cat = MasterConfig[category];
     if (cat && cat[key]) {
-        return cat[key].value as T;
+      return cat[key].value as T;
     }
     // @ts-ignore
     return undefined;

@@ -1,11 +1,6 @@
 import { Component } from "../Component";
-
-export enum ProjectileType {
-    CANNON = 'cannon',
-    ROCKET = 'rocket',
-    MISSILE = 'missile',
-    MINE = 'mine'
-}
+export { ProjectileType } from "../../../entities/Projectile";
+import { ProjectileType } from "../../../entities/Projectile";
 
 export class ProjectileComponent implements Component {
     public readonly type = 'projectile';
@@ -19,6 +14,7 @@ export class ProjectileComponent implements Component {
         public isArmed: boolean = true,
         public armTimer: number = 0,
         public targetId: string | null = null,
-        public turnSpeed: number = 0
-    ) {}
+        public turnSpeed: number = 0,
+        public trackingRange: number = 500
+    ) { }
 }

@@ -1,9 +1,6 @@
 import { Component } from "../Component";
-
-export enum DropType {
-    COIN = 'coin',
-    BOOSTER = 'booster'
-}
+export { DropType } from "../../../entities/Drop";
+import { DropType } from "../../../entities/Drop";
 
 export class DropComponent implements Component {
     public readonly type = 'drop';
@@ -12,5 +9,5 @@ export class DropComponent implements Component {
         public dropType: DropType = DropType.COIN,
         public value: number = 10,
         public collected: boolean = false
-    ) {}
+    ) { }
 }

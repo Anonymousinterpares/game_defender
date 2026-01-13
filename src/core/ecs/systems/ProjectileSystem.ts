@@ -10,20 +10,27 @@ import { EventBus, GameEvent } from "../../EventBus";
 import { Quadtree } from "../../../utils/Quadtree";
 import { Entity } from "../../Entity";
 import { CombatSystem } from "../../../systems/CombatSystem";
+import { ConfigManager } from "../../../config/MasterConfig";
 
 export class ProjectileSystem implements System {
     public readonly id = 'projectile_system';
 
     constructor(
-        private world: World, 
-        private heatMap: HeatMap, 
+        private world: World,
+        private heatMap: HeatMap,
         private spatialGrid: Quadtree<Entity>,
         private combatSystem: CombatSystem
-    ) {}
+    ) { }
 
     update(dt: number, entityManager: EntityManager): void {
         const entities = entityManager.query(['transform', 'physics', 'projectile']);
-        
+        const extendedLogs = ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs');
+
+        // HEARTBEAT LOG - Only if extended logs are enabled
+        if (entities.length > 0 && extendedLogs) {
+            console.log(`[ProjectileSystem] Update: Found ${entities.length} projectiles in ECS.`);
+        }
+
         for (const id of entities) {
             const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
             const physics = entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
@@ -46,8 +53,9 @@ export class ProjectileSystem implements System {
             }
 
             // 2. Guided Missile Logic
-            if (projectile.projectileType === ProjectileType.MISSILE && projectile.targetId) {
-                this.updateMissileGuidance(dt, transform, physics, projectile, entityManager);
+            if (projectile.projectileType === ProjectileType.MISSILE) {
+                if (extendedLogs) console.log(`[ProjectileSystem] Processing Missile ${id}. Target: ${projectile.targetId || 'None'}`);
+                this.updateMissileGuidance(id, dt, transform, physics, projectile, entityManager, extendedLogs);
             }
 
             // 3. World Collision (Raycasting from prev to current)
@@ -56,12 +64,12 @@ export class ProjectileSystem implements System {
             const dx = transform.x - oldX;
             const dy = transform.y - oldY;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            
+
             if (dist > 0.1) {
                 const angle = Math.atan2(dy, dx);
                 const hit = this.world.raycast(oldX, oldY, angle, dist);
-                const hitBorder = transform.x < 0 || transform.x > this.world.getWidthPixels() || 
-                                  transform.y < 0 || transform.y > this.world.getHeightPixels();
+                const hitBorder = transform.x < 0 || transform.x > this.world.getWidthPixels() ||
+                    transform.y < 0 || transform.y > this.world.getHeightPixels();
 
                 if (hit || hitBorder) {
                     const cx = hit ? hit.x : transform.x;
@@ -76,52 +84,78 @@ export class ProjectileSystem implements System {
         }
     }
 
-    private updateMissileGuidance(dt: number, transform: TransformComponent, physics: PhysicsComponent, projectile: ProjectileComponent, entityManager: EntityManager): void {
-        const targetTransform = entityManager.getComponent<TransformComponent>(projectile.targetId!, 'transform');
-        const targetHealth = entityManager.getComponent<HealthComponent>(projectile.targetId!, 'health');
-        
-        if (targetTransform && (!targetHealth || targetHealth.active)) {
-            const dx = targetTransform.x - transform.x;
-            const dy = targetTransform.y - transform.y;
-            const targetAngle = Math.atan2(dy, dx);
-            
-            // We use transform.rotation for target calc, but Invariant A says only Physics writes to it.
-            // However, missiles need to update their velocity vector. 
-            // PhysicsSystem will then update rotation because alignRotationToVelocity is true.
-            
-            const currentVelocityAngle = Math.atan2(physics.vy, physics.vx);
-            let angleDiff = targetAngle - currentVelocityAngle;
-            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-            
-            const newAngle = currentVelocityAngle + angleDiff * projectile.turnSpeed * dt;
-            const speed = Math.sqrt(physics.vx * physics.vx + physics.vy * physics.vy);
-            physics.vx = Math.cos(newAngle) * speed;
-            physics.vy = Math.sin(newAngle) * speed;
-        } else {
-            projectile.targetId = null; 
+    private updateMissileGuidance(id: string, dt: number, transform: TransformComponent, physics: PhysicsComponent, projectile: ProjectileComponent, entityManager: EntityManager, extendedLogs: boolean): void {
+        // Dynamic Target Acquisition if no target or target lost
+        if (!projectile.targetId) {
+            const nearest = this.combatSystem.findNearestTarget(transform.x, transform.y, projectile.shooterId, projectile.trackingRange);
+            if (nearest) {
+                if (extendedLogs) console.log(`[ProjectileSystem] Missile ${id} acquired new target: ${nearest.id}`);
+                projectile.targetId = nearest.id;
+            } else {
+                // Occasional log to avoid spamming
+                if (extendedLogs && Math.random() < 0.01) console.log(`[ProjectileSystem] Missile ${id} searching for target... (none found in range ${projectile.trackingRange})`);
+            }
+        }
+
+        if (projectile.targetId) {
+            const targetTransform = entityManager.getComponent<TransformComponent>(projectile.targetId, 'transform');
+            const targetHealth = entityManager.getComponent<HealthComponent>(projectile.targetId, 'health');
+
+            if (targetTransform && (!targetHealth || targetHealth.active)) {
+                const dx = targetTransform.x - transform.x;
+                const dy = targetTransform.y - transform.y;
+                const distSq = dx * dx + dy * dy;
+
+                // Range Check
+                if (distSq > projectile.trackingRange * projectile.trackingRange) {
+                    if (extendedLogs) console.log(`[ProjectileSystem] Missile ${id} lost target ${projectile.targetId} (out of range)`);
+                    projectile.targetId = null;
+                    return;
+                }
+
+                const targetAngle = Math.atan2(dy, dx);
+                const currentVelocityAngle = Math.atan2(physics.vy, physics.vx);
+
+                let angleDiff = targetAngle - currentVelocityAngle;
+                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+
+                // Clamp turn to prevent erratic behavior and apply turnSpeed
+                const maxTurn = projectile.turnSpeed * dt;
+                const turn = Math.max(-maxTurn, Math.min(maxTurn, angleDiff));
+
+                const newAngle = currentVelocityAngle + turn;
+                const speed = Math.sqrt(physics.vx * physics.vx + physics.vy * physics.vy);
+                physics.vx = Math.cos(newAngle) * speed;
+                physics.vy = Math.sin(newAngle) * speed;
+
+                if (extendedLogs) console.log(`[ProjectileSystem] Missile ${id} Turn: ${turn.toFixed(4)}, AngleDiff: ${angleDiff.toFixed(4)}, Speed: ${speed.toFixed(1)}`);
+            } else {
+                if (extendedLogs) console.log(`[ProjectileSystem] Missile ${id} lost target ${projectile.targetId} (inactive or missing components)`);
+                projectile.targetId = null;
+            }
         }
     }
 
     private checkEntityCollisions(id: string, transform: TransformComponent, physics: PhysicsComponent, projectile: ProjectileComponent, health: HealthComponent | undefined, entityManager: EntityManager): void {
         const range = physics.radius * 2;
-        const neighbors = this.spatialGrid.retrieve({ 
-            x: transform.x - range, 
-            y: transform.y - range, 
-            w: range * 2, 
-            h: range * 2 
+        const neighbors = this.spatialGrid.retrieve({
+            x: transform.x - range,
+            y: transform.y - range,
+            w: range * 2,
+            h: range * 2
         });
-        
+
         for (const other of neighbors) {
             if (other.id === id) continue;
-            
+
             // Muzzle protection: skip shooter if too close
             if (other.id === projectile.shooterId) {
                 const dx = transform.x - other.x;
                 const dy = transform.y - other.y;
                 if (dx * dx + dy * dy < 40 * 40) continue;
             }
-            
+
             const dx = transform.x - other.x;
             const dy = transform.y - other.y;
             const distSq = dx * dx + dy * dy;
@@ -138,28 +172,65 @@ export class ProjectileSystem implements System {
     private handleHit(x: number, y: number, id: string, projectile: ProjectileComponent, health: HealthComponent | undefined, hitType: 'wall' | 'entity', targetId: string | null, entityManager: EntityManager): void {
         if (projectile.aoeRadius > 0) {
             this.combatSystem.createExplosion(x, y, projectile.aoeRadius, projectile.damage, projectile.shooterId, projectile.projectileType as any);
+
+            // Still trigger procedural world hit if we hit a wall
+            if (hitType === 'wall') {
+                this.onWorldHitProcedural(x, y, projectile);
+            }
         } else {
             if (hitType === 'entity' && targetId) {
                 const targetHealth = entityManager.getComponent<HealthComponent>(targetId, 'health');
                 if (targetHealth) {
-                    targetHealth.health -= projectile.damage;
+                    let finalDamage = projectile.damage;
+
+                    // Armored Trait Logic (was calculateDamage in CombatSystem)
+                    const targetAI = entityManager.getComponent<any>(targetId, 'ai');
+                    const targetTransform = entityManager.getComponent<TransformComponent>(targetId, 'transform');
+                    if (targetAI && targetAI.dossier && targetAI.dossier.traits.includes('armored') && targetTransform) {
+                        const dx = x - targetTransform.x;
+                        const dy = y - targetTransform.y;
+                        const angleToSource = Math.atan2(dy, dx);
+
+                        let diff = angleToSource - targetTransform.rotation;
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        while (diff > Math.PI) diff -= Math.PI * 2;
+
+                        if (Math.abs(diff) < Math.PI / 4) {
+                            finalDamage *= 0.3; // 70% reduction
+                        }
+                    }
+
+                    targetHealth.health -= finalDamage;
                     targetHealth.damageFlash = 0.2;
                     if (targetHealth.health <= 0) {
                         targetHealth.health = 0;
                         targetHealth.active = false;
+                    }
+
+                    // Multiplayer Sync for RemotePlayer hits
+                    const tag = entityManager.getComponent<any>(targetId, 'tag')?.tag;
+                    if (tag === 'remote_player' && projectile.shooterId === 'local') {
+                        const mm = (window as any).MultiplayerManagerInstance; // Accessing singleton
+                        if (mm) {
+                            mm.broadcast('ph', {
+                                id: targetId,
+                                damage: finalDamage,
+                                killerId: 'local'
+                            });
+                        }
                     }
                 }
             } else {
                 this.onWorldHitProcedural(x, y, projectile);
             }
 
-            EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, { 
-                x, y, 
-                projectileType: projectile.projectileType, 
-                hitType 
+            EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, {
+                x, y,
+                projectileType: projectile.projectileType,
+                hitType
             });
         }
-        
+
         this.deactivateEntity(id, health);
     }
 
@@ -167,7 +238,7 @@ export class ProjectileSystem implements System {
         const mat = this.heatMap.getMaterialAt(hitX, hitY);
         const subSize = this.heatMap.getTileSize() / 10;
 
-        switch(projectile.projectileType) {
+        switch (projectile.projectileType) {
             case ProjectileType.CANNON:
                 if (mat === MaterialType.WOOD) {
                     this.heatMap.destroyArea(hitX, hitY, 12, true);
@@ -181,7 +252,7 @@ export class ProjectileSystem implements System {
                 this.heatMap.destroyArea(hitX, hitY, subSize * 5, true);
                 break;
         }
-        
+
         if (mat !== MaterialType.NONE) {
             EventBus.getInstance().emit(GameEvent.MATERIAL_HIT, { x: hitX, y: hitY, material: MaterialType[mat].toLowerCase() });
         }
