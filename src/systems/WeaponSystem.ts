@@ -259,11 +259,22 @@ export class WeaponSystem {
             const dmg = type === 'laser' ? ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt :
                 (ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage') / (1 + (dist / 32) ** 2)) * dt;
 
-            if ((hitEntity as any).id && (hitEntity as any).id !== this.parent.myId && !(hitEntity instanceof Enemy)) {
+            const isNpc = (hitEntity as any).tag === 'enemy' || (hitEntity as any).id?.startsWith('e_');
+            const mm = MultiplayerManager.getInstance();
+
+            if (mm.myId && mm.myId !== 'pending' && !mm.isHost) {
+                // Client always uses accumulator for everyone (including NPCs)
                 const current = this.netDamageAccumulator.get((hitEntity as any).id) || 0;
                 this.netDamageAccumulator.set((hitEntity as any).id, current + dmg);
             } else {
-                hitEntity.takeDamage(dmg);
+                // Host or Singleplayer
+                if (isNpc) {
+                    hitEntity.takeDamage(dmg);
+                } else if ((hitEntity as any).id && (hitEntity as any).id !== this.parent.myId) {
+                    // It's a remote player, use accumulator
+                    const current = this.netDamageAccumulator.get((hitEntity as any).id) || 0;
+                    this.netDamageAccumulator.set((hitEntity as any).id, current + dmg);
+                }
             }
         }
 
@@ -328,18 +339,24 @@ export class WeaponSystem {
             }
 
             if (hit) {
-                if ((e as any).id && (e as any).id !== this.parent.myId && !(e instanceof Enemy)) {
+                const isNpc = (e as any).tag === 'enemy' || (e as any).id?.startsWith('e_');
+                const mm = MultiplayerManager.getInstance();
+
+                if (mm.myId && mm.myId !== 'pending' && !mm.isHost) {
+                    // Client reports everyone
                     const current = this.netDamageAccumulator.get((e as any).id) || 0;
                     this.netDamageAccumulator.set((e as any).id, current + damage * dt);
-
-                    // 50% chance to catch fire per second
-                    if (Math.random() < 0.5 * dt) {
-                        this.netIgniteAccumulator.set((e as any).id, true);
-                    }
+                    if (Math.random() < 0.5 * dt) this.netIgniteAccumulator.set((e as any).id, true);
                 } else {
-                    e.takeDamage(damage * dt);
-                    if (Math.random() < 0.5 * dt) {
-                        e.isOnFire = true;
+                    // Host or Singleplayer
+                    if (isNpc) {
+                        e.takeDamage(damage * dt);
+                        if (Math.random() < 0.5 * dt) e.isOnFire = true;
+                    } else if ((e as any).id && (e as any).id !== this.parent.myId) {
+                        // Remote player
+                        const current = this.netDamageAccumulator.get((e as any).id) || 0;
+                        this.netDamageAccumulator.set((e as any).id, current + damage * dt);
+                        if (Math.random() < 0.5 * dt) this.netIgniteAccumulator.set((e as any).id, true);
                     }
                 }
                 (e as any).isOnFire = true;

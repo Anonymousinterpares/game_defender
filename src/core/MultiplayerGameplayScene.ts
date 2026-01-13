@@ -155,13 +155,24 @@ export class MultiplayerGameplayScene extends GameplayScene {
         const { id, damage, killerId, ignite } = data;
         const target = this.findPlayerByAnyId(id);
 
-        if (!target) return;
+        if (target) {
+            target.takeDamage(damage);
+            if (ignite) target.isOnFire = true;
 
-        target.takeDamage(damage);
-        if (ignite) target.isOnFire = true;
-
-        if (target === this.player) {
-            if (target.health <= 0) this.lastKilledBy = killerId;
+            if (target === this.player) {
+                if (target.health <= 0) this.lastKilledBy = killerId;
+            }
+        } else if (MultiplayerManager.getInstance().isHost && id.startsWith('e_')) {
+            // Apply damage to NPC on Host
+            const health = this.simulation.entityManager.getComponent<HealthComponent>(id, 'health');
+            if (health && health.active) {
+                health.health -= damage;
+                health.damageFlash = 0.2;
+                if (health.health <= 0) {
+                    health.health = 0;
+                    health.active = false;
+                }
+            }
         }
     }
 
@@ -343,8 +354,10 @@ export class MultiplayerGameplayScene extends GameplayScene {
     private sendWorldSync(): void {
         const enemyData = this.enemies.map(e => {
             const id = (e as any).id;
+            const type = (e as any).type || 'Scout';
             return {
                 id,
+                t: type,
                 x: Math.round(e.x),
                 y: Math.round(e.y),
                 r: Math.round((e.rotation || 0) * 100) / 100,
@@ -405,7 +418,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
             data.enemies.forEach((ed: any) => {
                 const em = this.simulation.entityManager;
                 if (!em.hasEntity(ed.id)) {
-                    EntityFactory.createEnemy(em, ed.x, ed.y, 'Scout', ed.id);
+                    EntityFactory.createEnemy(em, ed.x, ed.y, ed.t || 'Scout', ed.id);
                 }
                 const transform = em.getComponent<TransformComponent>(ed.id, 'transform');
                 if (transform) {

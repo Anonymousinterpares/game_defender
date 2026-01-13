@@ -17,6 +17,7 @@ import { PhysicsSystem } from './ecs/systems/PhysicsSystem';
 import { FireSystem } from './ecs/systems/FireSystem';
 import { InputSystem } from './ecs/systems/InputSystem';
 import { AISystem } from './ecs/systems/AISystem';
+import { AIComponent } from './ecs/components/AIComponent';
 import { ContactDamageSystem } from './ecs/systems/ContactDamageSystem';
 import { ProjectileSystem } from './ecs/systems/ProjectileSystem';
 import { DropSystem } from './ecs/systems/DropSystem';
@@ -67,6 +68,8 @@ export class Simulation implements WeaponParent, CombatParent {
 
             return {
                 id,
+                type: this.entityManager.getComponent<AIComponent>(id, 'ai')?.dossier?.name || 'Scout',
+                tag: 'enemy',
                 x: transform.x,
                 y: transform.y,
                 rotation: transform.rotation,
