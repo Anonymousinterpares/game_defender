@@ -3,6 +3,7 @@ import { EntityManager } from "../EntityManager";
 import { TransformComponent } from "../components/TransformComponent";
 import { TagComponent } from "../components/TagComponent";
 import { DropComponent, DropType } from "../components/DropComponent";
+import { HealthComponent } from "../components/HealthComponent";
 import { EventBus, GameEvent } from "../../EventBus";
 
 export interface DropCollector {
@@ -29,6 +30,9 @@ export class DropSystem implements System {
 
             const dropTransform = entityManager.getComponent<TransformComponent>(dropId, 'transform')!;
 
+            // Update bobbing animation
+            drop.bobTime += dt * 5;
+
             const dx = playerTransform.x - dropTransform.x;
             const dy = playerTransform.y - dropTransform.y;
             const distSq = dx * dx + dy * dy;
@@ -50,14 +54,10 @@ export class DropSystem implements System {
                     collectorId: this.collector.myId
                 });
 
-                // Deactivate/Remove entity logic will be handled by Simulation or a CleanupSystem
-                // For now, we'll mark it for removal by Simulation logic in Phase 3
-                // Actually, let's just use a HealthComponent and set active to false for consistency if it has one
-                const health = entityManager.getComponent<any>(dropId, 'health');
+                // Deactivate immediately to stop physics and rendering
+                const health = entityManager.getComponent<HealthComponent>(dropId, 'health');
                 if (health) {
                     health.active = false;
-                } else {
-                    // Fallback: Simulation will check drop.collected
                 }
             }
         }

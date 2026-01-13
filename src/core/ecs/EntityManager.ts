@@ -11,6 +11,17 @@ export class EntityManager {
         return entity;
     }
 
+    public createEntityWithId(id: EntityID): ECSEntity {
+        const entity = new ECSEntity();
+        entity.id = id;
+        this.entities.set(id, entity);
+        return entity;
+    }
+
+    public hasEntity(id: EntityID): boolean {
+        return this.entities.has(id);
+    }
+
     public removeEntity(id: EntityID): void {
         this.entities.delete(id);
         this.components.forEach(compMap => compMap.delete(id));

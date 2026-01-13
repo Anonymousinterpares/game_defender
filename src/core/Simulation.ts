@@ -3,8 +3,6 @@ import { Player } from '../entities/Player';
 import { RemotePlayer } from '../entities/RemotePlayer';
 import { Entity } from './Entity';
 import { Projectile, ProjectileType } from '../entities/Projectile';
-import { Enemy } from '../entities/Enemy';
-import { Drop, DropType } from '../entities/Drop';
 import { HeatMap, MaterialType } from './HeatMap';
 import { Quadtree } from '../utils/Quadtree';
 import { ConfigManager } from '../config/MasterConfig';
@@ -22,6 +20,7 @@ import { AISystem } from './ecs/systems/AISystem';
 import { ContactDamageSystem } from './ecs/systems/ContactDamageSystem';
 import { ProjectileSystem } from './ecs/systems/ProjectileSystem';
 import { DropSystem } from './ecs/systems/DropSystem';
+import { DropComponent, DropType } from './ecs/components/DropComponent';
 import { PlayerSegmentSystem } from './ecs/systems/PlayerSegmentSystem';
 import { RenderSystem } from './ecs/systems/RenderSystem';
 import { System } from './ecs/System';
@@ -50,11 +49,63 @@ export class Simulation implements WeaponParent, CombatParent {
     public playerEntityId: string = '';
     public spatialGrid: Quadtree<Entity>;
 
-    public entities: Entity[] = [];
-    public enemies: Enemy[] = [];
     public remotePlayers: RemotePlayer[] = [];
-    public drops: Drop[] = [];
     public projectiles: Projectile[] = [];
+
+    // Compatibility getters for systems not yet fully ECS-ified
+    public get enemies(): any[] {
+        const ids = this.entityManager.query(['tag']).filter(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'enemy');
+        // This is a bridge. ideally WeaponSystem should query ECS directly.
+        // For now, we return a minimalist object that looks like an Entity to satisfy checkHitbox/takeDamage
+        return ids.map(id => {
+            const transform = this.entityManager.getComponent<TransformComponent>(id, 'transform');
+            const physics = this.entityManager.getComponent<PhysicsComponent>(id, 'physics');
+            const health = this.entityManager.getComponent<HealthComponent>(id, 'health');
+
+            if (!transform || !physics || !health) return null;
+
+            return {
+                id,
+                x: transform.x,
+                y: transform.y,
+                rotation: transform.rotation,
+                radius: physics.radius,
+                active: health.active,
+                checkHitbox: (px: number, py: number) => {
+                    const dx = transform.x - px, dy = transform.y - py;
+                    return dx * dx + dy * dy < physics.radius * physics.radius;
+                },
+                takeDamage: (amt: number) => {
+                    health.health -= amt;
+                    health.damageFlash = 0.2;
+                    if (health.health <= 0) {
+                        health.health = 0;
+                        health.active = false;
+                    }
+                },
+                getAllBodies: () => [{ x: transform.x, y: transform.y, radius: physics.radius }]
+            };
+        }).filter(e => e !== null);
+    }
+
+    public get drops(): any[] {
+        const ids = this.entityManager.query(['tag']).filter(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'drop');
+        return ids.map(id => {
+            const transform = this.entityManager.getComponent<TransformComponent>(id, 'transform');
+            const health = this.entityManager.getComponent<HealthComponent>(id, 'health');
+            const drop = this.entityManager.getComponent<DropComponent>(id, 'drop');
+            if (!transform || !health || !drop) return null;
+            return {
+                id,
+                x: transform.x,
+                y: transform.y,
+                active: health.active,
+                dropType: drop.dropType,
+                type: drop.dropType, // Compatibility
+                value: drop.value
+            };
+        }).filter(d => d !== null);
+    }
 
     // ECS
     public entityManager: EntityManager;
@@ -123,7 +174,6 @@ export class Simulation implements WeaponParent, CombatParent {
 
         this.player = new Player(centerX, centerY, null as any);
         this.player.setEntityManager(this.entityManager);
-        this.entities.push(this.player);
 
         this.playerEntityId = EntityFactory.createPlayer(this.entityManager, centerX, centerY);
         const ecsPlayer = this.entityManager.query(['tag']).find(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'player');
@@ -238,9 +288,7 @@ export class Simulation implements WeaponParent, CombatParent {
             leaderId = seg.id;
         });
 
-        this.entities = [this.player, ...this.remotePlayers];
-        this.enemies = [];
-        this.drops = [];
+        this.remotePlayers = [];
         this.projectiles = [];
     }
 
@@ -271,40 +319,20 @@ export class Simulation implements WeaponParent, CombatParent {
         }
 
         this.player.update(dt);
-        this.enemies.forEach(e => e.update(dt, this.player));
-
-        const fireDPS = ConfigManager.getInstance().get<number>('Fire', 'dps');
-        const baseExtinguish = ConfigManager.getInstance().get<number>('Fire', 'baseExtinguishChance');
-        const catchChance = ConfigManager.getInstance().get<number>('Fire', 'catchChance');
-
-        [this.player, ...this.enemies, ...this.remotePlayers].forEach(e => {
-            e.handleFireLogic(dt, fireDPS, baseExtinguish);
-            if (e.active && !e.isOnFire && this.heatMap) {
-                const bodies = e.getAllBodies();
-                let isDangerous = false;
-                for (const b of bodies) {
-                    if (this.heatMap.checkFireArea(b.x, b.y, b.radius) ||
-                        this.heatMap.getMaxIntensityArea(b.x, b.y, b.radius) > 0.8) {
-                        isDangerous = true;
-                        break;
-                    }
-                }
-                if (isDangerous && Math.random() < catchChance * dt) {
-                    e.isOnFire = true;
-                }
-            }
-        });
-        this.drops.forEach(d => d.update(dt));
         this.remotePlayers.forEach(rp => rp.update(dt));
 
         // Cleanup Inactive Entities
-        this.enemies = this.enemies.filter(e => {
-            if (!e.active) {
-                this.combatSystem.createExplosion(e.x, e.y, 20, 0);
-                this.entityManager.removeEntity(e.id);
+        const enemyIds = this.entityManager.query(['tag', 'health']).filter(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'enemy');
+        for (const eid of enemyIds) {
+            const health = this.entityManager.getComponent<HealthComponent>(eid, 'health')!;
+            if (!health.active) {
+                const transform = this.entityManager.getComponent<TransformComponent>(eid, 'transform');
+                if (transform) {
+                    this.combatSystem.createExplosion(transform.x, transform.y, 20, 0);
+                }
+                this.entityManager.removeEntity(eid);
             }
-            return e.active;
-        });
+        }
 
         this.projectiles = this.projectiles.filter(p => {
             const health = this.entityManager.getComponent<HealthComponent>(p.id, 'health');
@@ -315,14 +343,13 @@ export class Simulation implements WeaponParent, CombatParent {
             return p.active;
         });
 
-        this.drops = this.drops.filter(d => {
-            const health = this.entityManager.getComponent<HealthComponent>(d.id, 'health');
-            if (health && !health.active) {
-                this.entityManager.removeEntity(d.id);
-                return false;
+        const dropIds = this.entityManager.query(['tag', 'health']).filter(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'drop');
+        for (const did of dropIds) {
+            const health = this.entityManager.getComponent<HealthComponent>(did, 'health')!;
+            if (!health.active) {
+                this.entityManager.removeEntity(did);
             }
-            return d.active;
-        });
+        }
 
         this.updateSpatialGrid();
         this.heatMap.update(dt);
@@ -348,11 +375,32 @@ export class Simulation implements WeaponParent, CombatParent {
 
     private updateSpatialGrid(): void {
         this.spatialGrid.clear();
+
+        // Manual insertion for legacy/player objects that might not be fully in ECS query or need specific handling
         this.spatialGrid.insert(this.player);
         this.player.segments.forEach(s => this.spatialGrid.insert(s));
 
-        this.enemies.forEach(e => this.spatialGrid.insert(e));
-        this.projectiles.forEach(p => this.spatialGrid.insert(p));
+        // Insert all active physics entities from ECS
+        const physicsEntities = this.entityManager.query(['transform', 'physics']);
+        physicsEntities.forEach(id => {
+            // Skip player (already inserted)
+            if (id === this.player.id || this.player.segments.some(s => s.id === id)) return;
+
+            const transform = this.entityManager.getComponent<TransformComponent>(id, 'transform')!;
+            const physics = this.entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
+            const health = this.entityManager.getComponent<HealthComponent>(id, 'health');
+
+            if (health && !health.active) return;
+
+            // Bridge to legacy Entity interface for Quadtree
+            this.spatialGrid.insert({
+                id,
+                x: transform.x,
+                y: transform.y,
+                radius: physics.radius
+            } as any);
+        });
+
         this.remotePlayers.forEach(rp => {
             if (rp.active) {
                 this.spatialGrid.insert(rp);
@@ -379,11 +427,7 @@ export class Simulation implements WeaponParent, CombatParent {
             const ex = this.player.x + Math.cos(angle) * dist, ey = this.player.y + Math.sin(angle) * dist;
             if (!this.world.isWall(ex, ey)) {
                 const type = EnemyRegistry.getInstance().getRandomName();
-                const id = EntityFactory.createEnemy(this.entityManager, ex, ey, type);
-                const e = new Enemy(ex, ey);
-                e.id = id;
-                e.setEntityManager(this.entityManager);
-                this.enemies.push(e);
+                EntityFactory.createEnemy(this.entityManager, ex, ey, type);
                 break;
             }
         }
@@ -392,18 +436,7 @@ export class Simulation implements WeaponParent, CombatParent {
     public spawnDrop(): void {
         const pos = this.getRandomValidPos();
         const type = Math.random() < 0.8 ? DropType.COIN : DropType.BOOSTER;
-        const id = EntityFactory.createDrop(this.entityManager, pos.x, pos.y, type);
-        const d = new Drop(pos.x, pos.y, type);
-        d.id = id;
-        d.setEntityManager(this.entityManager);
-        this.drops.push(d);
-    }
-
-    public spawnDropWithId(id: string, x: number, y: number, type: DropType): void {
-        EntityFactory.createDrop(this.entityManager, x, y, type);
-        const ecsDrops = this.entityManager.query(['tag']).filter(eid => this.entityManager.getComponent<TagComponent>(eid, 'tag')?.tag === 'drop');
-        const lastDrop = ecsDrops[ecsDrops.length - 1];
-        if (lastDrop) this.reassignEntityId(lastDrop, id);
+        EntityFactory.createDrop(this.entityManager, pos.x, pos.y, type);
     }
 
     private getRandomValidPos(): { x: number, y: number } {

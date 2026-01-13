@@ -8,6 +8,7 @@ export class DropComponent implements Component {
     constructor(
         public dropType: DropType = DropType.COIN,
         public value: number = 10,
-        public collected: boolean = false
+        public collected: boolean = false,
+        public bobTime: number = Math.random() * Math.PI * 2
     ) { }
 }

@@ -67,11 +67,11 @@ export class PhysicsSystem implements System {
             const tag = entityManager.getComponent<TagComponent>(id, 'tag');
             const health = entityManager.getComponent<HealthComponent>(id, 'health');
 
-            if (physics.isStatic || (health && !health.active)) continue;
-
-            // Store state for interpolation
+            // Store state for interpolation (Must happen even for static entities)
             transform.prevX = transform.x;
             transform.prevY = transform.y;
+
+            if (physics.isStatic || (health && !health.active)) continue;
 
             // 2. Handle Input (Consolidated from MovementSystem)
             if (input) {
@@ -276,13 +276,15 @@ export class PhysicsSystem implements System {
         let count = 0;
 
         for (const other of neighbors) {
-            // For now, let's assume we can get the tag from EntityManager.
-            // If it's a projectile, it should NOT push others and others should NOT push it (they should explode)
             const otherTag = entityManager.getComponent<TagComponent>(other.id, 'tag')?.tag;
             const myTag = entityManager.getComponent<TagComponent>(id, 'tag')?.tag;
 
             if (other.id === id) continue;
             if (otherTag === 'projectile' || myTag === 'projectile') continue;
+            if (otherTag === 'drop' || myTag === 'drop') continue;
+
+            const otherHealth = entityManager.getComponent<HealthComponent>(other.id, 'health');
+            if (otherHealth && !otherHealth.active) continue;
 
             // Check if ECS entity (prefer Transform/Physics components if available)
             // But Quadtree stores Entity instances (which map to ECS IDs if we set them up right).

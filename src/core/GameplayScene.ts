@@ -233,7 +233,6 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         this.worldRenderer.render(ctx, this.cameraX, this.cameraY);
         FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY, this.world.getWidthPixels(), this.world.getHeightPixels());
         if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY);
-        this.drops.forEach(d => d.render(ctx));
 
         // ECS Rendering
         this.simulation.render(ctx);
@@ -245,7 +244,9 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
             // We draw entities that aren't ECS-integrated yet OR those marked as 'custom'.
             const render = this.simulation.entityManager.getComponent<any>(e.id, 'render');
             if (!render || render.renderType === 'custom') {
-                e.render(ctx);
+                if (typeof (e as any).render === 'function') {
+                    (e as any).render(ctx);
+                }
             }
         });
 

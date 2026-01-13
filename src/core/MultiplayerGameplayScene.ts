@@ -214,6 +214,15 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
         // Ping loop: every 1 second
         this.pingTimer += dt;
+        if (this.isSpawned && this.player) {
+            const alpha = this.simulation.physicsSystem.alpha;
+            const px = this.player.prevX + (this.player.x - this.player.prevX) * alpha;
+            const py = this.player.prevY + (this.player.y - this.player.prevY) * alpha;
+
+            this.cameraX = px - window.innerWidth / 2;
+            this.cameraY = py - window.innerHeight / 2;
+            SoundManager.getInstance().updateListener(px, py);
+        }
         if (this.pingTimer >= 1.0) {
             this.pingTimer = 0;
             this.pingStartTime = performance.now();
@@ -317,8 +326,21 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
 
     private sendWorldSync(): void {
-        const enemyData = this.enemies.map(e => ({ id: e.id, x: Math.round(e.x), y: Math.round(e.y), r: Math.round(e.rotation * 100) / 100, h: Math.round(e.health) }));
-        const dropData = this.drops.map(d => ({ id: d.id, x: Math.round(d.x), y: Math.round(d.y), t: d.type }));
+        const enemyData = this.enemies.map(e => {
+            const id = (e as any).id;
+            return {
+                id,
+                x: Math.round(e.x),
+                y: Math.round(e.y),
+                r: Math.round((e.rotation || 0) * 100) / 100,
+                h: Math.round((e as any).health || 0)
+            };
+        });
+        const dropData = this.drops.map(d => {
+            const id = (d as any).id;
+            const type = (d as any).dropType || (d as any).type;
+            return { id, x: Math.round(d.x), y: Math.round(d.y), t: type };
+        });
         MultiplayerManager.getInstance().broadcast(NetworkMessageType.ENTITY_SPAWN, { enemies: enemyData, drops: dropData });
     }
 
@@ -366,34 +388,56 @@ export class MultiplayerGameplayScene extends GameplayScene {
     private handleEntitySpawn(data: any): void {
         if (data.enemies) {
             data.enemies.forEach((ed: any) => {
-                let enemy = this.enemies.find(e => e.id === ed.id);
-                if (!enemy) { enemy = new Enemy(ed.x, ed.y); enemy.id = ed.id; this.enemies.push(enemy); }
-                enemy.prevX = enemy.x; enemy.prevY = enemy.y; enemy.x = ed.x; enemy.y = ed.y; enemy.rotation = ed.r; enemy.health = ed.h;
+                const em = this.simulation.entityManager;
+                if (!em.hasEntity(ed.id)) {
+                    EntityFactory.createEnemy(em, ed.x, ed.y, 'Scout', ed.id);
+                }
+                const transform = em.getComponent<TransformComponent>(ed.id, 'transform');
+                if (transform) {
+                    // If moving significantly, let PhysicsSystem handle prevX update naturally.
+                    // If it's the first sync of an existing entity we just found, or jump, sync it.
+                    const distSq = (transform.x - ed.x) ** 2 + (transform.y - ed.y) ** 2;
+                    if (distSq > 10000) { // Large jump
+                        transform.prevX = ed.x;
+                        transform.prevY = ed.y;
+                    }
+                    transform.x = ed.x;
+                    transform.y = ed.y;
+                    transform.rotation = ed.r;
+                }
+                const health = em.getComponent<HealthComponent>(ed.id, 'health');
+                if (health) {
+                    health.health = ed.h;
+                }
             });
         }
         if (data.drops) {
             data.drops.forEach((dd: any) => {
-                let drop = this.drops.find(d => d.id === dd.id);
-                if (!drop) {
-                    drop = new Drop(dd.x, dd.y, dd.t);
-                    drop.id = dd.id;
-                    drop.setEntityManager(this.simulation.entityManager);
-
-                    // Create in ECS
-                    this.simulation.spawnDropWithId(dd.id, dd.x, dd.y, dd.t);
-
-                    this.drops.push(drop);
+                const em = this.simulation.entityManager;
+                if (!em.hasEntity(dd.id)) {
+                    EntityFactory.createDrop(em, dd.x, dd.y, dd.t, dd.id);
                 }
-                drop.x = dd.x; drop.y = dd.y;
+                const transform = em.getComponent<TransformComponent>(dd.id, 'transform');
+                if (transform) {
+                    // Drops are static, so always sync prev position to prevent jitter
+                    transform.prevX = dd.x;
+                    transform.prevY = dd.y;
+                    transform.x = dd.x;
+                    transform.y = dd.y;
+                }
             });
         }
     }
 
     private handleEntityDestroy(data: any): void {
-        if (data.type === 'drop') {
-            const drop = this.drops.find(d => d.id === data.id); if (drop) drop.active = false;
-        } else if (data.type === 'enemy') {
-            const enemy = this.enemies.find(e => e.id === data.id); if (enemy) enemy.active = false;
+        const em = this.simulation.entityManager;
+        if (!em.hasEntity(data.id)) return;
+
+        const health = em.getComponent<HealthComponent>(data.id, 'health');
+        if (health) {
+            health.active = false;
+        } else {
+            em.removeEntity(data.id);
         }
     }
 

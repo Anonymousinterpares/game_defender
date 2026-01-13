@@ -32,9 +32,8 @@ export class EntityFactory {
         return id;
     }
 
-    public static createEnemy(entityManager: EntityManager, x: number, y: number, type: string = 'Scout'): string {
-        const entity = entityManager.createEntity();
-        const id = entity.id;
+    public static createEnemy(entityManager: EntityManager, x: number, y: number, type: string = 'Scout', id?: string): string {
+        const entityId = id ? (entityManager.hasEntity(id) ? id : entityManager.createEntityWithId(id).id) : entityManager.createEntity().id;
 
         const registry = EnemyRegistry.getInstance();
         let dossier = registry.get(type);
@@ -55,18 +54,18 @@ export class EntityFactory {
         const isSwamer = dossier.name === 'Scout' || dossier.name === 'Horde Runner';
         const finalMass = dossier.name === 'Heavy' ? 5.0 : (isSwamer ? 0.5 : 1.0);
 
-        entityManager.addComponent(id, new TagComponent('enemy'));
-        entityManager.addComponent(id, new TransformComponent(x, y, 0));
-        entityManager.addComponent(id, new PhysicsComponent(0, 0, dossier.baseStats.radius, false, finalMass));
-        entityManager.addComponent(id, new HealthComponent(finalHp, finalHp));
-        entityManager.addComponent(id, new FireComponent());
-        entityManager.addComponent(id, new RenderComponent('enemy', dossier.visuals.color, dossier.baseStats.radius));
+        entityManager.addComponent(entityId, new TagComponent('enemy'));
+        entityManager.addComponent(entityId, new TransformComponent(x, y, 0));
+        entityManager.addComponent(entityId, new PhysicsComponent(0, 0, dossier.baseStats.radius, false, finalMass));
+        entityManager.addComponent(entityId, new HealthComponent(finalHp, finalHp));
+        entityManager.addComponent(entityId, new FireComponent());
+        entityManager.addComponent(entityId, new RenderComponent('enemy', dossier.visuals.color, dossier.baseStats.radius));
 
         const aiComp = new AIComponent(dossier.behavior, null, finalSpeed);
         aiComp.dossier = dossier;
-        entityManager.addComponent(id, aiComp);
+        entityManager.addComponent(entityId, aiComp);
 
-        return id;
+        return entityId;
     }
 
     public static createProjectile(entityManager: EntityManager, x: number, y: number, angle: number, type: ProjectileType, shooterId: string | null): string {
@@ -131,19 +130,20 @@ export class EntityFactory {
         return id;
     }
 
-    public static createDrop(entityManager: EntityManager, x: number, y: number, type: DropType): string {
-        const entity = entityManager.createEntity();
-        const id = entity.id;
+    public static createDrop(entityManager: EntityManager, x: number, y: number, type: DropType, id?: string): string {
+        const entityId = id ? (entityManager.hasEntity(id) ? id : entityManager.createEntityWithId(id).id) : entityManager.createEntity().id;
+        const fid = entityId;
 
         const radius = type === DropType.COIN ? 8 : 12;
         const value = type === DropType.COIN ? 10 : 0;
 
-        entityManager.addComponent(id, new TagComponent('drop'));
-        entityManager.addComponent(id, new TransformComponent(x, y, 0));
-        entityManager.addComponent(id, new PhysicsComponent(0, 0, radius, false, 1.0, 0, 0, 1.0, false));
-        entityManager.addComponent(id, new DropComponent(type, value));
-        entityManager.addComponent(id, new RenderComponent('drop', type === DropType.COIN ? '#ffd700' : '#3498db', radius));
+        entityManager.addComponent(entityId, new TagComponent('drop'));
+        entityManager.addComponent(entityId, new TransformComponent(x, y, 0));
+        entityManager.addComponent(entityId, new PhysicsComponent(0, 0, radius, true, 1.0, 0, 0, 1.0, false));
+        entityManager.addComponent(entityId, new DropComponent(type, value));
+        entityManager.addComponent(entityId, new HealthComponent(1, 1)); // Drops have 1 HP
+        entityManager.addComponent(entityId, new RenderComponent('drop', type === DropType.COIN ? '#ffd700' : '#3498db', radius));
 
-        return id;
+        return entityId;
     }
 }

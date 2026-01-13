@@ -50,9 +50,15 @@ export class RenderSystem implements System {
             if (render.renderType === 'custom') continue;
 
             // Interpolation
-            const ix = transform.prevX + (transform.x - transform.prevX) * alpha;
-            const iy = transform.prevY + (transform.y - transform.prevY) * alpha;
+            let ix = transform.prevX + (transform.x - transform.prevX) * alpha;
+            let iy = transform.prevY + (transform.y - transform.prevY) * alpha;
             const rotation = transform.rotation;
+
+            // Safety check for NaN or undefined (shouldn't happen with proper init, but good to have)
+            if (isNaN(ix) || isNaN(iy)) {
+                ix = transform.x;
+                iy = transform.y;
+            }
 
             // Sync visual properties from HealthComponent if available (Legacy/Compat)
             // Ideally RenderComponent should hold these, but logic updates HealthComponent currently.
@@ -123,7 +129,7 @@ export class RenderSystem implements System {
                 break;
             case 'drop':
                 const drop = entityManager.getComponent<any>(id, 'drop');
-                this.drawDrop(ctx, x, y, render.radius, drop?.dropType);
+                this.drawDrop(ctx, x, y, render.radius, drop?.dropType, drop?.bobTime);
                 break;
         }
     }
@@ -346,27 +352,52 @@ export class RenderSystem implements System {
         ctx.restore();
     }
 
-    private drawDrop(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, type: DropType = DropType.COIN): void {
-        const time = Date.now() * 0.005;
-        const hover = Math.sin(time) * 3;
+    private drawDrop(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, type: DropType = DropType.COIN, bobTime: number = 0): void {
+        const yOffset = Math.sin(bobTime) * 5;
 
         ctx.save();
-        ctx.translate(x, y + hover);
+        ctx.translate(x, y + yOffset);
 
         if (type === DropType.COIN) {
-            ctx.fillStyle = '#ffd700';
+            // Draw Gear (Coin)
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#ffd700';
+            ctx.fillStyle = '#cfaa6e'; // Brass gold
+
+            ctx.rotate(bobTime); // Spin
+
+            // Gear shape
+            const outer = radius;
+            const inner = radius * 0.6;
+            const teeth = 6;
+
             ctx.beginPath();
-            ctx.ellipse(0, 0, radius, Math.abs(radius * Math.cos(time)), 0, 0, Math.PI * 2);
+            for (let i = 0; i < teeth * 2; i++) {
+                const angle = (Math.PI * 2 * i) / (teeth * 2);
+                const r = (i % 2 === 0) ? outer : inner;
+                ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+            }
+            ctx.closePath();
             ctx.fill();
-            ctx.strokeStyle = '#b8860b';
+
+            // Hole in center
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.25, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            // Booster (Glowing Crystal / Box)
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#3498db';
+            ctx.fillStyle = '#3498db';
+
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = '#fff';
             ctx.lineWidth = 2;
             ctx.stroke();
-        } else {
-            // Booster (Box)
-            ctx.fillStyle = '#3498db';
-            ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
-            ctx.strokeStyle = '#fff';
-            ctx.strokeRect(-radius, -radius, radius * 2, radius * 2);
         }
         ctx.restore();
     }
