@@ -34,6 +34,31 @@ export class Player extends Entity {
         this.initSegments(x, y);
     }
 
+    public override setEntityManager(em: any): void {
+        super.setEntityManager(em);
+        this.segments.forEach((seg, i) => {
+            seg.setEntityManager(em);
+            const leaderId = i === 0 ? this.id : this.segments[i - 1].id;
+            this.bindSegmentToEcs(seg, leaderId);
+        });
+    }
+
+    private bindSegmentToEcs(seg: Entity, leaderId: string) {
+        if (!this._entityManager) return;
+
+        // Ensure segment is registered in ECS
+        if (!this._entityManager.hasEntity(seg.id)) {
+            this._entityManager.createEntityWithId(seg.id);
+        }
+
+        this._entityManager.addComponent(seg.id, new TransformComponent(seg.x, seg.y, seg.rotation));
+        this._entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
+        this._entityManager.addComponent(seg.id, new HealthComponent(seg.health, seg.maxHealth));
+        this._entityManager.addComponent(seg.id, new FireComponent());
+        this._entityManager.addComponent(seg.id, new RenderComponent('player_segment', '#cfaa6e', seg.radius));
+        this._entityManager.addComponent(seg.id, new SegmentComponent(leaderId, this.segmentSpacing));
+    }
+
     private initSegments(x: number, y: number) {
         this.segments = [];
         for (let i = 0; i < this.bodyLength; i++) {
@@ -49,13 +74,8 @@ export class Player extends Entity {
             this.segments.push(seg);
 
             if (this._entityManager) {
-                const leader = i === 0 ? this : this.segments[i - 1];
-                this._entityManager.addComponent(seg.id, new TransformComponent(seg.x, seg.y, seg.rotation));
-                this._entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
-                this._entityManager.addComponent(seg.id, new HealthComponent(seg.health, seg.maxHealth));
-                this._entityManager.addComponent(seg.id, new FireComponent());
-                this._entityManager.addComponent(seg.id, new RenderComponent('player_segment', '#cfaa6e', seg.radius));
-                this._entityManager.addComponent(seg.id, new SegmentComponent(leader.id, this.segmentSpacing));
+                const leaderId = i === 0 ? this.id : this.segments[i - 1].id;
+                this.bindSegmentToEcs(seg, leaderId);
             }
         }
     }

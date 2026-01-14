@@ -12,6 +12,7 @@ import { ConfigManager } from "../../config/MasterConfig";
 import { ProjectileComponent, ProjectileType } from "./components/ProjectileComponent";
 import { DropComponent, DropType } from "./components/DropComponent";
 import { EnemyRegistry } from "../../entities/enemies/EnemyRegistry";
+import { WeaponComponent } from "./components/WeaponComponent";
 
 export class EntityFactory {
     public static createPlayer(entityManager: EntityManager, x: number, y: number): string {
@@ -28,6 +29,22 @@ export class EntityFactory {
         entityManager.addComponent(id, new FireComponent());
         entityManager.addComponent(id, new RenderComponent('player', '#cfaa6e', 15));
         entityManager.addComponent(id, new InputComponent());
+
+        const weapon = new WeaponComponent();
+        const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine', 'flamethrower'];
+        weapons.forEach(w => {
+            const configKey = w === 'laser' || w === 'ray' || w === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
+            const max = config.get<number>('Weapons', w + configKey) || 0;
+            weapon.ammo.set(w, max);
+            weapon.reloading.set(w, false);
+            weapon.reloadTimers.set(w, 0);
+
+            // Ensure weapon is unlocked if it has ammo/energy capacity
+            if (max > 0) {
+                weapon.unlockedWeapons.add(w);
+            }
+        });
+        entityManager.addComponent(id, weapon);
 
         return id;
     }

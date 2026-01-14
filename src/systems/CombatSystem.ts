@@ -53,13 +53,19 @@ export class CombatSystem {
 
         for (const other of neighbors) {
             const id = other.id;
+            const rootId = this.findRootId(id);
 
-            // CORRECT EXCLUSION: Skip based on ID or the mapped playerEntityId
-            if (id === shooterId) continue;
-            if (shooterId === 'local' && id === this.parent.playerEntityId) continue;
-            if (shooterId === this.parent.myId && id === this.parent.playerEntityId) continue;
+            // ROBUST FIX: Directly compare IDs. 
+            // shooterId is now always the firing entity's actual entityId.
+            const isActualShooter = rootId === shooterId;
 
-            const tag = this.parent.entityManager.getComponent(id, 'tag')?.tag;
+            if (isActualShooter) {
+                continue;
+            }
+
+            const tagComponent = this.parent.entityManager.getComponent(id, 'tag');
+            const tag = tagComponent?.tag;
+
             if (tag !== 'enemy' && tag !== 'remote_player' && tag !== 'player') continue;
 
             const transform = this.parent.entityManager.getComponent(id, 'transform');
@@ -228,6 +234,11 @@ export class CombatSystem {
                     // REDIRECT: Find the actual root head
                     const rootId = this.findRootId(other.id);
 
+                    // EXCLUSION: Skip if it's the shooter themselves (prevent self-damage)
+                    const isActualShooter = rootId === shooterId;
+
+                    if (isActualShooter) continue;
+
                     // Don't damage the same root twice in one explosion
                     if (affectedEntities.has(rootId)) continue;
                     affectedEntities.add(rootId);
@@ -247,14 +258,17 @@ export class CombatSystem {
                             health.active = false;
                         }
 
-                        // Sync for multiplayer
+                        // Sync for multiplayer: Broadcast if this explosion was caused by our local player entity
                         const tag = this.parent.entityManager.getComponent(rootId, 'tag')?.tag;
-                        if (isMyExplosion && (tag === 'remote_player' || (tag === 'player' && this.parent.myId !== 'local'))) {
+                        const isMyExplosionOwn = this.parent.player && shooterId === this.parent.player.id;
+
+                        if (isMyExplosionOwn && (tag === 'remote_player' || tag === 'enemy')) {
+                            const mm = (window as any).MultiplayerManagerInstance;
                             if (mm) {
                                 mm.broadcast('ph', {
                                     id: rootId,
                                     damage: finalDmg,
-                                    killerId: shooterId || 'local'
+                                    killerId: this.parent.myId || 'local'
                                 });
                             }
                         }
@@ -264,7 +278,7 @@ export class CombatSystem {
         }
     }
 
-    private findRootId(id: string): string {
+    public findRootId(id: string): string {
         if (!this.parent.entityManager) return id;
         let currentId = id;
         let visited = new Set<string>();

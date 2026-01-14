@@ -13,27 +13,17 @@ import { ParticleSystem } from '../core/ParticleSystem';
 import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
 import { EventBus, GameEvent } from '../core/EventBus';
 
-export interface WeaponParent {
-    myId: string;
-    player: Player | null;
-    world: World | null;
-    heatMap: HeatMap | null;
-    enemies: Enemy[];
-    remotePlayers: any[];
-    projectiles: Projectile[];
-    weaponAmmo: Map<string, number>;
-    unlockedWeapons: Set<string>;
-    weaponReloading: Map<string, boolean>;
-    weaponReloadTimer: Map<string, number>;
-    shootCooldown: number;
-    lastShotTime: number;
-    setLastShotTime(time: number): void;
-    startReload(weapon: string): void;
-    combatSystem: CombatSystem;
-    entityManager: EntityManager; // Properly typed
-}
+import { System } from '../core/ecs/System';
+import { WeaponComponent } from '../core/ecs/components/WeaponComponent';
+import { InputComponent } from '../core/ecs/components/InputComponent';
+import { PhysicsComponent } from '../core/ecs/components/PhysicsComponent';
+import { HealthComponent } from '../core/ecs/components/HealthComponent';
+import { FireComponent } from '../core/ecs/components/FireComponent';
+import { TagComponent } from '../core/ecs/components/TagComponent';
+import { TransformComponent } from '../core/ecs/components/TransformComponent';
 
-export class WeaponSystem {
+export class WeaponSystem implements System {
+    public readonly id = 'weapon_system';
     public isFiringBeam: boolean = false;
     public isFiringFlamethrower: boolean = false;
     public beamEndPos: { x: number, y: number } = { x: 0, y: 0 };
@@ -42,103 +32,120 @@ export class WeaponSystem {
     private netIgniteAccumulator: Map<string, boolean> = new Map(); // targetId -> ignite
     private netBroadcastTimer: number = 0;
 
-    constructor(private parent: WeaponParent) { }
+    constructor(
+        private world: World,
+        private heatMap: HeatMap,
+        private combatSystem: CombatSystem
+    ) { }
 
-    public update(dt: number, inputManager: any): void {
-        const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+    public update(dt: number, entityManager: EntityManager, inputManager?: any): void {
+        const weaponEntities = entityManager.query(['weapon', 'transform']);
 
-        // Update all reload timers (moved from Scene)
-        this.parent.weaponReloadTimer.forEach((timer, w) => {
-            if (this.parent.weaponReloading.get(w)) {
-                const newTimer = timer - dt;
-                this.parent.weaponReloadTimer.set(w, newTimer);
-                if (newTimer <= 0) {
-                    this.finishReload(w);
-                }
-            }
-        });
+        for (const entityId of weaponEntities) {
+            const weaponComp = entityManager.getComponent<WeaponComponent>(entityId, 'weapon')!;
+            const transform = entityManager.getComponent<TransformComponent>(entityId, 'transform')!;
 
-        this.isFiringBeam = false;
-        this.isFiringFlamethrower = false;
-        const isReloading = this.parent.weaponReloading.get(weapon);
-        const currentAmmo = this.parent.weaponAmmo.get(weapon) || 0;
-
-        if (inputManager.isActionDown('fire') && this.parent.player && this.parent.player.active && !isReloading) {
-            if (weapon === 'cannon' || weapon === 'rocket' || weapon === 'missile' || weapon === 'mine') {
-                const now = performance.now() / 1000;
-                if (now - this.parent.lastShotTime > this.parent.shootCooldown) {
-                    if (currentAmmo > 0) {
-                        this.spawnProjectile(weapon, currentAmmo);
-                        this.parent.setLastShotTime(now);
-                    } else {
-                        this.parent.startReload(weapon);
+            // 1. Update all reload timers
+            weaponComp.reloadTimers.forEach((timer, w) => {
+                if (weaponComp.reloading.get(w)) {
+                    const newTimer = timer - dt;
+                    weaponComp.reloadTimers.set(w, newTimer);
+                    if (newTimer <= 0) {
+                        this.finishReload(weaponComp, w);
                     }
                 }
-            } else if (weapon === 'laser' || weapon === 'ray' || weapon === 'flamethrower') {
-                if (currentAmmo > 0) {
-                    if (weapon === 'flamethrower') {
-                        this.isFiringFlamethrower = true;
-                        this.handleFlamethrowerFiring(dt);
-                    } else {
-                        this.isFiringBeam = true;
-                        this.handleBeamFiring(weapon, dt);
+            });
+
+            // 2. Handle firing if it's the local player (has InputComponent)
+            const input = entityManager.getComponent<InputComponent>(entityId, 'input');
+            if (input && inputManager) {
+                const activeWeapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
+                weaponComp.activeWeapon = activeWeapon;
+
+                this.isFiringBeam = false;
+                this.isFiringFlamethrower = false;
+
+                const isReloading = weaponComp.reloading.get(activeWeapon);
+                const currentAmmo = weaponComp.ammo.get(activeWeapon) || 0;
+
+                if (inputManager.isActionDown('fire') && !isReloading) {
+                    if (['cannon', 'rocket', 'missile', 'mine'].includes(activeWeapon)) {
+                        const now = performance.now() / 1000;
+                        const shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
+                        if (now - weaponComp.lastShotTime > shootCooldown) {
+                            if (currentAmmo >= 1) {
+                                this.spawnProjectile(entityManager, entityId, transform, weaponComp, activeWeapon, currentAmmo);
+                                weaponComp.lastShotTime = now;
+                            } else {
+                                this.startReload(entityId, transform, weaponComp, activeWeapon);
+                            }
+                        }
+                    } else if (['laser', 'ray', 'flamethrower'].includes(activeWeapon)) {
+                        if (currentAmmo > 0) {
+                            if (activeWeapon === 'flamethrower') {
+                                this.isFiringFlamethrower = true;
+                                this.handleFlamethrowerFiring(entityManager, entityId, transform, dt);
+                            } else {
+                                this.isFiringBeam = true;
+                                this.handleBeamFiring(entityManager, entityId, transform, activeWeapon, dt);
+                            }
+
+                            // BROADCAST visual state
+                            const mm = MultiplayerManager.getInstance();
+                            if (Math.random() < 0.3 && mm.myId !== 'pending') {
+                                mm.broadcast(NetworkMessageType.PROJECTILE, {
+                                    type: activeWeapon,
+                                    x: transform.x,
+                                    y: transform.y,
+                                    a: transform.rotation,
+                                    sid: mm.myId
+                                });
+                            }
+
+                            const loopSfx = activeWeapon === 'laser' ? 'shoot_laser' : (activeWeapon === 'ray' ? 'shoot_ray' : 'shoot_flamethrower');
+                            EventBus.getInstance().emit(GameEvent.SOUND_LOOP_START, { soundId: loopSfx, x: transform.x, y: transform.y });
+                            EventBus.getInstance().emit(GameEvent.SOUND_LOOP_MOVE, { soundId: loopSfx, x: transform.x, y: transform.y });
+
+                            const depletion = ConfigManager.getInstance().get<number>('Weapons', activeWeapon + 'DepletionRate');
+                            const newAmmo = Math.max(0, currentAmmo - depletion * dt);
+                            weaponComp.ammo.set(activeWeapon, newAmmo);
+
+                            if (newAmmo <= 0) {
+                                this.startReload(entityId, transform, weaponComp, activeWeapon);
+                            }
+                        } else {
+                            this.startReload(entityId, transform, weaponComp, activeWeapon);
+                        }
                     }
-
-                    // BROADCAST visual state
-                    if (Math.random() < 0.3) {
-                        MultiplayerManager.getInstance().broadcast(NetworkMessageType.PROJECTILE, {
-                            type: weapon,
-                            x: this.parent.player.x,
-                            y: this.parent.player.y,
-                            a: this.parent.player.rotation,
-                            sid: this.parent.myId
-                        });
-                    }
-
-                    const loopSfx = weapon === 'laser' ? 'shoot_laser' : (weapon === 'ray' ? 'shoot_ray' : 'shoot_flamethrower');
-                    EventBus.getInstance().emit(GameEvent.SOUND_LOOP_START, { soundId: loopSfx, x: this.parent.player.x, y: this.parent.player.y });
-                    EventBus.getInstance().emit(GameEvent.SOUND_LOOP_MOVE, { soundId: loopSfx, x: this.parent.player.x, y: this.parent.player.y });
-
-                    const depletion = ConfigManager.getInstance().get<number>('Weapons', weapon + 'DepletionRate');
-                    const newAmmo = Math.max(0, currentAmmo - depletion * dt);
-                    this.parent.weaponAmmo.set(weapon, newAmmo);
-
-                    if (newAmmo <= 0) {
-                        this.parent.startReload(weapon);
-                    }
-                } else {
-                    this.parent.startReload(weapon);
                 }
             }
         }
 
+        // --- Cleanup and Network ---
         if (!this.isFiringBeam) {
             const eb = EventBus.getInstance();
-            eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'shoot_laser' });
-            eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'shoot_ray' });
-            eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'hit_laser' });
-            eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'hit_ray' });
+            ['shoot_laser', 'shoot_ray', 'hit_laser', 'hit_ray'].forEach(id => eb.emit(GameEvent.SOUND_LOOP_STOP, { soundId: id }));
         }
 
         if (!this.isFiringFlamethrower) {
             EventBus.getInstance().emit(GameEvent.SOUND_LOOP_STOP, { soundId: 'shoot_flamethrower' });
         }
 
-        // --- Network Damage Broadcast ---
         this.netBroadcastTimer += dt;
         if (this.netBroadcastTimer >= 0.1) {
-            // Combine damage and ignite for all targets that have either
             const allTargets = new Set([...this.netDamageAccumulator.keys(), ...this.netIgniteAccumulator.keys()]);
+            const mm = MultiplayerManager.getInstance();
+            const myId = mm.myId;
 
             allTargets.forEach(targetId => {
                 const dmg = this.netDamageAccumulator.get(targetId) || 0;
                 const ignite = this.netIgniteAccumulator.get(targetId) || false;
 
                 if (dmg > 0.01 || ignite) {
-                    MultiplayerManager.getInstance().broadcast(NetworkMessageType.PLAYER_HIT, {
+                    mm.broadcast(NetworkMessageType.PLAYER_HIT, {
                         id: targetId,
                         damage: dmg,
-                        killerId: this.parent.myId,
+                        killerId: myId,
                         ignite: ignite
                     });
                 }
@@ -150,8 +157,7 @@ export class WeaponSystem {
         }
     }
 
-    private spawnProjectile(weapon: string, currentAmmo: number): void {
-        const player = this.parent.player!;
+    private spawnProjectile(entityManager: EntityManager, entityId: string, transform: TransformComponent, weaponComp: WeaponComponent, weapon: string, currentAmmo: number): void {
         const weaponToType: Record<string, ProjectileType> = {
             'cannon': ProjectileType.CANNON,
             'rocket': ProjectileType.ROCKET,
@@ -159,86 +165,125 @@ export class WeaponSystem {
             'mine': ProjectileType.MINE
         };
 
+        const mm = MultiplayerManager.getInstance();
+        const myId = mm.myId;
         const pType = weaponToType[weapon] || ProjectileType.CANNON;
-        const id = EntityFactory.createProjectile(
-            this.parent.entityManager,
-            player.x + Math.cos(player.rotation) * 25,
-            player.y + Math.sin(player.rotation) * 25,
-            player.rotation,
-            pType,
-            this.parent.myId
-        );
 
-        const p = new Projectile(
-            player.x + Math.cos(player.rotation) * 25,
-            player.y + Math.sin(player.rotation) * 25,
-            player.rotation,
-            pType
+        const pId = EntityFactory.createProjectile(
+            entityManager,
+            transform.x + Math.cos(transform.rotation) * 25,
+            transform.y + Math.sin(transform.rotation) * 25,
+            transform.rotation,
+            pType,
+            entityId // <--- ROBUST FIX: Use actual entity ID as the source of truth
         );
-        p.id = id;
-        p.setEntityManager(this.parent.entityManager);
-        p.shooterId = this.parent.myId;
 
         // BROADCAST to network
-        const mm = MultiplayerManager.getInstance();
-        mm.broadcast(NetworkMessageType.PROJECTILE, {
-            x: p.x,
-            y: p.y,
-            a: p.rotation,
-            type: p.type,
-            sid: this.parent.myId
-        });
+        const mm_new = (window as any).MultiplayerManagerInstance;
+        if (mm_new && myId !== 'local') {
+            mm_new.broadcast('pj', {
+                x: transform.x + Math.cos(transform.rotation) * 25,
+                y: transform.y + Math.sin(transform.rotation) * 25,
+                a: transform.rotation,
+                type: pType,
+                sid: myId // Network still needs PeerId to route to the correct RemotePlayer
+            });
+        }
 
+        // --- MISSILE TARGETING ---
         if (pType === ProjectileType.MISSILE) {
-            const target = this.parent.combatSystem.findNearestTarget(p.x, p.y, this.parent.myId);
-            p.target = target;
-
-            // Sync to ECS
-            const pComp = this.parent.entityManager.getComponent<ProjectileComponent>(id, 'projectile');
+            const target = this.combatSystem.findNearestTarget(transform.x, transform.y, entityId);
+            const pComp = entityManager.getComponent<ProjectileComponent>(pId, 'projectile');
             if (pComp) {
                 pComp.targetId = target?.id || null;
             }
         }
-        this.parent.projectiles.push(p);
-        this.parent.weaponAmmo.set(weapon, currentAmmo - 1);
+
+        weaponComp.ammo.set(weapon, currentAmmo - 1);
 
         EventBus.getInstance().emit(GameEvent.WEAPON_FIRED, {
-            x: player.x, y: player.y,
-            rotation: player.rotation,
+            x: transform.x, y: transform.y,
+            rotation: transform.rotation,
             weaponType: weapon,
-            ownerId: this.parent.myId
+            ownerId: myId
         });
 
-        if (this.parent.weaponAmmo.get(weapon)! <= 0 && weapon !== 'cannon') {
-            this.parent.startReload(weapon);
+        if (weaponComp.ammo.get(weapon)! <= 0 && weapon !== 'cannon') {
+            this.startReload(entityId, transform, weaponComp, weapon);
         }
     }
 
-    private handleBeamFiring(type: string, dt: number): void {
-        if (!this.parent.player || !this.parent.world || !this.parent.heatMap) return;
+    private startReload(entityId: string, transform: TransformComponent, weaponComp: WeaponComponent, weapon: string): void {
+        if (weaponComp.reloading.get(weapon)) return;
 
-        const player = this.parent.player;
+        const reloadTime = ConfigManager.getInstance().get<number>('Weapons', weapon + 'ReloadTime');
+        const configKey = ['laser', 'ray', 'flamethrower'].includes(weapon) ? 'MaxEnergy' : 'MaxAmmo';
+        const maxAmmo = ConfigManager.getInstance().get<number>('Weapons', weapon + configKey);
+
+        if (reloadTime <= 0) {
+            weaponComp.ammo.set(weapon, maxAmmo);
+            return;
+        }
+
+        weaponComp.reloading.set(weapon, true);
+        weaponComp.reloadTimers.set(weapon, reloadTime);
+
+        const mm = MultiplayerManager.getInstance();
+        EventBus.getInstance().emit(GameEvent.WEAPON_RELOAD, {
+            x: transform.x,
+            y: transform.y,
+            ownerId: mm.myId
+        });
+    }
+
+    private handleBeamFiring(entityManager: EntityManager, entityId: string, transform: TransformComponent, type: string, dt: number): void {
         const maxDist = type === 'laser' ? 800 : 500;
-        const wallHit = this.parent.world.raycast(player.x, player.y, player.rotation, maxDist);
+        const wallHit = this.world.raycast(transform.x, transform.y, transform.rotation, maxDist);
 
         let dist = 0;
-        let hitEntity: Entity | null = null;
+        let hitEntity: any | null = null;
         let hitSomething = !!wallHit;
-        let finalX = wallHit ? wallHit.x : player.x + Math.cos(player.rotation) * maxDist;
-        let finalY = wallHit ? wallHit.y : player.y + Math.sin(player.rotation) * maxDist;
+        let finalX = wallHit ? wallHit.x : transform.x + Math.cos(transform.rotation) * maxDist;
+        let finalY = wallHit ? wallHit.y : transform.y + Math.sin(transform.rotation) * maxDist;
 
-        const actualMaxDist = wallHit ? Math.sqrt((wallHit.x - player.x) ** 2 + (wallHit.y - player.y) ** 2) : maxDist;
+        const actualMaxDist = wallHit ? Math.sqrt((wallHit.x - transform.x) ** 2 + (wallHit.y - transform.y) ** 2) : maxDist;
 
-        // Unified Entity check (Enemies and Remote Players) using checkHitbox
-        const targets: Entity[] = [...this.parent.enemies, ...this.parent.remotePlayers];
+        // Query enemies and potential remote players for hitboxes
+        const targetIds = entityManager.query(['transform', 'physics']).filter(id => {
+            const tag = entityManager.getComponent<TagComponent>(id, 'tag')?.tag;
+            return tag === 'enemy' || tag === 'remote_player' || tag === 'remote_segment';
+        });
+
         const step = 8;
         for (let d = 0; d < actualMaxDist; d += step) {
-            const tx = player.x + Math.cos(player.rotation) * d;
-            const ty = player.y + Math.sin(player.rotation) * d;
+            const tx = transform.x + Math.cos(transform.rotation) * d;
+            const ty = transform.y + Math.sin(transform.rotation) * d;
 
-            for (const e of targets) {
-                if (e.active && e.checkHitbox(tx, ty)) {
-                    hitEntity = e;
+            for (const id of targetIds) {
+                const eTransform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
+                const ePhysics = entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
+
+                // Barrier Fix: Only hit active entities
+                const h = entityManager.getComponent<HealthComponent>(id, 'health');
+                if (h && !h.active) continue;
+
+                // Self-hit protection: shooter's own pieces should not block beams
+                const rootId = (window as any).SimulationInstance?.combatSystem.findRootId(id) || id;
+                if (rootId === (window as any).SimulationInstance?.player?.id) continue;
+
+                const dx = eTransform.x - tx, dy = eTransform.y - ty;
+                if (dx * dx + dy * dy < ePhysics.radius * ePhysics.radius) {
+                    hitEntity = {
+                        id,
+                        takeDamage: (dmg: number) => {
+                            const health = entityManager.getComponent<HealthComponent>(id, 'health');
+                            if (health) {
+                                health.health -= dmg;
+                                health.damageFlash = 0.2;
+                                if (health.health <= 0) { health.health = 0; health.active = false; }
+                            }
+                        }
+                    };
                     dist = d;
                     finalX = tx; finalY = ty;
                     break;
@@ -259,21 +304,26 @@ export class WeaponSystem {
             const dmg = type === 'laser' ? ConfigManager.getInstance().get<number>('Weapons', 'laserDPS') * dt :
                 (ConfigManager.getInstance().get<number>('Weapons', 'rayBaseDamage') / (1 + (dist / 32) ** 2)) * dt;
 
-            const isNpc = (hitEntity as any).tag === 'enemy' || (hitEntity as any).id?.startsWith('e_');
+            // RESOLVE ROOT ID: Ensure damage is applied to the head if we hit a segment
+            const rootId = (window as any).SimulationInstance?.combatSystem.findRootId(hitEntity.id) || hitEntity.id;
+            const isNpc = rootId.startsWith('e_');
             const mm = MultiplayerManager.getInstance();
+            const myId = mm.myId;
 
-            if (mm.myId && mm.myId !== 'pending' && !mm.isHost) {
-                // Client always uses accumulator for everyone (including NPCs)
-                const current = this.netDamageAccumulator.get((hitEntity as any).id) || 0;
-                this.netDamageAccumulator.set((hitEntity as any).id, current + dmg);
+            if (myId && myId !== 'pending' && !mm.isHost) {
+                const current = this.netDamageAccumulator.get(rootId) || 0;
+                this.netDamageAccumulator.set(rootId, current + dmg);
             } else {
-                // Host or Singleplayer
                 if (isNpc) {
-                    hitEntity.takeDamage(dmg);
-                } else if ((hitEntity as any).id && (hitEntity as any).id !== this.parent.myId) {
-                    // It's a remote player, use accumulator
-                    const current = this.netDamageAccumulator.get((hitEntity as any).id) || 0;
-                    this.netDamageAccumulator.set((hitEntity as any).id, current + dmg);
+                    const h = entityManager.getComponent<HealthComponent>(rootId, 'health');
+                    if (h) {
+                        h.health -= dmg;
+                        h.damageFlash = 0.2;
+                        if (h.health <= 0) { h.health = 0; h.active = false; }
+                    }
+                } else if (rootId !== myId) {
+                    const current = this.netDamageAccumulator.get(rootId) || 0;
+                    this.netDamageAccumulator.set(rootId, current + dmg);
                 }
             }
         }
@@ -287,9 +337,9 @@ export class WeaponSystem {
 
             if (!hitEntity) {
                 const heatAmount = type === 'laser' ? 0.4 : 0.6;
-                this.parent.heatMap.addHeat(this.beamEndPos.x, this.beamEndPos.y, heatAmount * dt * 5, 12);
+                this.heatMap.addHeat(this.beamEndPos.x, this.beamEndPos.y, heatAmount * dt * 5, 12);
 
-                if (this.parent.heatMap.getIntensityAt(this.beamEndPos.x, this.beamEndPos.y) > 0.8 && Math.random() < 0.3) {
+                if (this.heatMap.getIntensityAt(this.beamEndPos.x, this.beamEndPos.y) > 0.8 && Math.random() < 0.3) {
                     EventBus.getInstance().emit(GameEvent.PROJECTILE_HIT, {
                         x: this.beamEndPos.x, y: this.beamEndPos.y,
                         projectileType: type,
@@ -302,117 +352,120 @@ export class WeaponSystem {
         }
     }
 
-    private handleFlamethrowerFiring(dt: number): void {
-        if (!this.parent.player || !this.parent.world || !this.parent.heatMap) return;
-
-        const player = this.parent.player;
+    private handleFlamethrowerFiring(entityManager: EntityManager, entityId: string, transform: TransformComponent, dt: number): void {
         const rangeTiles = ConfigManager.getInstance().get<number>('Weapons', 'flamethrowerRange');
         const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
         const range = rangeTiles * tileSize;
         const damage = ConfigManager.getInstance().get<number>('Weapons', 'flamethrowerDamage');
         const coneAngle = Math.PI / 4;
 
-        const targets: Entity[] = [...this.parent.enemies, ...this.parent.remotePlayers];
+        const targetIds = entityManager.query(['transform', 'physics']).filter(id => {
+            const tag = entityManager.getComponent<TagComponent>(id, 'tag')?.tag;
+            return tag === 'enemy' || tag === 'remote_player' || tag === 'remote_segment';
+        });
 
-        // Improved Flamethrower detection: check multiple points in the cone against entity hitboxes
-        targets.forEach(e => {
-            if (!e.active) return;
-            const bodies = e.getAllBodies();
-            let hit = false;
+        const mm = MultiplayerManager.getInstance();
+        const myId = mm.myId;
 
-            for (const b of bodies) {
-                const dx = b.x - player.x;
-                const dy = b.y - player.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
+        targetIds.forEach(id => {
+            const eTransform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
+            const ePhysics = entityManager.getComponent<PhysicsComponent>(id, 'physics')!;
 
-                if (dist < range) {
-                    const angleToTarget = Math.atan2(dy, dx);
-                    let diff = angleToTarget - player.rotation;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    while (diff > Math.PI) diff -= Math.PI * 2;
+            const dx = eTransform.x - transform.x;
+            const dy = eTransform.y - transform.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
 
-                    if (Math.abs(diff) < coneAngle / 2) {
-                        hit = true;
-                        break;
+            if (dist < range) {
+                const angleToTarget = Math.atan2(dy, dx);
+                let diff = angleToTarget - transform.rotation;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+
+                if (Math.abs(diff) < coneAngle / 2) {
+                    // Barrier Fix: Only hit active entities
+                    const h = entityManager.getComponent<HealthComponent>(id, 'health');
+                    if (h && !h.active) return;
+
+                    const rootId = (window as any).SimulationInstance?.combatSystem.findRootId(id) || id;
+                    if (rootId === (window as any).SimulationInstance?.player?.id) return;
+
+                    const isNpc = rootId.startsWith('e_');
+
+                    if (myId && myId !== 'pending' && !mm.isHost) {
+                        const current = this.netDamageAccumulator.get(rootId) || 0;
+                        this.netDamageAccumulator.set(rootId, current + damage * dt);
+                        if (Math.random() < 0.5 * dt) this.netIgniteAccumulator.set(rootId, true);
+                    } else {
+                        if (isNpc) {
+                            const h = entityManager.getComponent<HealthComponent>(rootId, 'health');
+                            if (h) {
+                                h.health -= damage * dt;
+                                if (Math.random() < 0.5 * dt) {
+                                    const f = entityManager.getComponent<FireComponent>(rootId, 'fire');
+                                    if (f) f.isOnFire = true;
+                                }
+                            }
+                        } else if (rootId !== myId) {
+                            const current = this.netDamageAccumulator.get(rootId) || 0;
+                            this.netDamageAccumulator.set(rootId, current + damage * dt);
+                            if (Math.random() < 0.5 * dt) this.netIgniteAccumulator.set(rootId, true);
+                        }
                     }
                 }
-            }
-
-            if (hit) {
-                const isNpc = (e as any).tag === 'enemy' || (e as any).id?.startsWith('e_');
-                const mm = MultiplayerManager.getInstance();
-
-                if (mm.myId && mm.myId !== 'pending' && !mm.isHost) {
-                    // Client reports everyone
-                    const current = this.netDamageAccumulator.get((e as any).id) || 0;
-                    this.netDamageAccumulator.set((e as any).id, current + damage * dt);
-                    if (Math.random() < 0.5 * dt) this.netIgniteAccumulator.set((e as any).id, true);
-                } else {
-                    // Host or Singleplayer
-                    if (isNpc) {
-                        e.takeDamage(damage * dt);
-                        if (Math.random() < 0.5 * dt) e.isOnFire = true;
-                    } else if ((e as any).id && (e as any).id !== this.parent.myId) {
-                        // Remote player
-                        const current = this.netDamageAccumulator.get((e as any).id) || 0;
-                        this.netDamageAccumulator.set((e as any).id, current + damage * dt);
-                        if (Math.random() < 0.5 * dt) this.netIgniteAccumulator.set((e as any).id, true);
-                    }
-                }
-                (e as any).isOnFire = true;
             }
         });
 
-        const steps = 10;
         let finalRange = range;
-
+        const steps = 10;
         for (let i = 1; i <= steps; i++) {
             const dist = (i / steps) * range;
-            const tx = player.x + Math.cos(player.rotation) * dist;
-            const ty = player.y + Math.sin(player.rotation) * dist;
+            const tx = transform.x + Math.cos(transform.rotation) * dist;
+            const ty = transform.y + Math.sin(transform.rotation) * dist;
 
-            if (this.parent.world.isWall(tx, ty)) {
+            if (this.world.isWall(tx, ty)) {
                 finalRange = dist;
-                const mat = this.parent.heatMap.getMaterialAt(tx, ty);
+                const mat = this.heatMap.getMaterialAt(tx, ty);
                 for (let j = 0; j < 3; j++) {
                     const jx = tx + (Math.random() - 0.5) * 10;
                     const jy = ty + (Math.random() - 0.5) * 10;
                     if (mat === MaterialType.WOOD) {
-                        this.parent.heatMap.forceIgniteArea(jx, jy, 12);
+                        this.heatMap.forceIgniteArea(jx, jy, 12);
                     }
-                    this.parent.heatMap.addHeat(jx, jy, 1.2 * dt * 10, 15);
+                    this.heatMap.addHeat(jx, jy, 1.2 * dt * 10, 15);
                 }
                 break;
             }
         }
 
-        (this as any).flameHitDist = finalRange;
+        const physics = entityManager.getComponent<PhysicsComponent>(entityId, 'physics');
+        const vx = physics ? physics.vx : 0;
+        const vy = physics ? physics.vy : 0;
 
         const flameCount = 3;
         for (let i = 0; i < flameCount; i++) {
             const angleOffset = (Math.random() - 0.5) * coneAngle;
-            const pAngle = player.rotation + angleOffset;
+            const pAngle = transform.rotation + angleOffset;
             const speed = (finalRange / 0.5) * (0.8 + Math.random() * 0.4);
-            const vx = Math.cos(pAngle) * speed + player.vx * 0.5;
-            const vy = Math.sin(pAngle) * speed + player.vy * 0.5;
+            const pvx = Math.cos(pAngle) * speed + vx * 0.5;
+            const pvy = Math.sin(pAngle) * speed + vy * 0.5;
 
             const idx = ParticleSystem.getInstance().spawnParticle(
-                player.x + Math.cos(player.rotation) * 15,
-                player.y + Math.sin(player.rotation) * 15,
+                transform.x + Math.cos(transform.rotation) * 15,
+                transform.y + Math.sin(transform.rotation) * 15,
                 Math.random() < 0.3 ? '#ffcc00' : '#ff4400',
-                vx, vy,
+                pvx, pvy,
                 0.4 + Math.random() * 0.2
             );
             ParticleSystem.getInstance().setFlame(idx, true);
         }
     }
 
-    private finishReload(weapon: string): void {
-        this.parent.weaponReloading.set(weapon, false);
-        this.parent.weaponReloadTimer.set(weapon, 0);
+    private finishReload(weaponComp: WeaponComponent, weapon: string): void {
+        weaponComp.reloading.set(weapon, false);
+        weaponComp.reloadTimers.set(weapon, 0);
 
-        const configKey = weapon === 'laser' || weapon === 'ray' || weapon === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
-        const max = ConfigManager.getInstance().get<number>('Weapons', weapon + configKey);
-        this.parent.weaponAmmo.set(weapon, max);
+        const configKey = ['laser', 'ray', 'flamethrower'].includes(weapon) ? 'MaxEnergy' : 'MaxAmmo';
+        const max = ConfigManager.getInstance().get<number>('Weapons', weapon + configKey) || 0;
+        weaponComp.ammo.set(weapon, max);
     }
 }

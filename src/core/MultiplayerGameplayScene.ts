@@ -461,6 +461,21 @@ export class MultiplayerGameplayScene extends GameplayScene {
         const em = this.simulation.entityManager;
         if (!em.hasEntity(data.id)) return;
 
+        // If it's a remote player, clean up fully to prevent "invisible barriers"
+        const rp = this.remotePlayersMap.get(data.id);
+        if (rp) {
+            // Remove segments from ECS
+            rp.segments.forEach(seg => {
+                if (em.hasEntity(seg.id)) em.removeEntity(seg.id);
+            });
+            // Remove head from ECS
+            em.removeEntity(data.id);
+            // Remove from local tracking
+            this.remotePlayersMap.delete(data.id);
+            this.simulation.remotePlayers = this.simulation.remotePlayers.filter(p => p.id !== data.id);
+            return;
+        }
+
         const health = em.getComponent<HealthComponent>(data.id, 'health');
         if (health) {
             health.active = false;

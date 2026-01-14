@@ -38,6 +38,12 @@ export class ProjectileSystem implements System {
             const projectile = entityManager.getComponent<ProjectileComponent>(id, 'projectile')!;
             const health = entityManager.getComponent<HealthComponent>(id, 'health');
 
+            // 0. Skip inactive
+            if (health && !health.active) {
+                entityManager.removeEntity(id);
+                continue;
+            }
+
             // 1. Lifetime Management
             projectile.lifeTime -= dt;
             if (projectile.lifeTime <= 0) {
@@ -150,11 +156,17 @@ export class ProjectileSystem implements System {
         for (const other of neighbors) {
             if (other.id === id) continue;
 
-            // Muzzle protection: skip shooter if too close
-            if (other.id === projectile.shooterId) {
+            const targetRootId = this.findRootId(entityManager, other.id);
+            const sim = (window as any).SimulationInstance;
+
+            // ROBUST FIX: Directly compare IDs. Muzzle protection only for the ACTUAL shooter.
+            const isActualShooter = targetRootId === projectile.shooterId;
+
+            // Muzzle protection: skip shooter (head or segments) if too close
+            if (isActualShooter) {
                 const dx = transform.x - other.x;
                 const dy = transform.y - other.y;
-                if (dx * dx + dy * dy < 40 * 40) continue;
+                if (dx * dx + dy * dy < 50 * 50) continue;
             }
 
             const dx = transform.x - other.x;
@@ -164,6 +176,7 @@ export class ProjectileSystem implements System {
 
             if (distSq < radSum * radSum) {
                 if (projectile.projectileType === ProjectileType.MINE && !projectile.isArmed) continue;
+                console.log(`[ProjectileSystem] HIT: id=${id}, target=${other.id}, root=${targetRootId}, shooter=${projectile.shooterId}`);
                 this.handleHit(transform.x, transform.y, id, projectile, physics, health, 'entity', other.id, entityManager);
                 break;
             }
@@ -213,15 +226,20 @@ export class ProjectileSystem implements System {
                         targetHealth.active = false;
                     }
 
-                    // Multiplayer Sync for RemotePlayer hits
+                    // Multiplayer Sync for hits (broadcast if shot by us)
                     const tag = entityManager.getComponent<any>(rootId, 'tag')?.tag;
-                    if (tag === 'remote_player' && projectile.shooterId === 'local') {
+                    const sim = (window as any).SimulationInstance;
+
+                    // IF we shot it (shooterId matches our local player entity id)
+                    const isMyProjectile = sim && projectile.shooterId === sim.player?.id;
+
+                    if (isMyProjectile && (tag === 'remote_player' || tag === 'enemy')) {
                         const mm = (window as any).MultiplayerManagerInstance;
                         if (mm) {
                             mm.broadcast('ph', {
                                 id: rootId,
                                 damage: finalDamage,
-                                killerId: 'local'
+                                killerId: sim.myId || 'local' // Network still uses PeerId for killer tracking
                             });
                         }
                     }

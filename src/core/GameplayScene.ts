@@ -25,6 +25,7 @@ import { Simulation, SimulationRole } from './Simulation';
 import { WorldRenderer } from './renderers/WorldRenderer';
 import { WeatherTimePlugin } from './plugins/WeatherTimePlugin';
 import { ChaosPlugin } from './plugins/ChaosPlugin';
+import { WeaponComponent } from './ecs/components/WeaponComponent';
 
 export class GameplayScene implements Scene, HUDParent, LightingParent {
     public simulation: Simulation;
@@ -50,10 +51,15 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     public set coinsCollected(val: number) { this.simulation.coinsCollected = val; }
     public get myId() { return this.simulation.myId; }
 
-    public get weaponAmmo() { return this.simulation.weaponAmmo; }
-    public get unlockedWeapons() { return this.simulation.unlockedWeapons; }
-    public get weaponReloading() { return this.simulation.weaponReloading; }
-    public get weaponReloadTimer() { return this.simulation.weaponReloadTimer; }
+    public get weaponComponent() {
+        if (!this.simulation.playerEntityId) return null;
+        return this.simulation.entityManager.getComponent<WeaponComponent>(this.simulation.playerEntityId, 'weapon');
+    }
+
+    public get weaponAmmo() { return this.weaponComponent?.ammo || new Map<string, number>(); }
+    public get unlockedWeapons() { return this.weaponComponent?.unlockedWeapons || new Set<string>(); }
+    public get weaponReloading() { return this.weaponComponent?.reloading || new Map<string, boolean>(); }
+    public get weaponReloadTimer() { return this.weaponComponent?.reloadTimers || new Map<string, number>(); }
 
     private isDevMode: boolean = false;
     private lightUpdateCounter: number = 0;
@@ -84,7 +90,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     }
 
     public refreshHUD(): void {
-        this.simulation.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
+        // Updated to ECS, cooldown handled by WeaponSystem/Config directly
     }
 
     async onEnter(): Promise<void> {
@@ -138,7 +144,9 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
 
         for (const [key, weaponName] of Object.entries(this.weaponSlots)) {
             if (this.inputManager.isKeyJustPressed(key)) {
-                if (this.simulation.unlockedWeapons.has(weaponName)) {
+                const unlocked = this.unlockedWeapons.has(weaponName);
+                console.log(`[WeaponSwitch] Key: ${key}, Weapon: ${weaponName}, Unlocked: ${unlocked}`);
+                if (unlocked) {
                     ConfigManager.getInstance().set('Player', 'activeWeapon', weaponName);
                     SoundManager.getInstance().playSound('ui_click');
                 }
@@ -297,7 +305,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
             const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine', 'flamethrower'];
             if (num >= 1 && num <= 7) {
                 const wName = weapons[num - 1];
-                this.simulation.unlockedWeapons.add(wName);
+                this.weaponComponent?.unlockedWeapons.add(wName);
                 ConfigManager.getInstance().set('Player', 'activeWeapon', wName);
                 return true;
             }

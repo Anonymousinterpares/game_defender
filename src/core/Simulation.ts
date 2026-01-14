@@ -6,7 +6,7 @@ import { Projectile, ProjectileType } from '../entities/Projectile';
 import { HeatMap, MaterialType } from './HeatMap';
 import { Quadtree } from '../utils/Quadtree';
 import { ConfigManager } from '../config/MasterConfig';
-import { WeaponSystem, WeaponParent } from '../systems/WeaponSystem';
+import { WeaponSystem } from '../systems/WeaponSystem';
 import { CombatSystem, CombatParent } from '../systems/CombatSystem';
 import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
 import { ParticleSystem } from './ParticleSystem';
@@ -44,7 +44,7 @@ export enum SimulationRole {
     CLIENT
 }
 
-export class Simulation implements WeaponParent, CombatParent {
+export class Simulation implements CombatParent {
     public world: World;
     public heatMap: HeatMap;
     public player: Player;
@@ -131,13 +131,6 @@ export class Simulation implements WeaponParent, CombatParent {
     public combatSystem: CombatSystem;
 
     public coinsCollected: number = 0;
-    public lastShotTime: number = 0;
-    public shootCooldown: number = 0.2;
-
-    public weaponAmmo: Map<string, number> = new Map();
-    public unlockedWeapons: Set<string> = new Set(['cannon']);
-    public weaponReloading: Map<string, boolean> = new Map();
-    public weaponReloadTimer: Map<string, number> = new Map();
 
     private nextDropSpawn: number = 5;
     private nextEnemySpawn: number = 3;
@@ -148,19 +141,19 @@ export class Simulation implements WeaponParent, CombatParent {
         this.world = new World(seed);
         this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
 
-        this.world.setHeatMap(this.heatMap);
-
-        this.weaponSystem = new WeaponSystem(this);
-        this.combatSystem = new CombatSystem(this);
-
         // ECS Init
         this.entityManager = new EntityManager();
+        this.world.setHeatMap(this.heatMap);
+
         this.spatialGrid = new Quadtree<Entity>({
             x: 0,
             y: 0,
             w: this.world.getWidthPixels(),
             h: this.world.getHeightPixels()
         });
+
+        this.combatSystem = new CombatSystem(this);
+        this.weaponSystem = new WeaponSystem(this.world, this.heatMap, this.combatSystem);
 
         this.physicsSystem = new PhysicsSystem(this.world, this.spatialGrid);
         this.fireSystem = new FireSystem();
@@ -205,23 +198,8 @@ export class Simulation implements WeaponParent, CombatParent {
             leaderId = seg.id;
         });
 
-        this.initWeapons();
-        this.shootCooldown = ConfigManager.getInstance().get<number>('Player', 'shootCooldown');
         this.coinsCollected = ConfigManager.getInstance().get<number>('Debug', 'startingCoins') || 0;
-    }
-
-    private initWeapons(): void {
-        const weapons = ['cannon', 'rocket', 'missile', 'laser', 'ray', 'mine', 'flamethrower'];
-        const alwaysOn = ConfigManager.getInstance().get<boolean>('Debug', 'devModeAlwaysOn');
-
-        weapons.forEach(w => {
-            const configKey = w === 'laser' || w === 'ray' || w === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
-            const max = ConfigManager.getInstance().get<number>('Weapons', w + configKey);
-            this.weaponAmmo.set(w, max);
-            this.weaponReloading.set(w, false);
-            this.weaponReloadTimer.set(w, 0);
-            if (alwaysOn) this.unlockedWeapons.add(w);
-        });
+        (window as any).SimulationInstance = this;
     }
 
     public get myId(): string {
@@ -242,7 +220,7 @@ export class Simulation implements WeaponParent, CombatParent {
     }
 
     public reassignEntityId(oldId: string, newId: string): void {
-        const comps = ['transform', 'physics', 'health', 'fire', 'render', 'tag', 'input', 'ai'];
+        const comps = ['transform', 'physics', 'health', 'fire', 'render', 'tag', 'input', 'ai', 'weapon'];
         comps.forEach(type => {
             const c = this.entityManager.getComponent(oldId, type);
             if (c) {
@@ -251,6 +229,15 @@ export class Simulation implements WeaponParent, CombatParent {
             }
         });
         this.entityManager.removeEntity(oldId);
+
+        // Update any SegmentComponents pointing to this leader
+        const allSegments = this.entityManager.query(['segment']);
+        allSegments.forEach(segId => {
+            const segment = this.entityManager.getComponent<SegmentComponent>(segId, 'segment');
+            if (segment && segment.leaderId === oldId) {
+                segment.leaderId = newId;
+            }
+        });
     }
 
     public reset(seed?: number): void {
@@ -312,7 +299,7 @@ export class Simulation implements WeaponParent, CombatParent {
 
         if (inputManager) {
             this.inputSystem.update(dt, this.entityManager, inputManager);
-            this.weaponSystem.update(dt, inputManager);
+            this.weaponSystem.update(dt, this.entityManager, inputManager);
         }
 
         if (this.role !== SimulationRole.CLIENT) {
@@ -463,17 +450,4 @@ export class Simulation implements WeaponParent, CombatParent {
         return { x: 100, y: 100 };
     }
 
-    public setLastShotTime(time: number): void { this.lastShotTime = time; }
-    public startReload(weapon: string): void {
-        if (this.weaponReloading.get(weapon)) return;
-        const reloadTime = ConfigManager.getInstance().get<number>('Weapons', weapon + 'ReloadTime');
-        const configKey = weapon === 'laser' || weapon === 'ray' || weapon === 'flamethrower' ? 'MaxEnergy' : 'MaxAmmo';
-        if (reloadTime <= 0) {
-            this.weaponAmmo.set(weapon, ConfigManager.getInstance().get<number>('Weapons', weapon + configKey));
-            return;
-        }
-        this.weaponReloading.set(weapon, true);
-        this.weaponReloadTimer.set(weapon, reloadTime);
-        EventBus.getInstance().emit(GameEvent.WEAPON_RELOAD, { x: this.player.x, y: this.player.y, ownerId: this.myId });
-    }
 }
