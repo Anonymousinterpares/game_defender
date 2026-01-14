@@ -9,7 +9,7 @@ import { HeatMap, MaterialType } from "../../HeatMap";
 import { EventBus, GameEvent } from "../../EventBus";
 import { Quadtree } from "../../../utils/Quadtree";
 import { Entity } from "../../Entity";
-import { CombatSystem } from "../../../systems/CombatSystem";
+import { CombatSystem } from "./CombatSystem";
 import { ConfigManager } from "../../../config/MasterConfig";
 import { SegmentComponent } from "../components/SegmentComponent";
 

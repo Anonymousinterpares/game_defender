@@ -1,14 +1,14 @@
-import { MaterialType, HeatMap } from '../core/HeatMap';
-import { Enemy } from '../entities/Enemy';
-import { RemotePlayer } from '../entities/RemotePlayer';
-import { Player } from '../entities/Player';
-import { Projectile, ProjectileType } from '../entities/Projectile';
-import { World } from '../core/World';
-import { ConfigManager } from '../config/MasterConfig';
-import { Drop, DropType } from '../entities/Drop';
-import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
-import { EventBus, GameEvent } from '../core/EventBus';
-import { SegmentComponent } from '../core/ecs/components/SegmentComponent';
+import { MaterialType, HeatMap } from '../../HeatMap';
+import { Enemy } from '../../../entities/Enemy';
+import { RemotePlayer } from '../../../entities/RemotePlayer';
+import { Player } from '../../../entities/Player';
+import { Projectile, ProjectileType } from '../../../entities/Projectile';
+import { World } from '../../World';
+import { ConfigManager } from '../../../config/MasterConfig';
+import { Drop, DropType } from '../../../entities/Drop';
+import { MultiplayerManager, NetworkMessageType } from '../../MultiplayerManager';
+import { EventBus, GameEvent } from '../../EventBus';
+import { SegmentComponent } from '../components/SegmentComponent';
 
 export interface CombatParent {
     enemies: Enemy[];

@@ -1,26 +1,26 @@
-import { ConfigManager } from '../config/MasterConfig';
-import { EntityFactory } from '../core/ecs/EntityFactory';
-import { EntityManager } from '../core/ecs/EntityManager';
-import { Player } from '../entities/Player';
-import { Projectile, ProjectileType } from '../entities/Projectile';
-import { ProjectileComponent } from '../core/ecs/components/ProjectileComponent';
-import { Enemy } from '../entities/Enemy';
+import { ConfigManager } from '../../../config/MasterConfig';
+import { EntityFactory } from '../EntityFactory';
+import { EntityManager } from '../EntityManager';
+import { Player } from '../../../entities/Player';
+import { Projectile, ProjectileType } from '../../../entities/Projectile';
+import { ProjectileComponent } from '../components/ProjectileComponent';
+import { Enemy } from '../../../entities/Enemy';
 import { CombatSystem } from './CombatSystem';
-import { Entity } from '../core/Entity';
-import { World } from '../core/World';
-import { HeatMap, MaterialType } from '../core/HeatMap';
-import { ParticleSystem } from '../core/ParticleSystem';
-import { MultiplayerManager, NetworkMessageType } from '../core/MultiplayerManager';
-import { EventBus, GameEvent } from '../core/EventBus';
+import { Entity } from '../../Entity';
+import { World } from '../../World';
+import { HeatMap, MaterialType } from '../../HeatMap';
+import { ParticleSystem } from '../../ParticleSystem';
+import { MultiplayerManager, NetworkMessageType } from '../../MultiplayerManager';
+import { EventBus, GameEvent } from '../../EventBus';
 
-import { System } from '../core/ecs/System';
-import { WeaponComponent } from '../core/ecs/components/WeaponComponent';
-import { InputComponent } from '../core/ecs/components/InputComponent';
-import { PhysicsComponent } from '../core/ecs/components/PhysicsComponent';
-import { HealthComponent } from '../core/ecs/components/HealthComponent';
-import { FireComponent } from '../core/ecs/components/FireComponent';
-import { TagComponent } from '../core/ecs/components/TagComponent';
-import { TransformComponent } from '../core/ecs/components/TransformComponent';
+import { System } from '../System';
+import { WeaponComponent } from '../components/WeaponComponent';
+import { InputComponent } from '../components/InputComponent';
+import { PhysicsComponent } from '../components/PhysicsComponent';
+import { HealthComponent } from '../components/HealthComponent';
+import { FireComponent } from '../components/FireComponent';
+import { TagComponent } from '../components/TagComponent';
+import { TransformComponent } from '../components/TransformComponent';
 
 export class WeaponSystem implements System {
     public readonly id = 'weapon_system';
