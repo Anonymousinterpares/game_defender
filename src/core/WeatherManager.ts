@@ -30,17 +30,17 @@ export interface WeatherState {
 
 export class WeatherManager {
     private static instance: WeatherManager;
-    
+
     private currentType: WeatherType = WeatherType.CLEAR;
     private currentCloudType: CloudType = CloudType.NONE;
-    
+
     // State values for interpolation
     private fogDensity: number = 0;
     private rainIntensity: number = 0;
     private snowIntensity: number = 0;
     private snowAccumulation: number = 0;
     private cloudCoverage: number = 0; // 0 to 1
-    
+
     private windAngle: number = 0;
     private windSpeed: number = 1.0;
     private windTimer: number = 0;
@@ -77,7 +77,7 @@ export class WeatherManager {
         }
 
         this.setWeather(type, true);
-        
+
         // Initial ground wind
         this.windAngle = Math.random() * Math.PI * 2;
         this.windSpeed = 1.0 + Math.random() * 2.0;
@@ -91,7 +91,7 @@ export class WeatherManager {
 
     public setWeather(type: WeatherType, immediate: boolean = false): void {
         this.currentType = type;
-        
+
         switch (type) {
             case WeatherType.CLEAR:
                 this.targetFogDensity = 0;
@@ -119,15 +119,15 @@ export class WeatherManager {
                 break;
             case WeatherType.RAIN:
                 this.targetFogDensity = 0.2 + Math.random() * 0.3;
-                this.targetCloudCoverage = 1.0; 
+                this.targetCloudCoverage = 1.0;
                 this.targetRainIntensity = 0.5 + Math.random() * 0.5;
                 this.targetSnowIntensity = 0;
-                this.targetWindSpeed = 2.0 + Math.random() * 3.0; 
+                this.targetWindSpeed = 2.0 + Math.random() * 3.0;
                 this.targetCloudWindSpeed = 3.0 + Math.random() * 5.0;
                 break;
             case WeatherType.SNOW:
                 this.targetFogDensity = 0.3 + Math.random() * 0.4;
-                this.targetCloudCoverage = 1.0; 
+                this.targetCloudCoverage = 1.0;
                 this.targetRainIntensity = 0;
                 this.targetSnowIntensity = 0.5 + Math.random() * 0.5;
                 this.targetWindSpeed = 1.0 + Math.random() * 2.0;
@@ -136,10 +136,10 @@ export class WeatherManager {
         }
 
         if (immediate) {
-            this.fogDensity = this.targetFogDensity;
-            this.cloudCoverage = this.targetCloudCoverage;
-            this.rainIntensity = this.targetRainIntensity;
-            this.snowIntensity = this.targetSnowIntensity;
+            this.fogDensity = Math.min(1.0, this.targetFogDensity);
+            this.cloudCoverage = Math.min(1.0, this.targetCloudCoverage);
+            this.rainIntensity = Math.min(1.0, this.targetRainIntensity);
+            this.snowIntensity = Math.min(1.0, this.targetSnowIntensity);
             this.windSpeed = this.targetWindSpeed;
             this.cloudWindSpeed = this.targetCloudWindSpeed;
         }
@@ -147,17 +147,17 @@ export class WeatherManager {
 
     public update(dt: number): void {
         const lerpSpeed = ConfigManager.getInstance().get<number>('Weather', 'transitionSpeed') * dt;
-        
+
         // Fog/Wind Interdependency: High wind scatters fog
         if (this.windSpeed > 1.0 && this.targetFogDensity > 0) {
             this.targetFogDensity = Math.max(0, this.targetFogDensity - (this.windSpeed - 1.0) * dt * 0.1);
         }
 
-        // Interpolate densities
-        this.fogDensity += (this.targetFogDensity - this.fogDensity) * lerpSpeed;
-        this.cloudCoverage += (this.targetCloudCoverage - this.cloudCoverage) * lerpSpeed;
-        this.rainIntensity += (this.targetRainIntensity - this.rainIntensity) * lerpSpeed;
-        this.snowIntensity += (this.targetSnowIntensity - this.snowIntensity) * lerpSpeed;
+        // Interpolate densities with strict clamping
+        this.fogDensity = Math.max(0, Math.min(1.0, this.fogDensity + (this.targetFogDensity - this.fogDensity) * lerpSpeed));
+        this.cloudCoverage = Math.max(0, Math.min(1.0, this.cloudCoverage + (this.targetCloudCoverage - this.cloudCoverage) * lerpSpeed));
+        this.rainIntensity = Math.max(0, Math.min(1.0, this.rainIntensity + (this.targetRainIntensity - this.rainIntensity) * lerpSpeed));
+        this.snowIntensity = Math.max(0, Math.min(1.0, this.snowIntensity + (this.targetSnowIntensity - this.snowIntensity) * lerpSpeed));
 
         // Snow accumulation
         if (this.snowIntensity > 0.1) {
@@ -176,19 +176,35 @@ export class WeatherManager {
 
         // Update Wind
         this.windTimer += dt;
-        
+
         // Base wind speed transitions
         this.windSpeed += (this.targetWindSpeed - this.windSpeed) * lerpSpeed;
         this.cloudWindSpeed += (this.targetCloudWindSpeed - this.cloudWindSpeed) * lerpSpeed;
-        
+
         this.windAngle += Math.sin(this.windTimer * 0.1) * 0.01; // Slow direction drift
-        
+
         // Clouds move in a very stable direction. 
         // We lerp the angle extremely slowly.
         let angleDiff = this.targetCloudWindAngle - this.cloudWindAngle;
         while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
         while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
         this.cloudWindAngle += angleDiff * (lerpSpeed * 0.05);
+
+        // Periodically fluctuate targets to prevent "stuck" high intensities
+        // This ensures weather feels dynamic and doesn't just crawl to a max and stay there.
+        if (Math.random() < 0.0005 * dt) {
+            if (this.currentType === WeatherType.RAIN) {
+                this.targetRainIntensity = 0.4 + Math.random() * 0.5; // Fluctuate between 0.4 and 0.9
+            } else if (this.currentType === WeatherType.SNOW) {
+                this.targetSnowIntensity = 0.4 + Math.random() * 0.5;
+            }
+
+            if (this.currentType === WeatherType.FOG) {
+                this.targetFogDensity = 0.5 + Math.random() * 0.4; // Max 0.9 for visibility safety
+            }
+
+            this.targetWindSpeed = 1.0 + Math.random() * 4.0;
+        }
 
         // Very rarely change the cloud wind target direction
         if (Math.random() < 0.0001 * dt) {
@@ -220,7 +236,7 @@ export class WeatherManager {
             cloudWindSpeed: this.cloudWindSpeed
         };
     }
-    
+
     public getSnowAccumulation(): number {
         return this.snowAccumulation;
     }

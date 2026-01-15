@@ -37,7 +37,7 @@ export class LightingRenderer {
     private tempCanvas: HTMLCanvasElement;
     private tempCtx: CanvasRenderingContext2D;
     private resolutionScale: number = 0.5; // Render lights at 50% resolution
-    
+
     private shadowChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, version: string }> = new Map();
     private rebuildQueue: string[] = [];
     private MAX_REBUILDS_PER_FRAME: number = 2;
@@ -80,7 +80,7 @@ export class LightingRenderer {
         this.cloudCtx = this.cloudCanvas.getContext('2d')!;
         this.fogCanvas = document.createElement('canvas');
         this.fogCtx = this.fogCanvas.getContext('2d')!;
-        
+
         this.generateCloudShapes();
         this.generateFogNoise();
         this.initParticles();
@@ -108,19 +108,19 @@ export class LightingRenderer {
         this.fogNoise.width = size;
         this.fogNoise.height = size;
         const ctx = this.fogNoise.getContext('2d')!;
-        
+
         // Wraparound Procedural Noise
         for (let i = 0; i < 30; i++) {
             const x = Math.random() * size;
             const y = Math.random() * size;
             const r = 60 + Math.random() * 100;
-            
+
             // Draw circle with 9-tap wraparound to ensure seamless tiling
             const offsets = [
-                {ox: 0, oy: 0}, {ox: size, oy: 0}, {ox: -size, oy: 0},
-                {ox: 0, oy: size}, {ox: 0, oy: -size},
-                {ox: size, oy: size}, {ox: size, oy: -size},
-                {ox: -size, oy: size}, {ox: -size, oy: -size}
+                { ox: 0, oy: 0 }, { ox: size, oy: 0 }, { ox: -size, oy: 0 },
+                { ox: 0, oy: size }, { ox: 0, oy: -size },
+                { ox: size, oy: size }, { ox: size, oy: -size },
+                { ox: -size, oy: size }, { ox: -size, oy: -size }
             ];
 
             offsets.forEach(off => {
@@ -128,8 +128,8 @@ export class LightingRenderer {
                 grad.addColorStop(0, 'rgba(255,255,255,0.4)');
                 grad.addColorStop(1, 'rgba(255,255,255,0)');
                 ctx.fillStyle = grad;
-                ctx.beginPath(); 
-                ctx.arc(x + off.ox, y + off.oy, r, 0, Math.PI * 2); 
+                ctx.beginPath();
+                ctx.arc(x + off.ox, y + off.oy, r, 0, Math.PI * 2);
                 ctx.fill();
             });
         }
@@ -140,20 +140,20 @@ export class LightingRenderer {
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d')!;
-            
+
             // Multiple blobs for organic feel
             const blobs = 3 + Math.floor(Math.random() * 5);
             for (let j = 0; j < blobs; j++) {
                 const x = 256 + (Math.random() - 0.5) * 180;
                 const y = 256 + (Math.random() - 0.5) * 180;
                 const r = 100 + Math.random() * 100;
-                
+
                 const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
                 const opacity = 0.6 + Math.random() * 0.4;
                 grad.addColorStop(0, `rgba(0,0,0,${opacity})`);
                 grad.addColorStop(0.5, `rgba(0,0,0,${opacity * 0.5})`);
                 grad.addColorStop(1, 'rgba(0,0,0,0)');
-                
+
                 ctx.fillStyle = grad;
                 ctx.beginPath();
                 ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -182,7 +182,7 @@ export class LightingRenderer {
     private drawWorldSilhouette(targetCtx: CanvasRenderingContext2D, color: string | null, meshVersion: number, w: number, h: number): void {
         const tctx = this.tempCtx;
         tctx.clearRect(0, 0, w, h);
-        
+
         const startGX = Math.floor(this.parent.cameraX / this.chunkSize);
         const startGY = Math.floor(this.parent.cameraY / this.chunkSize);
         const endGX = Math.floor((this.parent.cameraX + w) / this.chunkSize);
@@ -213,7 +213,7 @@ export class LightingRenderer {
             tctx.fillRect(0, 0, w, h);
             tctx.globalCompositeOperation = 'source-over';
         }
-        
+
         targetCtx.drawImage(this.tempCanvas, 0, 0);
     }
 
@@ -222,7 +222,7 @@ export class LightingRenderer {
         ctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
         const worldX = gx * this.chunkSize;
         const worldY = gy * this.chunkSize;
-        
+
         if (this.parent.worldRenderer) {
             this.parent.worldRenderer.renderAsSilhouette(ctx, worldX, worldY, '#ffffff');
         }
@@ -236,20 +236,20 @@ export class LightingRenderer {
         const fullH = ctx.canvas.height;
         const w = Math.floor(fullW * this.resolutionScale);
         const h = Math.floor(fullH * this.resolutionScale);
-        
+
         const worldMeshVersion = this.parent.world.getMeshVersion();
         const lightsCount = LightManager.getInstance().getLights().length;
-        
+
         const weather = WeatherManager.getInstance().getWeatherState();
         const isWeatherActive = weather.precipitationIntensity > 0.05 || weather.fogDensity > 0.05 || weather.cloudType !== CloudType.NONE;
 
         const { sun, moon, baseAmbient, isDaylight, totalSeconds } = WorldClock.getInstance().getTimeState();
-        
+
         // Skip entirely if static AND no active weather AND time hasn't changed much
-        const camMoved = Math.abs(this.parent.cameraX - this.lastCameraPos.x) > 0.5 || 
-                         Math.abs(this.parent.cameraY - this.lastCameraPos.y) > 0.5;
+        const camMoved = Math.abs(this.parent.cameraX - this.lastCameraPos.x) > 0.5 ||
+            Math.abs(this.parent.cameraY - this.lastCameraPos.y) > 0.5;
         const timeChanged = Math.abs(totalSeconds - ((this as any)._lastTotalSeconds || 0)) > 0.1;
-        
+
         if (!camMoved && !timeChanged && !isWeatherActive && worldMeshVersion === this.meshVersion && (this as any)._lastLightsCount === lightsCount && !this.parent.isFiringBeam && !this.parent.isFiringFlamethrower) {
             ctx.save();
             ctx.globalCompositeOperation = 'multiply';
@@ -264,7 +264,7 @@ export class LightingRenderer {
         (this as any)._lastLightsCount = lightsCount;
 
         PerfMonitor.getInstance().begin('lighting_setup');
-        
+
         if (this.lightCanvas.width !== w || this.lightCanvas.height !== h) {
             this.lightCanvas.width = w; this.lightCanvas.height = h;
             this.maskCanvas.width = w; this.maskCanvas.height = h;
@@ -280,7 +280,7 @@ export class LightingRenderer {
         lctx.scale(this.resolutionScale, this.resolutionScale);
 
         // 1. BASE FLOOR
-        lctx.globalCompositeOperation = 'source-over'; 
+        lctx.globalCompositeOperation = 'source-over';
         lctx.fillStyle = baseAmbient;
         lctx.fillRect(0, 0, fullW, fullH);
         PerfMonitor.getInstance().end('lighting_setup');
@@ -293,10 +293,10 @@ export class LightingRenderer {
 
         // 3. ENTITY AMBIENT REVEAL
         lctx.save();
-        lctx.globalCompositeOperation = 'screen'; 
+        lctx.globalCompositeOperation = 'screen';
         const silColor = isDaylight ? 'rgb(70, 65, 60)' : 'rgb(30, 35, 50)';
         this.drawWorldSilhouette(lctx, silColor, worldMeshVersion, fullW, fullH);
-        
+
         lctx.translate(-this.parent.cameraX, -this.parent.cameraY);
         const alpha = this.parent.simulation.physicsSystem.alpha;
         this.parent.simulation.renderSystem.renderSilhouettes(this.parent.simulation.entityManager, lctx, alpha, silColor);
@@ -343,21 +343,21 @@ export class LightingRenderer {
     private renderFogOverlay(ctx: CanvasRenderingContext2D, weather: any, w: number, h: number): void {
         const { sun, moon, isDaylight } = WorldClock.getInstance().getTimeState();
         const fctx = this.fogCtx;
-        
+
         fctx.clearRect(0, 0, w, h);
-        
+
         // Calculate dynamic fog color based on global light level
         // During night, fog color scales with moonlight
         const lightIntensity = isDaylight ? sun.intensity : Math.max(moon.intensity, 0.02);
         const baseFogRGB = weather.type === WeatherType.SNOW ? [210, 225, 255] : [160, 170, 190];
-        
+
         const r = Math.floor(baseFogRGB[0] * lightIntensity);
         const g = Math.floor(baseFogRGB[1] * lightIntensity);
         const b = Math.floor(baseFogRGB[2] * lightIntensity);
         const fogColor = `rgb(${r}, ${g}, ${b})`;
 
         // Update fog offset based on wind
-        const dt = 1/60; 
+        const dt = 1 / 60;
         this.fogOffset.x += weather.windDir.x * weather.windSpeed * 10 * dt;
         this.fogOffset.y += weather.windDir.y * weather.windSpeed * 10 * dt;
 
@@ -408,7 +408,7 @@ export class LightingRenderer {
 
     private renderCloudShadows(lctx: CanvasRenderingContext2D, weather: any, w: number, h: number): void {
         // Update cloud offset based on independent cloud wind
-        const dt = 1/60; 
+        const dt = 1 / 60;
         this.cloudOffset.x += weather.cloudWindDir.x * weather.cloudWindSpeed * 15 * dt;
         this.cloudOffset.y += weather.cloudWindDir.y * weather.cloudWindSpeed * 15 * dt;
 
@@ -425,9 +425,9 @@ export class LightingRenderer {
 
         // 2. If SCATTERED/BROKEN, render individual distinct cloud shadows
         // More dramatic shadows for visibility
-        lctx.globalAlpha = 0.4; 
+        lctx.globalAlpha = 0.4;
 
-        const spacing = 400; 
+        const spacing = 400;
         const startX = Math.floor((this.parent.cameraX + this.cloudOffset.x) / spacing) * spacing - (this.parent.cameraX + this.cloudOffset.x);
         const startY = Math.floor((this.parent.cameraY + this.cloudOffset.y) / spacing) * spacing - (this.parent.cameraY + this.cloudOffset.y);
 
@@ -438,16 +438,16 @@ export class LightingRenderer {
                 const worldY = oy + this.parent.cameraY + this.cloudOffset.y;
                 const gx = Math.round(worldX / spacing);
                 const gy = Math.round(worldY / spacing);
-                
+
                 // Deterministic noise based on stable grid coordinates
                 const noise = Math.abs(Math.sin(gx * 12.9898 + gy * 78.233) * 43758.5453) % 1;
-                
-                let threshold = 0.25; 
+
+                let threshold = 0.25;
                 if (weather.cloudType === CloudType.BROKEN) threshold = 0.6;
 
                 if (noise < threshold) {
                     const shapeIdx = Math.floor(noise * 100) % this.cloudShapes.length;
-                    
+
                     // Use noise to derive deterministic random properties
                     const rotation = noise * Math.PI * 2;
                     const scale = 0.8 + (noise * 10 % 1) * 0.7;
@@ -459,11 +459,11 @@ export class LightingRenderer {
 
                     lctx.save();
                     // Translate to center of shadow placement
-                    lctx.translate(ox + spacing/2 + jitterX, oy + spacing/2 + jitterY);
+                    lctx.translate(ox + spacing / 2 + jitterX, oy + spacing / 2 + jitterY);
                     lctx.rotate(rotation);
                     lctx.scale(scale, scale);
                     // Draw centered
-                    lctx.drawImage(this.cloudShapes[shapeIdx], -spacing/2, -spacing/2, spacing, spacing);
+                    lctx.drawImage(this.cloudShapes[shapeIdx], -spacing / 2, -spacing / 2, spacing, spacing);
                     lctx.restore();
                 }
             }
@@ -488,24 +488,26 @@ export class LightingRenderer {
         (this as any)._lastCamY = this.parent.cameraY;
 
         ctx.save();
-        
+
         // 1. RENDER SPLASHES (On Ground)
         this.splashes = this.splashes.filter(s => s.life > 0);
         this.splashes.forEach(s => {
             s.life -= dt * 4;
             const sx = s.x - this.parent.cameraX;
             const sy = s.y - this.parent.cameraY;
-            
-            if (s.type === 'rain') {
-                ctx.strokeStyle = `rgba(180, 200, 255, ${s.life * 0.4})`;
-                ctx.beginPath();
-                ctx.ellipse(sx, sy, (1 - s.life) * 15, (1 - s.life) * 8, 0, 0, Math.PI * 2);
-                ctx.stroke();
-            } else {
-                ctx.fillStyle = `rgba(255, 255, 255, ${s.life * 0.6})`;
-                ctx.beginPath();
-                ctx.arc(sx, sy, (1 - s.life) * 4, 0, Math.PI * 2);
-                ctx.fill();
+            if (sx < -50 || sx > w + 50 || sy < -50 || sy > h + 50) s.life = 0; // Cull off-screen splashes
+
+            if (s.life > 0) {
+                if (s.type === 'rain') {
+                    ctx.strokeStyle = `rgba(180, 200, 255, ${s.life * 0.4})`;
+                    ctx.beginPath();
+                    ctx.ellipse(sx, sy, (1 - s.life) * 15, (1 - s.life) * 8, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                } else {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${s.life * 0.6})`;
+                    ctx.beginPath();
+                    ctx.arc(sx, sy, (1 - s.life) * 4, 0, Math.PI * 2);
+                }
             }
         });
 
@@ -522,8 +524,15 @@ export class LightingRenderer {
 
                     // Apply motion + Camera Parallax (higher particles move more with camera)
                     const parallaxMult = p.z / 500;
+
+                    // Fixed downward component + wind influence
+                    // p.vy is screen-relative, so positive is down. 
+                    // We ensure it's always at least 300 units/sec down regardless of wind.
+                    const fallSpeed = 500;
+                    const finalVy = fallSpeed + Math.max(-200, p.vy); // Limit upward wind lift
+
                     p.x += (p.vx - camDx * parallaxMult) * dt;
-                    p.y += (p.vy - camDy * parallaxMult) * dt;
+                    p.y += (finalVy - camDy * parallaxMult) * dt;
                     p.z += p.vz * dt;
 
                     // Screen Wrap
@@ -534,12 +543,12 @@ export class LightingRenderer {
 
                     // Impact ground
                     if (p.z <= 0) {
-                        if (Math.random() < 0.2) { // Cap splashes for performance
-                            this.splashes.push({ 
-                                x: screenX + this.parent.cameraX, 
-                                y: screenY + this.parent.cameraY, 
-                                life: 1.0, 
-                                type: 'rain' 
+                        if (Math.random() < 0.2 && this.splashes.length < 200) { // Cap splashes for performance
+                            this.splashes.push({
+                                x: screenX + this.parent.cameraX,
+                                y: screenY + this.parent.cameraY,
+                                life: 1.0,
+                                type: 'rain'
                             });
                         }
                         p.z = 400 + Math.random() * 200;
@@ -559,8 +568,13 @@ export class LightingRenderer {
                     p.vy = weather.windDir.y * weather.windSpeed * 30;
 
                     const parallaxMult = p.z / 500;
+
+                    // Snow falls slower but still always down
+                    const snowFallSpeed = 100 + Math.random() * 50;
+                    const finalVy = snowFallSpeed + Math.max(-50, p.vy);
+
                     p.x += (p.vx - camDx * parallaxMult) * dt;
-                    p.y += (p.vy - camDy * parallaxMult) * dt;
+                    p.y += (finalVy - camDy * parallaxMult) * dt;
                     p.z += p.vz * dt;
 
                     const sx = p.x % w;
@@ -569,12 +583,12 @@ export class LightingRenderer {
                     const screenY = sy < 0 ? sy + h : sy;
 
                     if (p.z <= 0) {
-                        if (Math.random() < 0.1) {
-                            this.splashes.push({ 
-                                x: screenX + this.parent.cameraX, 
-                                y: screenY + this.parent.cameraY, 
-                                life: 1.0, 
-                                type: 'snow' 
+                        if (Math.random() < 0.1 && this.splashes.length < 200) {
+                            this.splashes.push({
+                                x: screenX + this.parent.cameraX,
+                                y: screenY + this.parent.cameraY,
+                                life: 1.0,
+                                type: 'snow'
                             });
                         }
                         p.z = 400 + Math.random() * 200;
@@ -595,14 +609,14 @@ export class LightingRenderer {
 
         sctx.clearRect(0, 0, w, h);
         mctx.clearRect(0, 0, w, h);
-        
+
         sctx.save();
         mctx.save();
-        
+
         // Match lctx scale (low-res lightmap)
         sctx.scale(this.resolutionScale, this.resolutionScale);
         mctx.scale(this.resolutionScale, this.resolutionScale);
-        
+
         // Align to World Space
         sctx.translate(-this.parent.cameraX, -this.parent.cameraY);
         mctx.translate(-this.parent.cameraX, -this.parent.cameraY);
@@ -632,7 +646,7 @@ export class LightingRenderer {
                     chunk = { canvas, ctx: canvas.getContext('2d')!, version: '' };
                     this.shadowChunks.set(key, chunk);
                 }
-                
+
                 if (chunk.version !== bakeVersion) {
                     if (rebuildsThisFrame < this.MAX_REBUILDS_PER_FRAME) {
                         this.rebuildShadowChunk(chunk, gx, gy, source);
@@ -678,12 +692,12 @@ export class LightingRenderer {
     private rebuildShadowChunk(chunk: any, gx: number, gy: number, source: any): void {
         const sctx = chunk.ctx;
         sctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
-        
+
         const worldX = gx * this.chunkSize;
         const worldY = gy * this.chunkSize;
-        const padding = 300; 
+        const padding = 300;
         const segments = this.parent.world!.getOcclusionSegments(worldX - padding, worldY - padding, this.chunkSize + padding * 2, this.chunkSize + padding * 2);
-        
+
         sctx.fillStyle = '#000000';
         const dx = source.direction.x * source.shadowLen;
         const dy = source.direction.y * source.shadowLen;
@@ -696,7 +710,7 @@ export class LightingRenderer {
             const groundB = seg.b;
             const roofA = { x: groundA.x, y: groundA.y - wallHeight };
             const roofB = { x: groundB.x, y: groundB.y - wallHeight };
-            
+
             const projA = { x: roofA.x + dx, y: roofA.y + dy };
             const projB = { x: roofB.x + dx, y: roofB.y + dy };
 
@@ -710,16 +724,16 @@ export class LightingRenderer {
         });
     }
 
-    private renderEntityShadow(ctx: CanvasRenderingContext2D, e: Entity, dir: {x: number, y: number}, len: number): void {
+    private renderEntityShadow(ctx: CanvasRenderingContext2D, e: Entity, dir: { x: number, y: number }, len: number): void {
         const ex = e.x;
         const ey = e.y;
         const r = e.radius;
         const angle = Math.atan2(dir.y, dir.x);
-        
-        const t1x = ex + Math.cos(angle - Math.PI/2) * r;
-        const t1y = ey + Math.sin(angle - Math.PI/2) * r;
-        const t2x = ex + Math.cos(angle + Math.PI/2) * r;
-        const t2y = ey + Math.sin(angle + Math.PI/2) * r;
+
+        const t1x = ex + Math.cos(angle - Math.PI / 2) * r;
+        const t1y = ey + Math.sin(angle - Math.PI / 2) * r;
+        const t2x = ex + Math.cos(angle + Math.PI / 2) * r;
+        const t2y = ey + Math.sin(angle + Math.PI / 2) * r;
         const t3x = t2x + dir.x * len;
         const t3y = t2y + dir.y * len;
         const t4x = t1x + dir.x * len;
@@ -732,7 +746,7 @@ export class LightingRenderer {
         ctx.lineTo(t4x, t4y);
         ctx.closePath();
         ctx.fill();
-        
+
         ctx.beginPath();
         ctx.arc(ex + dir.x * len, ey + dir.y * len, r, 0, Math.PI * 2);
         ctx.fill();
@@ -741,10 +755,10 @@ export class LightingRenderer {
     private renderPointLights(lctx: CanvasRenderingContext2D, ambientIntensity: number, meshVersion: number, w: number, h: number): void {
         const lights = LightManager.getInstance().getLights();
         const globalSegments = this.parent.world!.getOcclusionSegments(this.parent.cameraX, this.parent.cameraY, w, h);
-        
+
         lctx.save();
         lctx.globalCompositeOperation = 'screen';
-        
+
         let shadowLightsCount = 0;
         const MAX_SHADOW_LIGHTS = 8; // Primary bottleneck fix: don't calculate shadows for too many lights
 
@@ -759,7 +773,7 @@ export class LightingRenderer {
             if (light.castsShadows && shadowLightsCount < MAX_SHADOW_LIGHTS) {
                 shadowLightsCount++;
                 const polygon = this.lightPolygonCache.get(light.id);
-                const lastPos = (light as any)._lastShadowPos || {x: 0, y: 0};
+                const lastPos = (light as any)._lastShadowPos || { x: 0, y: 0 };
                 const hasMoved = Math.abs(light.x - lastPos.x) > 2 || Math.abs(light.y - lastPos.y) > 2;
 
                 if (meshVersion !== this.meshVersion || hasMoved) {
@@ -767,13 +781,13 @@ export class LightingRenderer {
                         this.pendingRequests.set(light.id, true);
                         const worker = this.workers[this.workerIndex];
                         this.workerIndex = (this.workerIndex + 1) % this.workers.length;
-                        
+
                         // Cache and reuse segments for this light
                         let cachedSegs = (light as any)._cachedSegments;
                         if (meshVersion !== this.meshVersion || !cachedSegs || hasMoved) {
-                            if (light.radius < 600) { 
+                            if (light.radius < 600) {
                                 cachedSegs = this.parent.world!.getOcclusionSegments(
-                                    light.x - light.radius, light.y - light.radius, 
+                                    light.x - light.radius, light.y - light.radius,
                                     light.radius * 2, light.radius * 2
                                 );
                             } else {
@@ -808,14 +822,14 @@ export class LightingRenderer {
                 // If we hit the limit, downgrade the light to a non-shadow caster 
                 // rather than not rendering it at all.
             }
-            
+
             const grad = lctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, light.radius);
             grad.addColorStop(0, light.color);
             grad.addColorStop(1, 'rgba(0,0,0,0)');
             lctx.fillStyle = grad;
             lctx.fillRect(screenX - light.radius, screenY - light.radius, light.radius * 2, light.radius * 2);
             lctx.restore();
-            
+
             // Halo logic...
             const weather = WeatherManager.getInstance().getWeatherState();
             if (weather.fogDensity > 0.1) {
@@ -866,18 +880,18 @@ export class LightingRenderer {
         const endAngle = this.parent.player.rotation + coneAngleRad / 2;
 
         const visionId = 'player_vision';
-        const lastVisionPos = (this.parent.player as any)._lastVisionPos || {x: 0, y: 0, rot: 0};
-        const hasMoved = Math.abs(this.parent.player.x - lastVisionPos.x) > 1 || 
-                        Math.abs(this.parent.player.y - lastVisionPos.y) > 1 ||
-                        Math.abs(this.parent.player.rotation - lastVisionPos.rot) > 0.05;
+        const lastVisionPos = (this.parent.player as any)._lastVisionPos || { x: 0, y: 0, rot: 0 };
+        const hasMoved = Math.abs(this.parent.player.x - lastVisionPos.x) > 1 ||
+            Math.abs(this.parent.player.y - lastVisionPos.y) > 1 ||
+            Math.abs(this.parent.player.rotation - lastVisionPos.rot) > 0.05;
 
         if (this.parent.world.getMeshVersion() !== this.meshVersion || hasMoved) {
             if (!this.pendingRequests.has(visionId)) {
                 this.pendingRequests.set(visionId, true);
                 const segments = this.parent.world!.getOcclusionSegments(
-                    this.parent.player.x - coneDist, 
-                    this.parent.player.y - coneDist, 
-                    coneDist * 2, 
+                    this.parent.player.x - coneDist,
+                    this.parent.player.y - coneDist,
+                    coneDist * 2,
                     coneDist * 2
                 );
 
@@ -924,7 +938,7 @@ export class LightingRenderer {
             lctx.save();
             lctx.globalCompositeOperation = 'screen';
             lctx.globalAlpha = weather.fogDensity * 0.25;
-            
+
             // Draw the same cone but without world occlusion clipping, 
             // and slightly larger/softer to simulate light scattering in air
             lctx.beginPath();
@@ -935,7 +949,7 @@ export class LightingRenderer {
                 lctx.lineTo(playerScreenX + Math.cos(angle) * coneDist * 0.8, playerScreenY + Math.sin(angle) * coneDist * 0.8);
             }
             lctx.closePath();
-            
+
             const scatterGrad = lctx.createRadialGradient(playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, coneDist);
             scatterGrad.addColorStop(0, revealColor);
             scatterGrad.addColorStop(1, 'rgba(0,0,0,0)');
