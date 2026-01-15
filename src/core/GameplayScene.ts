@@ -162,6 +162,11 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
             SoundManager.getInstance().updateListener(px, py);
             this.cameraX = px - window.innerWidth / 2;
             this.cameraY = py - window.innerHeight / 2;
+
+            // Update WeatherSystemECS Camera for correct World Wrapping and Repulsion
+            if (this.simulation.weatherSystemECS) {
+                this.simulation.weatherSystemECS.setCamera(this.cameraX, this.cameraY, window.innerWidth, window.innerHeight);
+            }
         }
 
         if (this.radar && this.player) this.radar.update(dt);

@@ -30,9 +30,21 @@ export class WeatherSystemECS implements System {
     private repulsionZones: RepulsionZone[] = [];
     private maxParticles: number = 1000;
 
+    private cameraX: number = 0;
+    private cameraY: number = 0;
+    private viewWidth: number = 1920;
+    private viewHeight: number = 1080;
+
     constructor() {
         this.initParticles();
         this.subscribeToEvents();
+    }
+
+    public setCamera(x: number, y: number, w: number, h: number): void {
+        this.cameraX = x;
+        this.cameraY = y;
+        this.viewWidth = w;
+        this.viewHeight = h;
     }
 
     private initParticles(): void {
@@ -52,10 +64,10 @@ export class WeatherSystemECS implements System {
             this.repulsionZones.push({
                 x: data.x,
                 y: data.y,
-                radius: data.radius * 2.5, // Repulsion reaches further than damage
-                strength: 1500, // Initial push strength
-                life: 0.3, // Duration of the repulsion force
-                maxLife: 0.3
+                radius: data.radius * 3.5,
+                strength: 2500,
+                life: 0.8,
+                maxLife: 0.8
             });
         });
     }
@@ -75,28 +87,26 @@ export class WeatherSystemECS implements System {
         const windY = weather.windDir.y * weather.windSpeed * 50;
         const isRain = weather.type === WeatherType.RAIN;
 
-        // Use a virtual viewport for screen wrapping based on player position (roughly)
-        // Since we don't have camera here easily without passing it, and systems shouldn't know about camera,
-        // we use a large world-space wrapping or just rely on the renderer to handle wrapping/parallax visuals.
-        // Actually, LightingRenderer uses % w/h for wrapping, so we just update world coordinates.
-
-        const w = 2000; // Reference width for wrapping (should ideally match renderer viewport or be large enough)
-        const h = 2000; // Reference height
+        // Bounds for wrapping (relative to camera)
+        const margin = 200;
+        const minX = this.cameraX - margin;
+        const maxX = this.cameraX + this.viewWidth + margin;
+        const minY = this.cameraY - margin;
+        const maxY = this.cameraY + this.viewHeight + margin;
 
         this.particles.forEach(p => {
             if (isRain) {
                 p.vz = -500;
-                p.vx = windX;
-                p.vy = windY;
+                p.vx = (p.vx * 0.95) + windX * 0.05;
+                p.vy = (p.vy * 0.95) + windY * 0.05;
             } else {
                 p.vz = -100 - Math.random() * 50;
                 const sway = Math.sin(Date.now() * 0.002 + p.life * 10) * 30;
-                p.vx = windX + sway;
-                p.vy = windY;
+                p.vx = (p.vx * 0.95) + (windX + sway) * 0.05;
+                p.vy = (p.vy * 0.95) + windY * 0.05;
             }
 
             const fallSpeed = isRain ? 500 : 120;
-            const finalVy = fallSpeed + Math.max(-200, p.vy);
 
             // Apply Repulsion
             this.repulsionZones.forEach(zone => {
@@ -107,24 +117,43 @@ export class WeatherSystemECS implements System {
 
                 if (distSq < radSq) {
                     const dist = Math.sqrt(distSq);
-                    const force = (1 - dist / zone.radius) * zone.strength * (zone.life / zone.maxLife);
+                    const falloff = 1 - (dist / zone.radius);
+                    const force = (falloff * falloff) * zone.strength;
                     const nx = dx / (dist || 1);
                     const ny = dy / (dist || 1);
 
-                    p.vx += nx * force;
-                    p.vy += ny * force;
+                    const lifeMult = zone.life / zone.maxLife;
+                    p.vx += nx * force * lifeMult * dt * 20;
+                    p.vy += ny * force * lifeMult * dt * 20;
                 }
             });
 
+            // CLAMP VERTICAL VELOCITY
+            let verticalShift = p.vy;
+            if (!isRain && fallSpeed + verticalShift < 30) {
+                verticalShift = 30 - fallSpeed;
+            }
+
+            // Physics Update
             p.x += p.vx * dt;
-            p.y += (finalVy + p.vy) * dt; // Vy is additive to fall speed when repelled
+            p.y += (fallSpeed + verticalShift) * dt;
             p.z += p.vz * dt;
 
-            // Reset particle if it hits ground or goes too far
+            // Reset Z
             if (p.z <= 0) {
                 p.z = 400 + Math.random() * 200;
                 p.life = Math.random();
+                // Randomize position slightly upon respawn to avoid patterns
+                p.x = minX + Math.random() * (maxX - minX);
+                p.y = minY + Math.random() * (maxY - minY);
             }
+
+            // World Wrapping (Toroidal around camera)
+            if (p.x < minX) p.x += (maxX - minX);
+            else if (p.x > maxX) p.x -= (maxX - minX);
+
+            if (p.y < minY) p.y += (maxY - minY);
+            else if (p.y > maxY) p.y -= (maxY - minY);
         });
     }
 

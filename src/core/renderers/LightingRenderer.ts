@@ -509,16 +509,18 @@ export class LightingRenderer {
                 ctx.strokeStyle = 'rgba(160, 190, 255, 0.4)';
                 ctx.lineWidth = 1;
                 particles.forEach(p => {
-                    // Apply Parallax (higher particles move more with camera)
                     const parallaxMult = p.z / 500;
 
-                    // Wrap coordinates based on viewport
-                    const sx = (p.x - camDx * parallaxMult) % w;
-                    const sy = (p.y - camDy * parallaxMult) % h;
-                    const screenX = sx < 0 ? sx + w : sx;
-                    const screenY = sy < 0 ? sy + h : sy;
+                    // Simple WORLD SPACE rendering
+                    // We just subtract camera position
+                    // Parallax shifts the visual position slightly based on Z
+                    const screenX = (p.x - this.parent.cameraX) - (camDx * parallaxMult * 10);
+                    const screenY = (p.y - this.parent.cameraY) - (camDy * parallaxMult * 10);
 
-                    // Impact ground (visual only here, logic in ECS)
+                    // Skip off-screen particles
+                    if (screenX < -50 || screenX > w + 50 || screenY < -50 || screenY > h + 50) return;
+
+                    // Impact ground visual
                     if (p.z <= 10 && Math.random() < 0.2 && this.splashes.length < 200) {
                         this.splashes.push({
                             x: screenX + this.parent.cameraX,
@@ -528,9 +530,13 @@ export class LightingRenderer {
                         });
                     }
 
+                    // Cinematic Stretching
+                    const speedSq = p.vx * p.vx + p.vy * p.vy;
+                    const speedFactor = Math.min(2.0, 1.0 + speedSq / 200000);
+
                     ctx.beginPath();
                     ctx.moveTo(screenX, screenY - p.z * 0.2);
-                    ctx.lineTo(screenX + p.vx * 0.01, (screenY - p.z * 0.2) + 10);
+                    ctx.lineTo(screenX + p.vx * 0.03 * speedFactor, (screenY - p.z * 0.2) + 15 * speedFactor);
                     ctx.stroke();
                 });
             } else if (weather.type === WeatherType.SNOW) {
@@ -538,10 +544,10 @@ export class LightingRenderer {
                 particles.forEach(p => {
                     const parallaxMult = p.z / 500;
 
-                    const sx = (p.x - camDx * parallaxMult) % w;
-                    const sy = (p.y - camDy * parallaxMult) % h;
-                    const screenX = sx < 0 ? sx + w : sx;
-                    const screenY = sy < 0 ? sy + h : sy;
+                    const screenX = (p.x - this.parent.cameraX) - (camDx * parallaxMult * 10);
+                    const screenY = (p.y - this.parent.cameraY) - (camDy * parallaxMult * 10);
+
+                    if (screenX < -50 || screenX > w + 50 || screenY < -50 || screenY > h + 50) return;
 
                     if (p.z <= 10 && Math.random() < 0.1 && this.splashes.length < 200) {
                         this.splashes.push({
