@@ -31,6 +31,11 @@ export class LightManager {
         return LightManager.instance;
     }
 
+    public reset(): void {
+        this.lights.clear();
+        this.transientCounter = 0;
+    }
+
     private subscribeToEvents(): void {
         const eb = EventBus.getInstance();
 
@@ -71,7 +76,7 @@ export class LightManager {
     public addTransientLight(type: 'muzzle' | 'impact' | 'explosion', x: number, y: number): void {
         const config = ConfigManager.getInstance().get<any>('Lighting', 'transientLights');
         const settings = config[type];
-        
+
         if (!settings) return;
 
         const id = `transient_${type}_${this.transientCounter++}`;
@@ -145,7 +150,7 @@ export class LightManager {
         }
     }
 
-    public updateFireLights(fireClusters: {x: number, y: number, intensity: number, color?: string}[]): void {
+    public updateFireLights(fireClusters: { x: number, y: number, intensity: number, color?: string }[]): void {
         this.clearType('fire');
         const defaultColor = ConfigManager.getInstance().get<string>('Lighting', 'fireLightColor') || '#ff6600';
         const baseRadius = ConfigManager.getInstance().get<number>('Lighting', 'fireLightRadius') || 250;

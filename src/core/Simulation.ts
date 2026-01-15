@@ -25,6 +25,7 @@ import { DropComponent, DropType } from './ecs/components/DropComponent';
 import { PlayerSegmentSystem } from './ecs/systems/PlayerSegmentSystem';
 import { RenderSystem } from './ecs/systems/RenderSystem';
 import { ParticleSystemECS } from './ecs/systems/ParticleSystemECS';
+import { WeatherSystemECS } from './ecs/systems/WeatherSystemECS';
 import { System } from './ecs/System';
 import { TransformComponent } from './ecs/components/TransformComponent';
 import { PhysicsComponent } from './ecs/components/PhysicsComponent';
@@ -123,6 +124,7 @@ export class Simulation implements WeaponParent, CombatParent {
     private playerSegmentSystem: PlayerSegmentSystem;
     public renderSystem: RenderSystem;
     private particleSystemECS: ParticleSystemECS;
+    public weatherSystemECS: WeatherSystemECS;
     private customSystems: System[] = [];
 
     public pluginManager: PluginManager;
@@ -172,6 +174,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.playerSegmentSystem = new PlayerSegmentSystem();
         this.renderSystem = new RenderSystem();
         this.particleSystemECS = new ParticleSystemECS(this.world);
+        this.weatherSystemECS = new WeatherSystemECS();
         this.pluginManager = new PluginManager(this);
 
         // Particle Worker Init
@@ -273,6 +276,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.dropSystem = new DropSystem(this);
         this.fireSystem = new FireSystem();
         this.particleSystemECS = new ParticleSystemECS(this.world);
+        this.weatherSystemECS = new WeatherSystemECS();
         this.renderSystem = new RenderSystem();
         this.pluginManager = new PluginManager(this);
 
@@ -327,6 +331,7 @@ export class Simulation implements WeaponParent, CombatParent {
         this.physicsSystem.update(dt, this.entityManager);
         this.playerSegmentSystem.update(dt, this.entityManager);
         this.particleSystemECS.update(dt, this.entityManager);
+        this.weatherSystemECS.update(dt, this.entityManager);
 
         this.customSystems.forEach(s => s.update(dt, this.entityManager));
 

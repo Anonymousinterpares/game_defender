@@ -2,7 +2,7 @@ import { ConfigManager } from '../config/MasterConfig';
 import { WeatherManager } from './WeatherManager';
 
 export interface LightState {
-    direction: {x: number, y: number};
+    direction: { x: number, y: number };
     color: string;
     intensity: number;
     shadowLen: number;
@@ -15,7 +15,7 @@ export interface TimeState {
     totalSeconds: number;
     sun: LightState;
     moon: LightState;
-    baseAmbient: string; 
+    baseAmbient: string;
     moonPhase: number;
     isDaylight: boolean;
 }
@@ -24,7 +24,7 @@ export class WorldClock {
     private static instance: WorldClock;
     private gameSeconds: number = 0;
     private realSecondsPerHour: number = 120;
-    
+
     private moonPhase: number = 1.0;
     private isMoonPhaseIncreasing: boolean = true;
     private currentNightShadowLen: number = 100;
@@ -46,6 +46,25 @@ export class WorldClock {
         }
 
         this.randomizeShadowLen();
+    }
+
+    public reset(): void {
+        const config = ConfigManager.getInstance();
+        const startHour = config.get<number>('TimeSystem', 'startHour') ?? 10;
+        this.realSecondsPerHour = config.get<number>('TimeSystem', 'realSecondsPerHour') || 120;
+        this.gameSeconds = startHour * 3600;
+
+        const randomPhase = config.get<boolean>('TimeSystem', 'randomMoonPhase');
+        if (randomPhase) {
+            this.moonPhase = Math.random();
+            this.isMoonPhaseIncreasing = Math.random() > 0.5;
+        } else {
+            this.moonPhase = config.get<number>('TimeSystem', 'moonPhase') ?? 1.0;
+            this.isMoonPhaseIncreasing = this.moonPhase < 0.5;
+        }
+
+        this.randomizeShadowLen();
+        this.lastWasDay = true;
     }
 
     public static getInstance(): WorldClock {
@@ -103,8 +122,8 @@ export class WorldClock {
         let sunAngle = 0;
         if (isSunUp) {
             const progress = (timeDecimal - sunRise) / (sunSet - sunRise);
-            sunAngle = progress * Math.PI + 0.3; 
-            const weatherDim = 0.7 + (ambMult * 0.3); 
+            sunAngle = progress * Math.PI + 0.3;
+            const weatherDim = 0.7 + (ambMult * 0.3);
             // Smooth curve for intensity
             sunIntensity = Math.min(1.0, Math.sin(progress * Math.PI) * 1.8) * weatherDim;
         }
@@ -118,7 +137,7 @@ export class WorldClock {
         if (isMoonUp) {
             const range = (24 - moonRise + moonSet);
             const progress = timeDecimal >= moonRise ? (timeDecimal - moonRise) / range : (24 - moonRise + timeDecimal) / range;
-            moonAngle = progress * Math.PI + 2.8; 
+            moonAngle = progress * Math.PI + 2.8;
             const weatherDim = 0.6 + (ambMult * 0.4);
             moonBaseIntensity = Math.min(1.0, Math.sin(progress * Math.PI) * 1.5) * this.moonPhase * weatherDim;
         }
@@ -137,14 +156,14 @@ export class WorldClock {
                 color: sunColor,
                 intensity: sunIntensity,
                 shadowLen: 20 + 150 * (1.0 - Math.pow(sunIntensity, 0.4)),
-                active: isSunUp && sunIntensity > 0.01 
+                active: isSunUp && sunIntensity > 0.01
             },
             moon: {
                 direction: { x: Math.cos(moonAngle), y: Math.sin(moonAngle) },
                 color: moonColor,
-                intensity: moonBaseIntensity * 0.5, 
+                intensity: moonBaseIntensity * 0.5,
                 shadowLen: this.currentNightShadowLen,
-                active: isMoonUp && moonBaseIntensity > 0.01 
+                active: isMoonUp && moonBaseIntensity > 0.01
             },
             baseAmbient: dimmedAmbient,
             moonPhase: this.moonPhase,
@@ -178,7 +197,7 @@ export class WorldClock {
 
         for (let i = 0; i < keyframes.length - 1; i++) {
             const k1 = keyframes[i];
-            const k2 = keyframes[i+1];
+            const k2 = keyframes[i + 1];
             if (t >= k1[0] && t <= k2[0]) {
                 const range = k2[0] - k1[0];
                 const progress = range === 0 ? 0 : (t - k1[0]) / range;
@@ -204,7 +223,7 @@ export class WorldClock {
 
         for (let i = 0; i < keyframes.length - 1; i++) {
             const k1 = keyframes[i];
-            const k2 = keyframes[i+1];
+            const k2 = keyframes[i + 1];
             if (t >= k1[0] && t <= k2[0]) {
                 const range = k2[0] - k1[0];
                 const progress = range === 0 ? 0 : (t - k1[0]) / range;

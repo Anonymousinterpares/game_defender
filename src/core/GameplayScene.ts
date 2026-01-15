@@ -88,6 +88,12 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     }
 
     async onEnter(): Promise<void> {
+        // Reset Singletons for clean state
+        WorldClock.getInstance().reset();
+        LightManager.getInstance().reset();
+        WeatherManager.getInstance().reset();
+        SoundManager.getInstance().reset();
+
         const seed = ConfigManager.getInstance().get<number>('Debug', 'forcedSeed');
         this.simulation = new Simulation(SimulationRole.SINGLEPLAYER, seed);
         this.simulation.pluginManager.install(new WeatherTimePlugin());

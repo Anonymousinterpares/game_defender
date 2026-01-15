@@ -67,6 +67,15 @@ export class WeatherManager {
         return WeatherManager.instance;
     }
 
+    public reset(): void {
+        this.snowAccumulation = 0;
+        this.initializeFromConfig();
+    }
+
+    public refreshConfig(): void {
+        this.initializeFromConfig();
+    }
+
     private initializeFromConfig(): void {
         const initial = ConfigManager.getInstance().get<string>('Weather', 'initialWeather');
         let type = initial as WeatherType;

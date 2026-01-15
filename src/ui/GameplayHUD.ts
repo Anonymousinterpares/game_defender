@@ -324,7 +324,7 @@ export class GameplayHUD {
             ctx.font = '16px "Share Tech Mono"';
             ctx.fillStyle = '#fff';
             ctx.fillText('EXCESSIVE HEAT DAMAGE DETECTED', ctx.canvas.width / 2, ctx.canvas.height / 2 + 20);
-            ctx.fillText('RELOAD PAGE TO RESTART', ctx.canvas.width / 2, ctx.canvas.height / 2 + 50);
+            ctx.fillText('RETURN TO MENU TO RESTART', ctx.canvas.width / 2, ctx.canvas.height / 2 + 50);
             ctx.restore();
         } else {
             ctx.restore();

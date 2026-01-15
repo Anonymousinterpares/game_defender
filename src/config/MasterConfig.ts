@@ -219,7 +219,9 @@ export class ConfigManager {
   // Flattened simplified config for direct access
   // access like ConfigManager.get('World', 'width')
 
-  private constructor() { }
+  private constructor() {
+    this.loadFromLocalStorage();
+  }
 
   public static getInstance(): ConfigManager {
     if (!ConfigManager.instance) {
@@ -243,6 +245,43 @@ export class ConfigManager {
       // @ts-ignore
       MasterConfig[category][key].value = newValue;
       console.log(`Config Updated: [${category}.${key}] = ${newValue}`);
+      this.saveToLocalStorage();
+    }
+  }
+
+  private saveToLocalStorage(): void {
+    try {
+      const flatConfig: Record<string, any> = {};
+      for (const cat in MasterConfig) {
+        flatConfig[cat] = {};
+        for (const key in MasterConfig[cat]) {
+          flatConfig[cat][key] = MasterConfig[cat][key].value;
+        }
+      }
+      localStorage.setItem('neon_rogue_config', JSON.stringify(flatConfig));
+    } catch (e) {
+      console.warn('Failed to save config to localStorage', e);
+    }
+  }
+
+  private loadFromLocalStorage(): void {
+    try {
+      const saved = localStorage.getItem('neon_rogue_config');
+      if (saved) {
+        const flatConfig = JSON.parse(saved);
+        for (const cat in flatConfig) {
+          if (MasterConfig[cat]) {
+            for (const key in flatConfig[cat]) {
+              if (MasterConfig[cat][key]) {
+                MasterConfig[cat][key].value = flatConfig[cat][key];
+              }
+            }
+          }
+        }
+        console.log('Config loaded from localStorage');
+      }
+    } catch (e) {
+      console.warn('Failed to load config from localStorage', e);
     }
   }
 
