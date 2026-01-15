@@ -93,6 +93,7 @@ export const MasterConfig: GameConfigSchema = {
     extendedLogs: { value: false, type: 'boolean', description: 'Show detailed logs (Audio, Net, etc)' },
     devModeAlwaysOn: { value: true, type: 'boolean', description: 'Dev commands always active' },
     showLatency: { value: true, type: 'boolean', description: 'Show Network Latency' },
+    showVersionAndPos: { value: true, type: 'boolean', description: 'Show Version and Position in HUD' },
     enableEnemySpawning: { value: false, type: 'boolean', description: 'Enable Enemy Spawning' }
   },
   Visuals: {

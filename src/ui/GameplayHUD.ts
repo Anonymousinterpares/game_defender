@@ -28,7 +28,7 @@ export class GameplayHUD {
     private dockContainer: HTMLElement | null = null;
     public isDockOpen: boolean = false;
 
-    constructor(private parent: HUDParent) {}
+    constructor(private parent: HUDParent) { }
 
     public create(): void {
         const uiLayer = document.getElementById('ui-layer');
@@ -125,7 +125,7 @@ export class GameplayHUD {
             const ampm = state.hour >= 12 ? 'PM' : 'AM';
             let displayHour = state.hour % 12;
             if (displayHour === 0) displayHour = 12;
-            
+
             const hh = displayHour.toString().padStart(2, '0');
             const mm = state.minute.toString().padStart(2, '0');
             this.clockDisplay.textContent = `${hh}:${mm} ${ampm}`;
@@ -151,7 +151,7 @@ export class GameplayHUD {
         this.dockContainer = document.createElement('div');
         this.dockContainer.className = 'ui-panel';
         this.dockContainer.style.zIndex = '2000';
-        
+
         uiLayer.appendChild(this.dockContainer);
         this.updateDockContent();
     }
@@ -165,7 +165,7 @@ export class GameplayHUD {
         const slotCost = ConfigManager.getInstance().get<number>('Upgrades', 'slotUpgradeCost');
         const turretCost = ConfigManager.getInstance().get<number>('Upgrades', 'turretUpgradeCost');
         const shieldCost = ConfigManager.getInstance().get<number>('Upgrades', 'shieldUpgradeCost');
-        
+
         this.dockContainer.innerHTML = `
           <h2>ENGINEERING DOCK</h2>
           <p style="text-align: center; color: #cfaa6e; font-size: 1.2em;">COINS: ${this.parent.coinsCollected}</p>
@@ -255,15 +255,27 @@ export class GameplayHUD {
 
     public render(ctx: CanvasRenderingContext2D): void {
         if (!this.parent.player) return;
-        
+
         ctx.save();
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
 
+        const showDebugInfo = ConfigManager.getInstance().get<boolean>('Debug', 'showVersionAndPos');
+        let currentY = 20;
+
+        if (showDebugInfo) {
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px "Share Tech Mono"';
+            ctx.fillText(`VER: ${__APP_VERSION__}`, 10, currentY);
+            currentY += 15;
+            ctx.fillText(`POS: ${Math.floor(this.parent.player.x)}, ${Math.floor(this.parent.player.y)}`, 10, currentY);
+            currentY += 20;
+        }
+
         ctx.fillStyle = '#fff';
         ctx.font = '14px Courier';
-        ctx.fillText(`POS: ${Math.floor(this.parent.player.x)}, ${Math.floor(this.parent.player.y)}`, 10, 20);
-        ctx.fillText(`COINS: ${this.parent.coinsCollected}`, 10, 40);
+        ctx.fillText(`COINS: ${this.parent.coinsCollected}`, 10, currentY);
+        currentY += 30;
 
         const weapon = ConfigManager.getInstance().get<string>('Player', 'activeWeapon');
         const isReloading = this.parent.weaponReloading.get(weapon);
@@ -279,10 +291,11 @@ export class GameplayHUD {
             const displayAmmo = weapon === 'laser' || weapon === 'ray' || weapon === 'flamethrower' ? currentAmmo.toFixed(1) : Math.floor(currentAmmo);
             ammoText = isReloading ? `RELOADING... (${reloadTimer.toFixed(1)}s)` : `AMMO: ${displayAmmo}`;
         }
-        
+
         ctx.fillStyle = isReloading ? '#ff4500' : '#cfaa6e';
         ctx.font = 'bold 16px "Share Tech Mono"';
-        ctx.fillText(`${displayName} | ${ammoText}`, 10, 70);
+        ctx.fillText(`${displayName} | ${ammoText}`, 10, currentY);
+        currentY += 20;
 
         ctx.font = '12px "Share Tech Mono"';
         let slotX = 10;
@@ -291,7 +304,7 @@ export class GameplayHUD {
             const isUnlocked = this.parent.unlockedWeapons.has(name);
             const slotDisplayName = name === 'missile' ? 'GUIDED MISSILE' : name.toUpperCase();
             ctx.fillStyle = isSelected ? '#00ff00' : (isUnlocked ? '#888' : '#444');
-            ctx.fillText(`${i+1}: ${slotDisplayName}${isSelected ? ' <' : ''}`, slotX, 90 + i * 15);
+            ctx.fillText(`${i + 1}: ${slotDisplayName}${isSelected ? ' <' : ''}`, slotX, currentY + i * 15);
         });
 
         if (!this.parent.player.active) {
@@ -299,14 +312,14 @@ export class GameplayHUD {
             ctx.save();
             ctx.fillStyle = 'rgba(100, 0, 0, 0.4)';
             ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-            
+
             ctx.fillStyle = '#ff3300';
             ctx.shadowBlur = 10;
             ctx.shadowColor = '#000';
             ctx.font = 'bold 32px "Share Tech Mono"';
             ctx.textAlign = 'center';
             ctx.fillText('CRITICAL FAILURE: AVATAR OFFLINE', ctx.canvas.width / 2, ctx.canvas.height / 2 - 20);
-            
+
             ctx.font = '16px "Share Tech Mono"';
             ctx.fillStyle = '#fff';
             ctx.fillText('EXCESSIVE HEAT DAMAGE DETECTED', ctx.canvas.width / 2, ctx.canvas.height / 2 + 20);
@@ -320,7 +333,7 @@ export class GameplayHUD {
     public renderEntityOverlay(ctx: CanvasRenderingContext2D, entity: any, cameraX: number, cameraY: number, nameOverride?: string): void {
         const hix = entity.interpolatedX - cameraX;
         const hiy = entity.interpolatedY - cameraY;
-        
+
         // Name
         ctx.fillStyle = entity.color || '#cfaa6e';
         ctx.font = 'bold 12px monospace';
@@ -334,8 +347,8 @@ export class GameplayHUD {
         const hbW = 40;
         const hbH = 4;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.fillRect(hix - hbW/2, hiy - 25, hbW, hbH);
+        ctx.fillRect(hix - hbW / 2, hiy - 25, hbW, hbH);
         ctx.fillStyle = entity.health > 30 ? '#0f0' : '#f00';
-        ctx.fillRect(hix - hbW/2, hiy - 25, hbW * (entity.health / entity.maxHealth), hbH);
+        ctx.fillRect(hix - hbW / 2, hiy - 25, hbW * (entity.health / entity.maxHealth), hbH);
     }
 }

@@ -1,11 +1,11 @@
 {
   "name": "modular-rogue",
-  "version": "1.0.0",
+  "version": "0.04",
   "description": "Modular Arcade Roguelike",
   "main": "src/main.ts",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node scripts/update-version.js && tsc && vite build",
     "preview": "vite preview",
     "predeploy": "cross-env GITHUB_PAGES=true npm run build",
     "deploy": "gh-pages -d dist"
