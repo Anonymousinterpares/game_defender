@@ -23,7 +23,7 @@ export class ContactDamageSystem implements System {
         const playerRadius = playerPhysics?.radius || 15;
 
         const enemyIds = entityManager.query(['ai', 'transform', 'tag']);
-        
+
         for (const enemyId of enemyIds) {
             const tag = entityManager.getComponent<TagComponent>(enemyId, 'tag');
             if (tag?.tag !== 'enemy') continue;
@@ -55,16 +55,18 @@ export class ContactDamageSystem implements System {
                 const dist = Math.sqrt(distSq) || 0.1;
                 const nx = dx / dist; // Direction from player to enemy
                 const ny = dy / dist;
-                
+
                 // Professional grade bounce: apply impulse to both
-                const bounceStrength = 300;
+                const baseImpulse = 300; // Fixed base impulse
                 if (playerPhysics) {
-                    playerPhysics.vx -= nx * bounceStrength * (physics?.mass || 1.0);
-                    playerPhysics.vy -= ny * bounceStrength * (physics?.mass || 1.0);
+                    // Scaled inversely with receiver's mass: F = J / m
+                    playerPhysics.vx -= nx * (baseImpulse / playerPhysics.mass);
+                    playerPhysics.vy -= ny * (baseImpulse / playerPhysics.mass);
                 }
                 if (physics) {
-                    physics.vx += nx * bounceStrength * 2.0; // Enemies bounce off harder
-                    physics.vy += ny * bounceStrength * 2.0;
+                    // Enemies also bounce off
+                    physics.vx += nx * (baseImpulse / physics.mass);
+                    physics.vy += ny * (baseImpulse / physics.mass);
                 }
 
                 // Set AI wait timer to prevent immediate re-charge

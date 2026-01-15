@@ -8,6 +8,7 @@ import { HealthComponent } from '../core/ecs/components/HealthComponent';
 import { FireComponent } from '../core/ecs/components/FireComponent';
 import { RenderComponent } from '../core/ecs/components/RenderComponent';
 import { SegmentComponent } from '../core/ecs/components/SegmentComponent';
+import { InputComponent } from '../core/ecs/components/InputComponent';
 
 export class Player extends Entity {
     public segments: Entity[] = []; // Treat segments as full Entities for collision
@@ -105,6 +106,40 @@ export class Player extends Entity {
         // penalty: 5% reduction per slot beyond starting 2
         const penalty = Math.max(0.5, 1.0 - (this.bodyLength - 2) * 0.05);
         this.speed = this.baseSpeedStat * 20 * penalty;
+
+        this.updateTotalMass();
+    }
+
+    private updateTotalMass(): void {
+        const config = ConfigManager.getInstance();
+        const headMass = config.get<number>('Mass', 'playerHead') || 10.0;
+        const tileMass = config.get<number>('Mass', 'playerTile') || 5.0;
+
+        let totalMass = headMass;
+        // Each segment adds tile mass
+        totalMass += this.segments.length * tileMass;
+
+        // Each upgrade adds its specific mass
+        this.upgrades.forEach(upgrade => {
+            totalMass += upgrade.mass;
+        });
+
+        if (this._entityManager) {
+            const physics = this._entityManager.getComponent<PhysicsComponent>(this.id, 'physics');
+            if (physics) {
+                physics.mass = totalMass;
+            }
+
+            // Also update segments mass? The requirement says:
+            // "mass of player should be calculated in following way: mass of head + mass of each individual tile -> if more tiles, more mass"
+            // This implies the WHOLE player entity (as a physics object) has this mass.
+            // But in ECS, head and segments are separate entities with their own physics components.
+            // If the head is the one receiving thrust, its mass should probably be the total mass
+            // BUT segments also have physics and are constrained. 
+            // In a snake model, usually each segment has its own mass for "inertia" of the tail.
+            // Let's re-read: "mass of player should be calculated in following way: mass of head + mass of each individual tile -> if more tiles, more mass ( head & empty tile should have equal mass ) + mass of every configured/added module"
+            // This refers to the TOTAL mass. I will apply it to the HEAD (the parent entity).
+        }
     }
 
     // Helper to expose all parts for Physics Engine
@@ -141,16 +176,15 @@ export class Player extends Entity {
         }
 
         // 2. MOVEMENT
-        let driveSpeed = 0;
-        if (this.inputManager.isActionDown('moveUp')) driveSpeed = this.speed;
-        else if (this.inputManager.isActionDown('moveDown')) driveSpeed = -this.speed * 0.6;
+        let throttle = 0;
+        if (this.inputManager.isActionDown('moveUp')) throttle = 1.0;
+        else if (this.inputManager.isActionDown('moveDown')) throttle = -0.6;
 
-        if (driveSpeed === 0) {
-            this.vx = 0;
-            this.vy = 0;
-        } else {
-            this.vx = Math.cos(this.rotation) * driveSpeed;
-            this.vy = Math.sin(this.rotation) * driveSpeed;
+        if (this._entityManager) {
+            const input = this._entityManager.getComponent<InputComponent>(this.id, 'input');
+            if (input) {
+                input.throttle = throttle;
+            }
         }
 
         // 3. PASSIVE SEGMENTS

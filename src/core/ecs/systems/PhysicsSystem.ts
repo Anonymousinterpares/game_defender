@@ -42,23 +42,21 @@ export class PhysicsSystem implements System {
 
     private step(dt: number, entityManager: EntityManager): void {
         const config = ConfigManager.getInstance();
-        const baseSpeed = config.get<number>('Player', 'baseSpeed') || 5.0;
         const turnSpeed = config.get<number>('Player', 'turnSpeed') || 3.0;
-        let friction = config.get<number>('Physics', 'friction') || 0.9;
-        const tileSize = config.get<number>('World', 'tileSize') || 32;
+        const groundFriction = config.get<number>('Physics', 'groundFriction') || 0.1;
+        const rainMult = config.get<number>('Physics', 'rainFrictionMultiplier') || 0.6;
+        const snowMult = config.get<number>('Physics', 'snowFrictionMultiplier') || 0.3;
+        const gravity = config.get<number>('Physics', 'gravity') || 9.81;
+        const maxThrust = config.get<number>('Physics', 'maxThrust') || 2500;
+        const physicsLogs = config.get<boolean>('Debug', 'physics_logs');
 
         // Apply weather friction modifiers
+        let currentFriction = groundFriction;
         const weather = WeatherManager.getInstance().getWeatherState();
-        if (weather.type === WeatherType.RAIN) friction *= 0.95;
-        else if (weather.type === WeatherType.SNOW) friction *= 0.85;
+        if (weather.type === WeatherType.RAIN) currentFriction *= rainMult;
+        else if (weather.type === WeatherType.SNOW) currentFriction *= snowMult;
 
         const entityIds = entityManager.query(['transform', 'physics']);
-
-        // 1. Prepare entities for Quadtree updates (handled in Simulation usually, but let's ensure we use current positions)
-        // Actually, Simulation.ts calls `updateSpatialGrid()` at the end of the frame. 
-        // For Physics, we might want to query the LAST frame's grid or update it?
-        // The instruction says "Spatial Grid Integration: Modify PhysicsSystem to use the Quadtree for entity-vs-entity collisions".
-        // Assuming the Quadtree is up-to-date from the previous frame or Simulation loop.
 
         for (const id of entityIds) {
             const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
@@ -67,18 +65,21 @@ export class PhysicsSystem implements System {
             const tag = entityManager.getComponent<TagComponent>(id, 'tag');
             const health = entityManager.getComponent<HealthComponent>(id, 'health');
 
-            // Store state for interpolation (Must happen even for static entities)
+            // Store state for interpolation
             transform.prevX = transform.x;
             transform.prevY = transform.y;
 
             if (physics.isStatic || (health && !health.active)) continue;
 
-            // 2. Handle Input (Consolidated from MovementSystem)
+            // 1. Force Accumulator
+            let forceX = 0;
+            let forceY = 0;
+
+            // 2. Handle Input (Thrust)
             if (input) {
                 if (tag?.tag === 'player' && (entityManager as any).inputManager) {
                     const im = (entityManager as any).inputManager;
-                    // Mouse Aiming for player
-                    const dx = im.mouseX - (window.innerWidth / 2); // Assuming camera is centered on player
+                    const dx = im.mouseX - (window.innerWidth / 2);
                     const dy = im.mouseY - (window.innerHeight / 2);
                     transform.rotation = Math.atan2(dy, dx);
                 } else if (tag?.tag !== 'player') {
@@ -86,47 +87,67 @@ export class PhysicsSystem implements System {
                 }
 
                 if (input.throttle !== 0) {
-                    const speedPx = baseSpeed * tileSize;
-                    physics.vx += Math.cos(transform.rotation) * input.throttle * speedPx * dt * 5;
-                    physics.vy += Math.sin(transform.rotation) * input.throttle * speedPx * dt * 5;
+                    const thrust = input.throttle * maxThrust;
+                    forceX += Math.cos(transform.rotation) * thrust;
+                    forceY += Math.sin(transform.rotation) * thrust;
                 }
             }
 
             // 3. Apply Steering Forces (from AI)
             if (physics.steeringForceX !== 0 || physics.steeringForceY !== 0) {
-                const ax = physics.steeringForceX / physics.mass;
-                const ay = physics.steeringForceY / physics.mass;
-                physics.vx += ax * dt;
-                physics.vy += ay * dt;
+                forceX += physics.steeringForceX;
+                forceY += physics.steeringForceY;
 
                 physics.steeringForceX = 0;
                 physics.steeringForceY = 0;
             }
 
-            // 4. Apply Friction (multiplier 1.0 = full friction, 0.0 = no friction)
-            const frictionToApply = 1.0 - (1.0 - Math.pow(friction, dt * 60)) * physics.frictionMultiplier;
-            physics.vx *= frictionToApply;
-            physics.vy *= frictionToApply;
+            // 4. Calculate Friction Force: Ff = -v * mass * coeff * gravity
+            // We use the entity's frictionMultiplier to allow per-entity adjustments
+            const appliedFrictionCoeff = currentFriction * physics.frictionMultiplier;
+            const frictionFX = -physics.vx * physics.mass * appliedFrictionCoeff * gravity;
+            const frictionFY = -physics.vy * physics.mass * appliedFrictionCoeff * gravity;
 
-            // 5. Predict Position
+            forceX += frictionFX;
+            forceY += frictionFY;
+
+            // 5. Physics Update (Euler integration)
+            const ax = forceX / physics.mass;
+            const ay = forceY / physics.mass;
+
+            physics.vx += ax * dt;
+            physics.vy += ay * dt;
+
+            // 6. Predict Position
             let nextX = transform.x + physics.vx * dt;
             let nextY = transform.y + physics.vy * dt;
 
-            // 6. Align Rotation to Velocity (for Projectiles)
+            // Log if enabled
+            if (physicsLogs) {
+                if (tag?.tag === 'player') {
+                    console.log(`[Physics] Player: Mass=${physics.mass.toFixed(1)}, Thrust=(${forceX.toFixed(0)},${forceY.toFixed(0)}), Friction=(${frictionFX.toFixed(0)},${frictionFY.toFixed(0)}), Accel=(${ax.toFixed(1)},${ay.toFixed(1)}), Vel=(${physics.vx.toFixed(1)},${physics.vy.toFixed(1)})`);
+                } else if (tag?.tag === 'enemy' && ConfigManager.getInstance().get<boolean>('Debug', 'extendedLogs')) {
+                    // Log enemy physics only if extended logs are also on to avoid flooding, 
+                    // or maybe just log one representative enemy?
+                    // Let's log if it's an enemy and we want physics logs.
+                    console.log(`[Physics] Enemy(${id.split('-')[0]}): Mass=${physics.mass.toFixed(1)}, TotalForce=(${forceX.toFixed(0)},${forceY.toFixed(0)}), Vel=(${physics.vx.toFixed(1)},${physics.vy.toFixed(1)})`);
+                }
+            }
+
+            // 7. Align Rotation to Velocity (for Projectiles)
             if (physics.alignRotationToVelocity) {
                 const speedSq = physics.vx * physics.vx + physics.vy * physics.vy;
-                if (speedSq > 100) { // Only rotate if moving significantly
+                if (speedSq > 100) {
                     transform.rotation = Math.atan2(physics.vy, physics.vx);
                 }
             }
 
-            // 6. World Collision (Centralized Logic)
+            // 8. World Collision
             if (tag?.tag !== 'projectile') {
                 const wallResult = PhysicsSystem.checkCircleVsTile(this.world, nextX, nextY, physics.radius);
                 nextX = wallResult.x;
                 nextY = wallResult.y;
 
-                // Adjust velocity if hit wall
                 if (wallResult.hit) {
                     if (wallResult.nx !== 0 || wallResult.ny !== 0) {
                         const dot = physics.vx * wallResult.nx + physics.vy * wallResult.ny;
@@ -146,17 +167,16 @@ export class PhysicsSystem implements System {
                 if (nextY > mapH - physics.radius) { nextY = mapH - physics.radius; physics.vy = 0; }
             }
 
-            // 7. Entity vs Entity (Separation via Quadtree)
+            // 9. Entity vs Entity (Separation)
             const separation = this.calculateSeparation(id, nextX, nextY, physics, entityManager);
             nextX += separation.x;
             nextY += separation.y;
-            // Also apply separation to velocity to prevent re-entry
             if (separation.x !== 0 || separation.y !== 0) {
-                physics.vx += separation.x * 5; // Impulse
+                physics.vx += separation.x * 5;
                 physics.vy += separation.y * 5;
             }
 
-            // 8. Commit Final Position
+            // 10. Commit Final Position
             transform.x = nextX;
             transform.y = nextY;
         }

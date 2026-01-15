@@ -20,10 +20,11 @@ export class EntityFactory {
 
         const config = ConfigManager.getInstance();
         const maxHealth = config.get<number>('Player', 'maxHealth') || 100;
+        const playerMass = config.get<number>('Mass', 'playerHead') || 10.0;
 
         entityManager.addComponent(id, new TagComponent('player'));
         entityManager.addComponent(id, new TransformComponent(x, y, 0));
-        entityManager.addComponent(id, new PhysicsComponent(0, 0, 15, false, 10.0)); // Player mass 10.0
+        entityManager.addComponent(id, new PhysicsComponent(0, 0, 15, false, playerMass));
         entityManager.addComponent(id, new HealthComponent(maxHealth, maxHealth));
         entityManager.addComponent(id, new FireComponent());
         entityManager.addComponent(id, new RenderComponent('player', '#cfaa6e', 15));
@@ -39,6 +40,20 @@ export class EntityFactory {
         let dossier = registry.get(type);
         if (!dossier) dossier = registry.get('Scout')!;
 
+        const config = ConfigManager.getInstance();
+        let finalMass = 1.0;
+        let finalThrust = 1000;
+        if (dossier.name === 'Heavy') {
+            finalMass = config.get<number>('Mass', 'npcHeavy') || 50.0;
+            finalThrust = config.get<number>('Mass', 'npcHeavyThrust') || 8000;
+        } else if (dossier.name === 'Scout') {
+            finalMass = config.get<number>('Mass', 'npcScout') || 5.0;
+            finalThrust = config.get<number>('Mass', 'npcScoutThrust') || 1200;
+        } else if (dossier.name === 'Horde Runner') {
+            finalMass = config.get<number>('Mass', 'npcHorde') || 3.0;
+            finalThrust = config.get<number>('Mass', 'npcHordeThrust') || 900;
+        }
+
         // Apply trait modifiers to base stats
         let finalHp = dossier.baseStats.hp;
         let finalSpeed = dossier.baseStats.speed;
@@ -51,9 +66,6 @@ export class EntityFactory {
             }
         });
 
-        const isSwamer = dossier.name === 'Scout' || dossier.name === 'Horde Runner';
-        const finalMass = dossier.name === 'Heavy' ? 5.0 : (isSwamer ? 0.5 : 1.0);
-
         entityManager.addComponent(entityId, new TagComponent('enemy'));
         entityManager.addComponent(entityId, new TransformComponent(x, y, 0));
         entityManager.addComponent(entityId, new PhysicsComponent(0, 0, dossier.baseStats.radius, false, finalMass));
@@ -61,7 +73,7 @@ export class EntityFactory {
         entityManager.addComponent(entityId, new FireComponent());
         entityManager.addComponent(entityId, new RenderComponent('enemy', dossier.visuals.color, dossier.baseStats.radius));
 
-        const aiComp = new AIComponent(dossier.behavior, null, finalSpeed);
+        const aiComp = new AIComponent(dossier.behavior, null, finalSpeed, finalThrust);
         aiComp.dossier = dossier;
         entityManager.addComponent(entityId, aiComp);
 

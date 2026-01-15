@@ -81,7 +81,11 @@ export const MasterConfig: GameConfigSchema = {
     shieldUpgradeCost: { value: 250, type: 'number', description: 'Shield Cost' }
   },
   Physics: {
-    friction: { value: 0.9, type: 'number', min: 0.1, max: 1.0, step: 0.01, description: 'Movement Friction' },
+    groundFriction: { value: 0.1, type: 'number', min: 0.01, max: 1.0, step: 0.01, description: 'Base Ground Friction Coefficient' },
+    rainFrictionMultiplier: { value: 0.6, type: 'number', min: 0.1, max: 1.0, step: 0.05, description: 'Friction Multiplier (Rain)' },
+    snowFrictionMultiplier: { value: 0.3, type: 'number', min: 0.05, max: 1.0, step: 0.05, description: 'Friction Multiplier (Snow)' },
+    gravity: { value: 9.81, type: 'number', min: 0, max: 20, step: 0.1, description: 'Gravity (m/s²)' },
+    maxThrust: { value: 2500, type: 'number', min: 100, max: 10000, step: 100, description: 'Maximum Engine Thrust' },
     collisionPrecision: { value: 0.5, type: 'number', min: 0.1, max: 1.0, step: 0.1, description: 'Collision Check Step' }
   },
   Debug: {
@@ -91,10 +95,23 @@ export const MasterConfig: GameConfigSchema = {
     fpsCounter: { value: true, type: 'boolean', description: 'Show FPS' },
     FpsShow: { value: true, type: 'boolean', description: 'Show FPS Counter' },
     extendedLogs: { value: false, type: 'boolean', description: 'Show detailed logs (Audio, Net, etc)' },
+    physics_logs: { value: false, type: 'boolean', description: 'Show detailed physics calculations' },
     devModeAlwaysOn: { value: true, type: 'boolean', description: 'Dev commands always active' },
     showLatency: { value: true, type: 'boolean', description: 'Show Network Latency' },
     showVersionAndPos: { value: true, type: 'boolean', description: 'Show Version and Position in HUD' },
     enableEnemySpawning: { value: false, type: 'boolean', description: 'Enable Enemy Spawning' }
+  },
+  Mass: {
+    playerHead: { value: 10.0, type: 'number', min: 1, max: 100, step: 1, description: 'Mass of Player Head' },
+    playerTile: { value: 5.0, type: 'number', min: 1, max: 50, step: 1, description: 'Mass of Empty Tile' },
+    turretModule: { value: 8.0, type: 'number', min: 1, max: 50, step: 1, description: 'Mass of Turret Module' },
+    shieldModule: { value: 12.0, type: 'number', min: 1, max: 50, step: 1, description: 'Mass of Shield Module' },
+    npcScout: { value: 5.0, type: 'number', min: 1, max: 50, step: 1, description: 'Mass of Scout NPC' },
+    npcScoutThrust: { value: 1200, type: 'number', min: 100, max: 5000, step: 100, description: 'Thrust for Scout NPC' },
+    npcHeavy: { value: 50.0, type: 'number', min: 5, max: 200, step: 5, description: 'Mass of Heavy NPC' },
+    npcHeavyThrust: { value: 8000, type: 'number', min: 500, max: 20000, step: 500, description: 'Thrust for Heavy NPC' },
+    npcHorde: { value: 3.0, type: 'number', min: 1, max: 20, step: 1, description: 'Mass of Horde NPC' },
+    npcHordeThrust: { value: 900, type: 'number', min: 100, max: 3000, step: 50, description: 'Thrust for Horde NPC' }
   },
   Visuals: {
     enableSmoke: { value: true, type: 'boolean', description: 'Enable Smoke Effects (Wind Responsive)' },

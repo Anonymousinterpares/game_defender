@@ -46,13 +46,13 @@ export class AISystem implements System {
                 // For now, just let Physics friction take over, or apply a "stop" force.
                 physics.steeringForceX = -physics.vx * 5 * physics.mass;
                 physics.steeringForceY = -physics.vy * 5 * physics.mass;
-                continue; 
+                continue;
             }
 
             // 1. Vision / Line of Sight Check
             const canSeePlayer = this.checkLOS(transform, playerTransform);
             const isTracker = ai.dossier?.traits.includes('tracker');
-            
+
             const dx = playerTransform.x - transform.x;
             const dy = playerTransform.y - transform.y;
             const distToPlayer = Math.sqrt(dx * dx + dy * dy);
@@ -64,15 +64,15 @@ export class AISystem implements System {
             ai.lastPathUpdateTime += dt;
             if (ai.lastPathUpdateTime >= this.pathUpdateInterval && shouldUpdatePath) {
                 ai.lastPathUpdateTime = 0;
-                
+
                 const canBreach = ai.dossier?.traits.includes('breacher') || ai.behavior === AIBehavior.BREACHER;
                 const isHeatProof = ai.dossier?.traits.includes('heat_proof');
-                
+
                 ai.path = Pathfinder.findPath(
-                    this.world, 
-                    transform.x, 
-                    transform.y, 
-                    playerTransform.x, 
+                    this.world,
+                    transform.x,
+                    transform.y,
+                    playerTransform.x,
                     playerTransform.y,
                     canBreach,
                     isHeatProof
@@ -108,16 +108,25 @@ export class AISystem implements System {
                 const preferredDist = ai.dossier?.baseStats.preferredDistance || 250;
                 if (distToPlayer < preferredDist) {
                     // Reverse/Flee
-                    desiredVx *= -1.2; 
+                    desiredVx *= -1.2;
                     desiredVy *= -1.2;
                 }
             }
 
             // 4. Submit Steering Force to PhysicsSystem
-            const steeringWeight = 5.0; // How fast they turn/adjust
-            // Force = (DesiredVelocity - CurrentVelocity) * Mass * Rate
-            physics.steeringForceX += (desiredVx - physics.vx) * steeringWeight * physics.mass;
-            physics.steeringForceY += (desiredVy - physics.vy) * steeringWeight * physics.mass;
+            const steeringWeight = 1.5; // Lower = more inertia-like behavior
+
+            // We want to calculate a force that pushes the entity towards desired velocity
+            // But we limit this force by the NPC's configured thrust!
+            const diffX = desiredVx - physics.vx;
+            const diffY = desiredVy - physics.vy;
+            const diffLen = Math.sqrt(diffX * diffX + diffY * diffY);
+
+            if (diffLen > 0) {
+                const forceScale = Math.min(ai.thrust, diffLen * steeringWeight * physics.mass);
+                physics.steeringForceX += (diffX / diffLen) * forceScale;
+                physics.steeringForceY += (diffY / diffLen) * forceScale;
+            }
 
             // Update rotation based on current velocity
             if (Math.abs(physics.vx) > 0.1 || Math.abs(physics.vy) > 0.1) {
@@ -133,7 +142,7 @@ export class AISystem implements System {
         const dy = to.y - from.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const angle = Math.atan2(dy, dx);
-        
+
         // Raycast returns hit point or null if clear
         const hit = this.world.raycast(from.x, from.y, angle, dist);
         return hit === null;
