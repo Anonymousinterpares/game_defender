@@ -5,6 +5,7 @@ import { WorldClock } from '../core/WorldClock';
 import { TurretUpgrade, ShieldUpgrade } from '../entities/upgrades/Upgrade';
 import { EventBus, GameEvent } from '../core/EventBus';
 import { SoundManager } from '../core/SoundManager';
+import { VERSION } from '../version';
 
 export interface HUDParent {
     sceneManager: SceneManager;
@@ -266,7 +267,7 @@ export class GameplayHUD {
         if (showDebugInfo) {
             ctx.fillStyle = '#fff';
             ctx.font = 'bold 12px "Share Tech Mono"';
-            ctx.fillText(`VER: ${__APP_VERSION__}`, 10, currentY);
+            ctx.fillText(`VER: ${VERSION}`, 10, currentY);
             currentY += 15;
             ctx.fillText(`POS: ${Math.floor(this.parent.player.x)}, ${Math.floor(this.parent.player.y)}`, 10, currentY);
             currentY += 20;

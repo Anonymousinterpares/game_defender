@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PACKAGE_JSON_PATH = path.join(__dirname, '../package.json');
+const VERSION_TS_PATH = path.join(__dirname, '../src/version.ts');
 const STATE_FILE_PATH = path.join(__dirname, '../.last_build_state');
 const WATCH_DIRS = ['src', 'public'];
 
@@ -67,6 +68,7 @@ function updateVersion() {
 
     pkg.version = newVersion;
     fs.writeFileSync(PACKAGE_JSON_PATH, JSON.stringify(pkg, null, 2) + '\n');
+    fs.writeFileSync(VERSION_TS_PATH, `export const VERSION = '${newVersion}';\n`);
     fs.writeFileSync(STATE_FILE_PATH, combinedHash);
 
     console.log(`Changes detected. Version incremented: ${oldVersion} -> ${newVersion}`);
