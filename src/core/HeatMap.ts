@@ -512,10 +512,47 @@ export class HeatMap {
                         let sum = val;
                         let count = 1;
                         const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+                        const isHot = val > 0.1;
+
                         for (const [nx, ny] of neighbors) {
-                            const nIdx = (y + ny) * this.subDiv + (x + nx);
-                            if (x + nx >= 0 && x + nx < this.subDiv && y + ny >= 0 && y + ny < this.subDiv) {
-                                sum += data![nIdx];
+                            let nSx = x + nx;
+                            let nSy = y + ny;
+
+                            // Local neighbor
+                            if (nSx >= 0 && nSx < this.subDiv && nSy >= 0 && nSy < this.subDiv) {
+                                sum += data![nSy * this.subDiv + nSx];
+                                count++;
+                                continue;
+                            }
+
+                            // Boundary Logic
+                            const offsetTx = (nSx < 0 ? -1 : (nSx >= this.subDiv ? 1 : 0));
+                            const offsetTy = (nSy < 0 ? -1 : (nSy >= this.subDiv ? 1 : 0));
+
+                            const nTx = tx + offsetTx;
+                            const nTy = ty + offsetTy;
+
+                            // Skip world boundaries
+                            if (nTx <= 0 || nTx >= this.widthTiles - 1 || nTy <= 0 || nTy >= this.heightTiles - 1) continue;
+
+                            const nKey = `${nTx},${nTy}`;
+                            let nd = this.heatData.get(nKey);
+
+                            // Wake up logic: if we are hot, ensure neighbor exists and is active
+                            if (isHot) {
+                                if (!nd) {
+                                    nd = new Float32Array(this.subDiv * this.subDiv);
+                                    this.heatData.set(nKey, nd);
+                                }
+                                if (!this.activeTiles.has(nKey)) {
+                                    this.activeTiles.add(nKey);
+                                }
+                            }
+
+                            if (nd) {
+                                const wrappedSx = (nSx + this.subDiv) % this.subDiv;
+                                const wrappedSy = (nSy + this.subDiv) % this.subDiv;
+                                sum += nd[wrappedSy * this.subDiv + wrappedSx];
                                 count++;
                             }
                         }
@@ -656,11 +693,46 @@ export class HeatMap {
                             if (nextFire[idx] > 0.3) {
                                 const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
                                 for (const [nx, ny] of neighbors) {
-                                    const nIdx = (y + ny) * this.subDiv + (x + nx);
-                                    if (x + nx >= 0 && x + nx < this.subDiv && y + ny >= 0 && y + ny < this.subDiv) {
+                                    let nSx = x + nx;
+                                    let nSy = y + ny;
+
+                                    if (nSx >= 0 && nSx < this.subDiv && nSy >= 0 && nSy < this.subDiv) {
+                                        // Local neighbor
+                                        const nIdx = nSy * this.subDiv + nSx;
                                         if (nextFire[nIdx] === 0 && hData && hData[nIdx] > 0) {
                                             nextFire[nIdx] = 0.05;
                                         }
+                                        continue;
+                                    }
+
+                                    // Inter-tile propagation
+                                    const offsetTx = (nSx < 0 ? -1 : (nSx >= this.subDiv ? 1 : 0));
+                                    const offsetTy = (nSy < 0 ? -1 : (nSy >= this.subDiv ? 1 : 0));
+
+                                    const nTx = tx + offsetTx;
+                                    const nTy = ty + offsetTy;
+
+                                    // Skip world boundaries
+                                    if (nTx <= 0 || nTx >= this.widthTiles - 1 || nTy <= 0 || nTy >= this.heightTiles - 1) continue;
+
+                                    const nKey = `${nTx},${nTy}`;
+                                    // Need to check material of neighbor
+                                    // Since we don't have write access to neighbor's nextFire loop easily here without locking
+                                    // We will just Ignite the neighbor tile if it exists. 
+                                    // The ignite() method handles activation.
+
+                                    // Calculate neighbor sub-index
+                                    const wrappedSx = (nSx + this.subDiv) % this.subDiv;
+                                    const wrappedSy = (nSy + this.subDiv) % this.subDiv;
+                                    const nIdx = wrappedSy * this.subDiv + wrappedSx;
+
+                                    // To properly ignite, we need access to neighbor data.
+                                    // But we are activeTile iteration. We can just force ignite.
+                                    // However, we should check if it CAN burn to avoid waking tiles unnecessarily.
+                                    const nmData = this.materialData.get(nKey);
+                                    if (nmData && MATERIAL_PROPS[nmData[nIdx] as MaterialType].flammable) {
+                                        // Ignite neighbor!
+                                        this.ignite(nTx, nTy, nIdx);
                                     }
                                 }
                             }
