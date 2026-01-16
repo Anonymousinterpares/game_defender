@@ -12,6 +12,8 @@ export interface WeatherParticle {
     vy: number;
     vz: number;
     life: number;
+    wasRepulsed: boolean;
+    repulsionLife: number;
 }
 
 export interface RepulsionZone {
@@ -35,6 +37,8 @@ export class WeatherSystemECS implements System {
     private viewWidth: number = 1920;
     private viewHeight: number = 1080;
 
+    private splashQueue: Array<{ x: number, y: number, type: string }> = [];
+
     constructor() {
         this.initParticles();
         this.subscribeToEvents();
@@ -54,7 +58,9 @@ export class WeatherSystemECS implements System {
                 y: Math.random() * 2000,
                 z: Math.random() * 500,
                 vx: 0, vy: 0, vz: 0,
-                life: Math.random()
+                life: Math.random(),
+                wasRepulsed: false,
+                repulsionLife: 0
             });
         }
     }
@@ -125,8 +131,42 @@ export class WeatherSystemECS implements System {
                     const lifeMult = zone.life / zone.maxLife;
                     p.vx += nx * force * lifeMult * dt * 20;
                     p.vy += ny * force * lifeMult * dt * 20;
+
+                    // Mark as repulsed
+                    if (!p.wasRepulsed) {
+                        p.wasRepulsed = true;
+                        p.repulsionLife = 0;
+                    }
                 }
             });
+
+            // Track repulsed particle lifetime
+            if (p.wasRepulsed) {
+                p.repulsionLife += dt;
+
+                // After 0.4 seconds of being repulsed, "land" the particle
+                if (p.repulsionLife >= 0.4) {
+                    // Spawn splash for rain at current position
+                    if (isRain) {
+                        this.splashQueue.push({
+                            x: p.x,
+                            y: p.y,
+                            type: 'rain'
+                        });
+                    }
+
+                    // Reset particle
+                    p.z = 400 + Math.random() * 200;
+                    p.life = Math.random();
+                    p.x = minX + Math.random() * (maxX - minX);
+                    p.y = minY + Math.random() * (maxY - minY);
+                    p.wasRepulsed = false;
+                    p.repulsionLife = 0;
+                    p.vx = 0;
+                    p.vy = 0;
+                    return; // Skip rest of physics for this particle this frame
+                }
+            }
 
             // CLAMP VERTICAL VELOCITY
             let verticalShift = p.vy;
@@ -146,6 +186,8 @@ export class WeatherSystemECS implements System {
                 // Randomize position slightly upon respawn to avoid patterns
                 p.x = minX + Math.random() * (maxX - minX);
                 p.y = minY + Math.random() * (maxY - minY);
+                p.wasRepulsed = false;
+                p.repulsionLife = 0;
             }
 
             // World Wrapping (Toroidal around camera)
@@ -159,5 +201,11 @@ export class WeatherSystemECS implements System {
 
     public getParticles(): WeatherParticle[] {
         return this.particles;
+    }
+
+    public getSplashes(): Array<{ x: number, y: number, type: string }> {
+        const splashes = [...this.splashQueue];
+        this.splashQueue = [];
+        return splashes;
     }
 }

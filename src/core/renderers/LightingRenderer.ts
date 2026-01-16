@@ -504,6 +504,18 @@ export class LightingRenderer {
 
         // 2. RENDER FALLING PARTICLES
         const particles = this.parent.simulation.weatherSystemECS.getParticles();
+
+        // Consume splash queue from weather repulsion
+        const weatherSplashes = this.parent.simulation.weatherSystemECS.getSplashes();
+        weatherSplashes.forEach(splash => {
+            this.splashes.push({
+                x: splash.x,
+                y: splash.y,
+                life: 1.0,
+                type: splash.type as 'rain' | 'snow'
+            });
+        });
+
         if (weather.precipitationIntensity > 0.05) {
             if (weather.type === WeatherType.RAIN) {
                 ctx.strokeStyle = 'rgba(160, 190, 255, 0.4)';
