@@ -13,8 +13,12 @@ export class WorldRenderer {
 
     private scratchCanvas: HTMLCanvasElement;
     private scratchCtx: CanvasRenderingContext2D;
-    private meltedGroundScratch: HTMLCanvasElement;
-    private meltedGroundCtx: CanvasRenderingContext2D;
+    // Batched melted ground rendering
+    private meltedBatchCanvas: HTMLCanvasElement;
+    private meltedBatchCtx: CanvasRenderingContext2D;
+    private meltedBatchData: ImageData | null = null;
+    private meltedBatchWidth: number = 0;
+    private meltedBatchHeight: number = 0;
 
     constructor(world: World) {
         this.world = world;
@@ -27,10 +31,9 @@ export class WorldRenderer {
         this.scratchCanvas.height = this.chunkSize + 32;
         this.scratchCtx = this.scratchCanvas.getContext('2d')!;
 
-        this.meltedGroundScratch = document.createElement('canvas');
-        this.meltedGroundScratch.width = 10;
-        this.meltedGroundScratch.height = 10;
-        this.meltedGroundCtx = this.meltedGroundScratch.getContext('2d')!;
+        // Initialize batch canvas
+        this.meltedBatchCanvas = document.createElement('canvas');
+        this.meltedBatchCtx = this.meltedBatchCanvas.getContext('2d', { willReadFrequently: true })!;
     }
 
     public invalidateTileCache(tx: number, ty: number): void {
@@ -101,7 +104,7 @@ export class WorldRenderer {
                 const screenWTiles = Math.ceil(viewWidth / this.tileSize) + 1;
                 const screenHTiles = Math.ceil(viewHeight / this.tileSize) + 1;
 
-                this.renderMeltedGround(ctx, startTx, startTy, screenWTiles, screenHTiles);
+                this.renderMeltedGround(ctx, startTx, startTy, screenWTiles, screenHTiles, cameraX, cameraY);
             }
         }
 
@@ -303,12 +306,31 @@ export class WorldRenderer {
         this.wallChunks.clear();
     }
 
-    private renderMeltedGround(ctx: CanvasRenderingContext2D, startTx: number, startTy: number, w: number, h: number): void {
+    private renderMeltedGround(ctx: CanvasRenderingContext2D, startTx: number, startTy: number, w: number, h: number, camX: number, camY: number): void {
         const wm = WeatherManager.getInstance();
-        const sCtx = this.meltedGroundCtx;
-        const sCanv = this.meltedGroundScratch;
-        const imgData = sCtx.createImageData(10, 10);
 
+        // 10x10 sub-tiles per tile
+        const subDiv = 10;
+        const requiredW = w * subDiv;
+        const requiredH = h * subDiv;
+
+        // Resize buffer if needed
+        if (this.meltedBatchWidth !== requiredW || this.meltedBatchHeight !== requiredH) {
+            this.meltedBatchWidth = requiredW;
+            this.meltedBatchHeight = requiredH;
+            this.meltedBatchCanvas.width = requiredW;
+            this.meltedBatchCanvas.height = requiredH;
+            this.meltedBatchData = this.meltedBatchCtx.createImageData(requiredW, requiredH);
+        }
+
+        const imgData = this.meltedBatchData!;
+        // Clear buffer (set all to transparent)
+        // Faster to fill with 0 than recreate
+        new Uint32Array(imgData.data.buffer).fill(0);
+
+        let hasPixels = false;
+
+        // Iterate tiles and fill the buffer
         for (let y = 0; y < h; y++) {
             for (let x = 0; x < w; x++) {
                 const tx = startTx + x;
@@ -316,35 +338,43 @@ export class WorldRenderer {
 
                 const removal = wm.getTileSnowRemoval(tx, ty);
                 if (removal) {
-                    let hasPixels = false;
+                    hasPixels = true;
+                    // Copy 100 sub-tile values into the correct position in the large buffer
+                    const bufferStartX = x * subDiv;
+                    const bufferStartY = y * subDiv;
 
-                    for (let i = 0; i < 100; i++) {
-                        const factor = removal[i];
-                        const idx = i * 4;
-                        if (factor < 0.99) {
-                            hasPixels = true;
-                            const alpha = Math.floor((1.0 - factor) * 255);
-                            imgData.data[idx] = 28;   // R
-                            imgData.data[idx + 1] = 28; // G
-                            imgData.data[idx + 2] = 28; // B
-                            imgData.data[idx + 3] = alpha;
-                        } else {
-                            imgData.data[idx + 3] = 0; // Transparent
+                    for (let sy = 0; sy < subDiv; sy++) {
+                        const rowOffset = (bufferStartY + sy) * requiredW * 4;
+                        for (let sx = 0; sx < subDiv; sx++) {
+                            const factor = removal[sy * subDiv + sx];
+                            if (factor < 0.99) {
+                                const bufferIdx = rowOffset + (bufferStartX + sx) * 4;
+                                const alpha = Math.floor((1.0 - factor) * 255);
+                                imgData.data[bufferIdx] = 28;     // R
+                                imgData.data[bufferIdx + 1] = 28; // G
+                                imgData.data[bufferIdx + 2] = 28; // B
+                                imgData.data[bufferIdx + 3] = alpha;
+                            }
                         }
-                    }
-
-                    if (hasPixels) {
-                        sCtx.putImageData(imgData, 0, 0);
-                        const worldX = tx * this.tileSize;
-                        const worldY = ty * this.tileSize;
-
-                        ctx.save();
-                        ctx.imageSmoothingEnabled = true; // Smooths the sub-pixels
-                        ctx.drawImage(sCanv, worldX, worldY, this.tileSize, this.tileSize);
-                        ctx.restore();
                     }
                 }
             }
+        }
+
+        if (hasPixels) {
+            this.meltedBatchCtx.putImageData(imgData, 0, 0);
+
+            ctx.save();
+            ctx.imageSmoothingEnabled = true; // Smooth scaling
+
+            // Calculate world position of the batch top-left
+            const worldX = startTx * this.tileSize;
+            const worldY = startTy * this.tileSize;
+            const widthWorld = w * this.tileSize;
+            const heightWorld = h * this.tileSize;
+
+            ctx.drawImage(this.meltedBatchCanvas, worldX, worldY, widthWorld, heightWorld);
+            ctx.restore();
         }
     }
 }
