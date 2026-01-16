@@ -10,14 +10,14 @@ export class WorldRenderer {
     private wallChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, dirty: boolean }> = new Map();
     private chunkSize: number = 512;
     private lastSnowAccumulation: number = 0;
-    
+
     private scratchCanvas: HTMLCanvasElement;
     private scratchCtx: CanvasRenderingContext2D;
 
     constructor(world: World) {
         this.world = world;
         this.tileSize = world.getTileSize();
-        
+
         this.world.onTileChange((tx, ty) => this.invalidateTileCache(tx, ty));
 
         this.scratchCanvas = document.createElement('canvas');
@@ -28,7 +28,7 @@ export class WorldRenderer {
 
     public invalidateTileCache(tx: number, ty: number): void {
         this.tileCanvasCache.delete(`${tx},${ty}`);
-        
+
         const gx = Math.floor((tx * this.tileSize) / this.chunkSize);
         const gy = Math.floor((ty * this.tileSize) / this.chunkSize);
         const chunk = this.wallChunks.get(`${gx},${gy}`);
@@ -48,7 +48,7 @@ export class WorldRenderer {
     private renderInternal(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, silhouette: boolean, silColor?: string): void {
         const viewWidth = ctx.canvas.width;
         const viewHeight = ctx.canvas.height;
-        
+
         const currentSnow = WeatherManager.getInstance().getSnowAccumulation();
         if (Math.abs(currentSnow - this.lastSnowAccumulation) > 0.05) {
             this.tileCanvasCache.clear();
@@ -100,7 +100,7 @@ export class WorldRenderer {
 
                 const key = `${gx},${gy}`;
                 let chunk = this.wallChunks.get(key);
-                
+
                 if (!chunk) {
                     const canvas = document.createElement('canvas');
                     canvas.width = this.chunkSize;
@@ -124,7 +124,7 @@ export class WorldRenderer {
                         sctx.fillStyle = silColor;
                         sctx.fillRect(0, 0, this.chunkSize, this.chunkSize + 32);
                         sctx.globalCompositeOperation = 'source-over';
-                        
+
                         ctx.drawImage(this.scratchCanvas, gx * this.chunkSize, gy * this.chunkSize - 8);
                     } else {
                         ctx.drawImage(chunk.canvas, gx * this.chunkSize, gy * this.chunkSize - 8);
@@ -140,7 +140,7 @@ export class WorldRenderer {
     private rebuildWallChunk(chunk: any, gx: number, gy: number): void {
         const ctx = chunk.ctx;
         ctx.clearRect(0, 0, this.chunkSize, this.chunkSize + 32);
-        
+
         const startCol = Math.floor((gx * this.chunkSize) / this.tileSize);
         const endCol = Math.ceil(((gx + 1) * this.chunkSize) / this.tileSize);
         const startRow = Math.floor((gy * this.chunkSize) / this.tileSize);
@@ -169,12 +169,12 @@ export class WorldRenderer {
         canvas.width = this.tileSize;
         canvas.height = this.tileSize + 16;
         const ctx = canvas.getContext('2d')!;
-        
+
         let color = '#2a2a2a';
         let sideColor = '#1a1a1a';
         let topColor = '#444';
-        
-        switch(tileType) {
+
+        switch (tileType) {
             case MaterialType.WOOD: color = '#5d4037'; sideColor = '#3e2723'; topColor = '#795548'; break;
             case MaterialType.BRICK: color = '#a52a2a'; sideColor = '#800000'; topColor = '#c62828'; break;
             case MaterialType.STONE: color = '#616161'; sideColor = '#424242'; topColor = '#9e9e9e'; break;
@@ -196,12 +196,12 @@ export class WorldRenderer {
                     if (hData[idx] > 0) {
                         const lx = sx * subSize;
                         const ly = sy * subSize + h;
-                        
+
                         ctx.fillStyle = sideColor;
                         ctx.fillRect(lx, ly, subSize, subSize);
                         ctx.fillStyle = color;
                         ctx.fillRect(lx, ly - h, subSize, subSize);
-                        
+
                         if (sData && sData[idx]) {
                             ctx.fillStyle = tileType === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
                             ctx.fillRect(lx, ly - h, subSize, subSize);
@@ -213,6 +213,34 @@ export class WorldRenderer {
                                 const r = Math.floor(100 + 155 * (heat / 0.4));
                                 ctx.fillStyle = `rgba(${r}, 0, 0, ${0.2 + heat * 0.4})`;
                                 ctx.fillRect(lx, ly - h, subSize, subSize);
+                            }
+                        }
+
+                        // Snow accumulation on walls (applied after heat/scorch)
+                        const snow = WeatherManager.getInstance().getSnowAccumulation();
+                        if (snow > 0.1) {
+                            // Prevent snow on very hot tiles
+                            const tileHeat = heatData && heatData[idx] ? heatData[idx] : 0;
+                            if (tileHeat < 0.3) {
+                                // Simple pseudo-random variation per sub-tile for natural look
+                                const variation = ((tx * 7 + ty * 13 + sx * 3 + sy * 5) % 100) / 100;
+                                const snowThreshold = 0.15 - (variation * 0.1); // 0.05 to 0.15
+
+                                if (snow > snowThreshold) {
+                                    // Progressive coverage based on accumulation
+                                    // Light: 0.1-0.3 (10-30% opacity)
+                                    // Moderate: 0.3-0.6 (40-60% opacity)
+                                    // Heavy: 0.6-1.0 (70-90% opacity)
+                                    const effectiveSnow = Math.min(1.0, (snow - snowThreshold) / (1.0 - snowThreshold));
+                                    const opacity = 0.1 + (effectiveSnow * 0.8);
+
+                                    // Top surface gets more snow (gravity)
+                                    const isTopSurface = sy === 0;
+                                    const finalOpacity = isTopSurface ? opacity : opacity * 0.7;
+
+                                    ctx.fillStyle = `rgba(240, 245, 255, ${finalOpacity})`;
+                                    ctx.fillRect(lx, ly - h, subSize, subSize);
+                                }
                             }
                         }
 
