@@ -13,6 +13,8 @@ export class WorldRenderer {
 
     private scratchCanvas: HTMLCanvasElement;
     private scratchCtx: CanvasRenderingContext2D;
+    private meltedGroundScratch: HTMLCanvasElement;
+    private meltedGroundCtx: CanvasRenderingContext2D;
 
     constructor(world: World) {
         this.world = world;
@@ -24,6 +26,11 @@ export class WorldRenderer {
         this.scratchCanvas.width = this.chunkSize;
         this.scratchCanvas.height = this.chunkSize + 32;
         this.scratchCtx = this.scratchCanvas.getContext('2d')!;
+
+        this.meltedGroundScratch = document.createElement('canvas');
+        this.meltedGroundScratch.width = 10;
+        this.meltedGroundScratch.height = 10;
+        this.meltedGroundCtx = this.meltedGroundScratch.getContext('2d')!;
     }
 
     public invalidateTileCache(tx: number, ty: number): void {
@@ -86,6 +93,16 @@ export class WorldRenderer {
                 ctx.lineTo(endX, y);
             }
             ctx.stroke();
+
+            // Render melted ground patches (dark ground showing through snow)
+            if (currentSnow > 0.1) {
+                const startTx = Math.floor(cameraX / this.tileSize);
+                const startTy = Math.floor(cameraY / this.tileSize);
+                const screenWTiles = Math.ceil(viewWidth / this.tileSize) + 1;
+                const screenHTiles = Math.ceil(viewHeight / this.tileSize) + 1;
+
+                this.renderMeltedGround(ctx, startTx, startTy, screenWTiles, screenHTiles);
+            }
         }
 
         const startGX = Math.floor(cameraX / this.chunkSize);
@@ -222,24 +239,32 @@ export class WorldRenderer {
                             // Prevent snow on very hot tiles
                             const tileHeat = heatData && heatData[idx] ? heatData[idx] : 0;
                             if (tileHeat < 0.3) {
-                                // Simple pseudo-random variation per sub-tile for natural look
-                                const variation = ((tx * 7 + ty * 13 + sx * 3 + sy * 5) % 100) / 100;
-                                const snowThreshold = 0.15 - (variation * 0.1); // 0.05 to 0.15
+                                // Check for local snow removal
+                                const removalData = WeatherManager.getInstance().getTileSnowRemoval(tx, ty);
+                                const snowFactor = removalData ? removalData[idx] : 1.0;
 
-                                if (snow > snowThreshold) {
-                                    // Progressive coverage based on accumulation
-                                    // Light: 0.1-0.3 (10-30% opacity)
-                                    // Moderate: 0.3-0.6 (40-60% opacity)
-                                    // Heavy: 0.6-1.0 (70-90% opacity)
-                                    const effectiveSnow = Math.min(1.0, (snow - snowThreshold) / (1.0 - snowThreshold));
-                                    const opacity = 0.1 + (effectiveSnow * 0.8);
+                                if (snowFactor > 0.01) { // Only render if some snow remains
+                                    // Simple pseudo-random variation per sub-tile for natural look
+                                    const variation = ((tx * 7 + ty * 13 + sx * 3 + sy * 5) % 100) / 100;
+                                    const snowThreshold = 0.15 - (variation * 0.1); // 0.05 to 0.15
 
-                                    // Top surface gets more snow (gravity)
-                                    const isTopSurface = sy === 0;
-                                    const finalOpacity = isTopSurface ? opacity : opacity * 0.7;
+                                    const effectiveSnow = snow * snowFactor; // Apply local removal
 
-                                    ctx.fillStyle = `rgba(240, 245, 255, ${finalOpacity})`;
-                                    ctx.fillRect(lx, ly - h, subSize, subSize);
+                                    if (effectiveSnow > snowThreshold) {
+                                        // Progressive coverage based on accumulation
+                                        // Light: 0.1-0.3 (10-30% opacity)
+                                        // Moderate: 0.3-0.6 (40-60% opacity)
+                                        // Heavy: 0.6-1.0 (70-90% opacity)
+                                        const normalizedSnow = Math.min(1.0, (effectiveSnow - snowThreshold) / (1.0 - snowThreshold));
+                                        const opacity = 0.1 + (normalizedSnow * 0.8);
+
+                                        // Top surface gets more snow (gravity)
+                                        const isTopSurface = sy === 0;
+                                        const finalOpacity = isTopSurface ? opacity : opacity * 0.7;
+
+                                        ctx.fillStyle = `rgba(240, 245, 255, ${finalOpacity})`;
+                                        ctx.fillRect(lx, ly - h, subSize, subSize);
+                                    }
                                 }
                             }
                         }
@@ -276,5 +301,50 @@ export class WorldRenderer {
     public clearCache(): void {
         this.tileCanvasCache.clear();
         this.wallChunks.clear();
+    }
+
+    private renderMeltedGround(ctx: CanvasRenderingContext2D, startTx: number, startTy: number, w: number, h: number): void {
+        const wm = WeatherManager.getInstance();
+        const sCtx = this.meltedGroundCtx;
+        const sCanv = this.meltedGroundScratch;
+        const imgData = sCtx.createImageData(10, 10);
+
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const tx = startTx + x;
+                const ty = startTy + y;
+
+                const removal = wm.getTileSnowRemoval(tx, ty);
+                if (removal) {
+                    let hasPixels = false;
+
+                    for (let i = 0; i < 100; i++) {
+                        const factor = removal[i];
+                        const idx = i * 4;
+                        if (factor < 0.99) {
+                            hasPixels = true;
+                            const alpha = Math.floor((1.0 - factor) * 255);
+                            imgData.data[idx] = 28;   // R
+                            imgData.data[idx + 1] = 28; // G
+                            imgData.data[idx + 2] = 28; // B
+                            imgData.data[idx + 3] = alpha;
+                        } else {
+                            imgData.data[idx + 3] = 0; // Transparent
+                        }
+                    }
+
+                    if (hasPixels) {
+                        sCtx.putImageData(imgData, 0, 0);
+                        const worldX = tx * this.tileSize;
+                        const worldY = ty * this.tileSize;
+
+                        ctx.save();
+                        ctx.imageSmoothingEnabled = true; // Smooths the sub-pixels
+                        ctx.drawImage(sCanv, worldX, worldY, this.tileSize, this.tileSize);
+                        ctx.restore();
+                    }
+                }
+            }
+        }
     }
 }

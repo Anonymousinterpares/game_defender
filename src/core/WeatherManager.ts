@@ -56,8 +56,14 @@ export class WeatherManager {
     private targetCloudWindSpeed: number = 1.5;
     private targetCloudWindAngle: number = 0;
 
+    // Per-tile snow removal (0 = fully removed, 1 = full snow)
+    // Similar to HeatMap structure: Map<"tx,ty", Float32Array[100]> for 10x10 sub-tiles
+    private snowRemovalData: Map<string, Float32Array> = new Map();
+    private readonly subDiv: number = 10;
+
     private constructor() {
         this.initializeFromConfig();
+        this.subscribeToEvents();
     }
 
     public static getInstance(): WeatherManager {
@@ -69,11 +75,22 @@ export class WeatherManager {
 
     public reset(): void {
         this.snowAccumulation = 0;
+        this.snowRemovalData.clear();
         this.initializeFromConfig();
     }
 
     public refreshConfig(): void {
         this.initializeFromConfig();
+    }
+
+    private subscribeToEvents(): void {
+        const eb = (window as any).EventBusInstance;
+        if (eb) {
+            // Listen for explosions to remove snow
+            eb.on('explosion', (data: { x: number, y: number, radius: number }) => {
+                this.removeSnowInArea(data.x, data.y, data.radius);
+            });
+        }
     }
 
     private initializeFromConfig(): void {
@@ -199,6 +216,28 @@ export class WeatherManager {
         while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
         this.cloudWindAngle += angleDiff * (lerpSpeed * 0.05);
 
+        // Gradually restore removed snow when snowing
+        if (this.snowIntensity > 0.1) {
+            this.snowRemovalData.forEach((data, key) => {
+                let fullyRestored = true;
+                for (let i = 0; i < data.length; i++) {
+                    if (data[i] < 1.0) {
+                        // Restore at 0.01/second (much slower than initial accumulation)
+                        data[i] = Math.min(1.0, data[i] + dt * 0.01);
+                        if (data[i] < 0.99) fullyRestored = false;
+                    }
+                }
+                if (fullyRestored) {
+                    this.snowRemovalData.delete(key);
+                }
+            });
+        } else if (this.snowAccumulation <= 0.01) {
+            // Optimization: Clear all removal data if snow is gone
+            if (this.snowRemovalData.size > 0) {
+                this.snowRemovalData.clear();
+            }
+        }
+
         // Periodically fluctuate targets to prevent "stuck" high intensities
         // This ensures weather feels dynamic and doesn't just crawl to a max and stay there.
         if (Math.random() < 0.0005 * dt) {
@@ -248,5 +287,164 @@ export class WeatherManager {
 
     public getSnowAccumulation(): number {
         return this.snowAccumulation;
+    }
+
+    /**
+     * Get effective snow coverage at a specific world position (0-1 scale)
+     * Takes global accumulation and applies local removal data
+     */
+    public getSnowCoverageAt(worldX: number, worldY: number, tileSize: number): number {
+        if (this.snowAccumulation < 0.1) return 0;
+
+        const tx = Math.floor(worldX / tileSize);
+        const ty = Math.floor(worldY / tileSize);
+        const key = `${tx},${ty}`;
+        const removalData = this.snowRemovalData.get(key);
+
+        if (!removalData) return this.snowAccumulation;
+
+        const subX = Math.floor((worldX - tx * tileSize) / (tileSize / this.subDiv));
+        const subY = Math.floor((worldY - ty * tileSize) / (tileSize / this.subDiv));
+        const idx = subY * this.subDiv + subX;
+
+        // removalData[idx]: 0 = fully removed, 1 = full snow
+        return this.snowAccumulation * removalData[idx];
+    }
+
+    /**
+     * Get tile-level snow removal data for rendering
+     */
+    public getTileSnowRemoval(tx: number, ty: number): Float32Array | null {
+        return this.snowRemovalData.get(`${tx},${ty}`) || null;
+    }
+
+    /**
+     * Remove snow in area (called by explosions)
+     */
+    public removeSnowInArea(worldX: number, worldY: number, radius: number, tileSize: number = 32): void {
+        const tx = Math.floor(worldX / tileSize);
+        const ty = Math.floor(worldY / tileSize);
+        const tileRadius = Math.ceil(radius / tileSize);
+
+        for (let ry = -tileRadius; ry <= tileRadius; ry++) {
+            for (let rx = -tileRadius; rx <= tileRadius; rx++) {
+                this.removeSnowInTile(tx + rx, ty + ry, worldX, worldY, radius, tileSize);
+            }
+        }
+    }
+
+    private removeSnowInTile(tx: number, ty: number, hitX: number, hitY: number, radius: number, tileSize: number): void {
+        const key = `${tx},${ty}`;
+        let data = this.snowRemovalData.get(key);
+
+        if (!data) {
+            data = new Float32Array(this.subDiv * this.subDiv);
+            data.fill(1.0); // Start with full snow
+            this.snowRemovalData.set(key, data);
+        }
+
+        const tileWorldX = tx * tileSize;
+        const tileWorldY = ty * tileSize;
+        const subSize = tileSize / this.subDiv;
+
+        for (let i = 0; i < data.length; i++) {
+            const subX = i % this.subDiv;
+            const subY = Math.floor(i / this.subDiv);
+            const centerX = tileWorldX + (subX + 0.5) * subSize;
+            const centerY = tileWorldY + (subY + 0.5) * subSize;
+
+            const dx = centerX - hitX;
+            const dy = centerY - hitY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < radius) {
+                // Remove snow completely within explosion radius
+                data[i] = 0;
+            }
+        }
+    }
+
+    /**
+     * Remove snow from heated tiles (called by update with HeatMap data)
+     * Includes 2-layer spread to neighbors and ground melting
+     */
+    public removeSnowFromHeat(tx: number, ty: number, heatData: Float32Array, tileSize: number = 32): void {
+        const key = `${tx},${ty}`;
+        let data = this.snowRemovalData.get(key);
+
+        if (!data) {
+            data = new Float32Array(this.subDiv * this.subDiv);
+            data.fill(1.0); // Start with full snow
+            this.snowRemovalData.set(key, data);
+        }
+
+        const heatThreshold = 0.3; // Same as WorldRenderer check
+
+        for (let i = 0; i < heatData.length; i++) {
+            if (heatData[i] > heatThreshold) {
+                // Remove snow from hot sub-tile
+                data[i] = Math.max(0, data[i] - 0.05); // Gradual melting
+
+                // Spread to 2 layers of neighbors (8-directional + secondary ring)
+                const sx = i % this.subDiv;
+                const sy = Math.floor(i / this.subDiv);
+
+                // Layer 1: Immediate neighbors (8-directional)
+                for (let ny = -1; ny <= 1; ny++) {
+                    for (let nx = -1; nx <= 1; nx++) {
+                        if (nx === 0 && ny === 0) continue;
+                        this.meltNeighborSnow(tx, ty, sx + nx, sy + ny, 0.03, tileSize);
+                    }
+                }
+
+                // Layer 2: Secondary ring
+                for (let ny = -2; ny <= 2; ny++) {
+                    for (let nx = -2; nx <= 2; nx++) {
+                        const dist = Math.sqrt(nx * nx + ny * ny);
+                        if (dist > 1.5 && dist <= 2.5) {
+                            this.meltNeighborSnow(tx, ty, sx + nx, sy + ny, 0.01, tileSize);
+                        }
+                    }
+                }
+
+                // Ground melting (similar to molten metal)
+                this.meltGroundSnowBelowHeat(tx, ty, sx, sy, tileSize);
+            }
+        }
+    }
+
+    private meltNeighborSnow(baseTx: number, baseTy: number, sx: number, sy: number, amount: number, tileSize: number): void {
+        let targetTx = baseTx;
+        let targetTy = baseTy;
+        let targetSx = sx;
+        let targetSy = sy;
+
+        // Handle cross-tile boundaries
+        if (sx < 0) { targetTx--; targetSx = sx + this.subDiv; }
+        else if (sx >= this.subDiv) { targetTx++; targetSx = sx - this.subDiv; }
+
+        if (sy < 0) { targetTy--; targetSy = sy + this.subDiv; }
+        else if (sy >= this.subDiv) { targetTy++; targetSy = sy - this.subDiv; }
+
+        const key = `${targetTx},${targetTy}`;
+        let data = this.snowRemovalData.get(key);
+
+        if (!data) {
+            data = new Float32Array(this.subDiv * this.subDiv);
+            data.fill(1.0);
+            this.snowRemovalData.set(key, data);
+        }
+
+        const idx = targetSy * this.subDiv + targetSx;
+        data[idx] = Math.max(0, data[idx] - amount);
+    }
+
+    private meltGroundSnowBelowHeat(tx: number, ty: number, sx: number, sy: number, tileSize: number): void {
+        // Melt ground snow in 8-directional neighbors (simulating heat radiation to ground)
+        const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]];
+
+        for (const [nx, ny] of neighbors) {
+            this.meltNeighborSnow(tx, ty, sx + nx, sy + ny, 0.02, tileSize);
+        }
     }
 }

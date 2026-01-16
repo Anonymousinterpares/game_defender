@@ -2,6 +2,7 @@
 import { SoundManager } from './SoundManager';
 import { ConfigManager } from '../config/MasterConfig';
 import { FloorDecalManager } from './FloorDecalManager';
+import { WeatherManager } from './WeatherManager';
 
 export enum MaterialType {
     NONE = 0,
@@ -30,21 +31,21 @@ export const MATERIAL_PROPS: Record<MaterialType, MaterialProperties> = {
 export class HeatMap {
     private heatData: Map<string, Float32Array> = new Map();
     private activeTiles: Set<string> = new Set();
-    private scorchData: Map<string, Uint8Array> = new Map(); 
-    
+    private scorchData: Map<string, Uint8Array> = new Map();
+
     // New material and HP data
     private materialData: Map<string, Uint8Array> = new Map();
     private hpData: Map<string, Float32Array> = new Map();
     private fireData: Map<string, Float32Array> = new Map(); // intensity of fire
     private moltenData: Map<string, Float32Array> = new Map(); // molten intensity for METAL
     private whiteHeatTime: Map<string, Float32Array> = new Map(); // how long sub-tile is white-hot
-    
+
     private subDiv: number = 10; // 10x10 sub-elements per tile
     private decayRate: number = 0.0125; // Decreased 4x (from 0.05)
-    private spreadRate: number = 0.1; 
-    
+    private spreadRate: number = 0.1;
+
     private lastSimTime: number = 0;
-    private simInterval: number = 3; 
+    private simInterval: number = 3;
     private frameCount: number = 0;
     private fireAsset: HTMLImageElement | null = null;
     private worldRef: any = null;
@@ -84,13 +85,13 @@ export class HeatMap {
     public checkFireArea(x: number, y: number, radius: number): boolean {
         // Check center and 4 points around the radius for fire
         const points = [
-            {x, y},
-            {x: x - radius, y},
-            {x: x + radius, y},
-            {x, y: y - radius},
-            {x, y: y + radius}
+            { x, y },
+            { x: x - radius, y },
+            { x: x + radius, y },
+            { x, y: y - radius },
+            { x, y: y + radius }
         ];
-        
+
         for (const p of points) {
             if (this.isSubTileBurning(p.x, p.y)) return true;
         }
@@ -99,13 +100,13 @@ export class HeatMap {
 
     public getMaxIntensityArea(x: number, y: number, radius: number): number {
         const points = [
-            {x, y},
-            {x: x - radius, y},
-            {x: x + radius, y},
-            {x, y: y - radius},
-            {x, y: y + radius}
+            { x, y },
+            { x: x - radius, y },
+            { x: x + radius, y },
+            { x, y: y - radius },
+            { x, y: y + radius }
         ];
-        
+
         let max = 0;
         for (const p of points) {
             max = Math.max(max, this.getIntensityAt(p.x, p.y));
@@ -115,13 +116,13 @@ export class HeatMap {
 
     public getMaxMoltenArea(x: number, y: number, radius: number): number {
         const points = [
-            {x, y},
-            {x: x - radius, y},
-            {x: x + radius, y},
-            {x, y: y - radius},
-            {x, y: y + radius}
+            { x, y },
+            { x: x - radius, y },
+            { x: x + radius, y },
+            { x, y: y - radius },
+            { x, y: y + radius }
         ];
-        
+
         let max = 0;
         for (const p of points) {
             max = Math.max(max, this.getMoltenAt(p.x, p.y));
@@ -134,7 +135,7 @@ export class HeatMap {
         const key = `${tx},${ty}`;
         const mData = new Uint8Array(this.subDiv * this.subDiv).fill(material);
         this.materialData.set(key, mData);
-        
+
         const hp = MATERIAL_PROPS[material].hp;
         const hData = new Float32Array(this.subDiv * this.subDiv).fill(hp);
         this.hpData.set(key, hData);
@@ -155,7 +156,7 @@ export class HeatMap {
     public isTileMostlyDestroyed(tx: number, ty: number): boolean {
         const hData = this.hpData.get(`${tx},${ty}`);
         if (!hData) return false;
-        
+
         let destroyedCount = 0;
         for (let i = 0; i < hData.length; i++) {
             if (hData[i] <= 0) destroyedCount++;
@@ -163,8 +164,8 @@ export class HeatMap {
         return destroyedCount > (hData.length * 0.8);
     }
 
-    public getFireClusters(gridSize: number): {x: number, y: number, intensity: number, color: string}[] {
-        const clusters: Map<string, {x: number, y: number, intensity: number, count: number, r: number, g: number, b: number}> = new Map();
+    public getFireClusters(gridSize: number): { x: number, y: number, intensity: number, color: string }[] {
+        const clusters: Map<string, { x: number, y: number, intensity: number, count: number, r: number, g: number, b: number }> = new Map();
         const fireColor = { r: 255, g: 102, b: 0 }; // Default fire orange
 
         this.activeTiles.forEach(key => {
@@ -180,7 +181,7 @@ export class HeatMap {
             for (let i = 0; i < dataLen; i++) {
                 const fire = fData ? fData[i] : 0;
                 const heat = hData ? hData[i] : 0;
-                
+
                 // Lower threshold to 0.3 for red glow on heated walls
                 if (fire > 0.1 || heat > 0.3) {
                     const subX = i % this.subDiv;
@@ -197,10 +198,10 @@ export class HeatMap {
                         cluster = { x: 0, y: 0, intensity: 0, count: 0, r: 0, g: 0, b: 0 };
                         clusters.set(cKey, cluster);
                     }
-                    
+
                     cluster.x += px;
                     cluster.y += py;
-                    
+
                     const mData = this.moltenData.get(key);
                     const molten = mData ? mData[i] : 0;
                     const inst = Math.max(fire, (heat - 0.2) * 1.5, molten);
@@ -224,11 +225,11 @@ export class HeatMap {
             x: c.x / c.count,
             y: c.y / c.count,
             intensity: c.intensity / c.count,
-            color: `rgb(${Math.floor(c.r/c.count)}, ${Math.floor(c.g/c.count)}, ${Math.floor(c.b/c.count)})`
+            color: `rgb(${Math.floor(c.r / c.count)}, ${Math.floor(c.g / c.count)}, ${Math.floor(c.b / c.count)})`
         }));
     }
 
-    private getHeatColorComponents(intensity: number): {r: number, g: number, b: number} {
+    private getHeatColorComponents(intensity: number): { r: number, g: number, b: number } {
         if (intensity < 0.4) {
             const r = Math.floor(100 + 155 * (intensity / 0.4));
             return { r, g: 0, b: 0 };
@@ -244,7 +245,7 @@ export class HeatMap {
     public addHeat(worldX: number, worldY: number, amount: number, radius: number): void {
         const tx = Math.floor(worldX / this.tileSize);
         const ty = Math.floor(worldY / this.tileSize);
-        
+
         const tileRadius = Math.ceil(radius / this.tileSize);
         for (let ry = -tileRadius; ry <= tileRadius; ry++) {
             for (let rx = -tileRadius; rx <= tileRadius; rx++) {
@@ -265,9 +266,9 @@ export class HeatMap {
             data = new Float32Array(this.subDiv * this.subDiv);
             this.heatData.set(key, data);
         }
-        
+
         this.activeTiles.add(key);
-        
+
         const tileWorldX = tx * this.tileSize;
         const tileWorldY = ty * this.tileSize;
         const subSize = this.tileSize / this.subDiv;
@@ -284,12 +285,12 @@ export class HeatMap {
 
             const dx = centerX - hitX;
             const dy = centerY - hitY;
-            const dist = Math.sqrt(dx*dx + dy*dy);
+            const dist = Math.sqrt(dx * dx + dy * dy);
 
             if (dist < radius) {
-                const effect = (1 - dist/radius) * amount;
+                const effect = (1 - dist / radius) * amount;
                 data[i] = Math.min(1.0, data[i] + effect);
-                
+
                 this.applyScorch(tx, ty, i);
 
                 // Wood Flammability
@@ -361,7 +362,7 @@ export class HeatMap {
 
             const dx = centerX - hitX;
             const dy = centerY - hitY;
-            const dist = Math.sqrt(dx*dx + dy*dy);
+            const dist = Math.sqrt(dx * dx + dy * dy);
 
             if (dist < radius) {
                 // Only ignite if it's on the surface (exposed to air/destroyed sub-tile)
@@ -435,13 +436,13 @@ export class HeatMap {
 
             const dx = centerX - hitX;
             const dy = centerY - hitY;
-            const dist = Math.sqrt(dx*dx + dy*dy);
+            const dist = Math.sqrt(dx * dx + dy * dy);
 
             let effectiveRadius = radius;
             if (isIrregular) {
                 // Add star-like/irregular noise (0 to 10 sub-tiles extra)
                 const angle = Math.atan2(dy, dx);
-                const noise = (Math.sin(angle * 5) + Math.cos(angle * 3)) * 5; 
+                const noise = (Math.sin(angle * 5) + Math.cos(angle * 3)) * 5;
                 effectiveRadius += noise;
             }
 
@@ -471,7 +472,7 @@ export class HeatMap {
 
         this.activeTiles.forEach(key => {
             const [tx, ty] = key.split(',').map(Number);
-            
+
             // Skip boundaries
             if (tx <= 0 || tx >= this.widthTiles - 1 || ty <= 0 || ty >= this.heightTiles - 1) {
                 this.activeTiles.delete(key);
@@ -480,6 +481,11 @@ export class HeatMap {
             }
 
             const data = this.heatData.get(key);
+
+            if (data) {
+                WeatherManager.getInstance().removeSnowFromHeat(tx, ty, data, this.tileSize);
+            }
+
             const fData = this.fireData.get(key);
             const mlData = this.moltenData.get(key);
             const mData = this.materialData.get(key);
@@ -505,10 +511,10 @@ export class HeatMap {
                     if (val > 0) {
                         let sum = val;
                         let count = 1;
-                        const neighbors = [[-1,0], [1,0], [0,-1], [0,1]];
+                        const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
                         for (const [nx, ny] of neighbors) {
                             const nIdx = (y + ny) * this.subDiv + (x + nx);
-                            if (x+nx >= 0 && x+nx < this.subDiv && y+ny >= 0 && y+ny < this.subDiv) {
+                            if (x + nx >= 0 && x + nx < this.subDiv && y + ny >= 0 && y + ny < this.subDiv) {
                                 sum += data![nIdx];
                                 count++;
                             }
@@ -546,8 +552,8 @@ export class HeatMap {
                         // Hot wall leaks molten metal into empty/destroyed neighbors
                         // Doubled leak rate (0.8 vs 0.4) to increase area
                         const leakAmount = (nextData[idx] - 0.4) * 0.8 * effectiveDT;
-                        const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1,-1], [1,1], [-1,1], [1,-1]];
-                        
+                        const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]];
+
                         for (const [nx, ny] of neighbors) {
                             let nx_sub = x + nx;
                             let ny_sub = y + ny;
@@ -563,7 +569,7 @@ export class HeatMap {
 
                             const nhData = this.hpData.get(nKey);
                             const nIdx = ny_sub * this.subDiv + nx_sub;
-                            
+
                             // ONLY leak into empty/destroyed space
                             if (!nhData || nhData[nIdx] <= 0) {
                                 let nmData = this.moltenData.get(nKey);
@@ -585,9 +591,9 @@ export class HeatMap {
                         const pressure = nextMolten[idx] + (nextData[idx] * 0.5);
                         if (pressure > 0.15) { // Lowered threshold for easier flow
                             // Diagonal neighbors added for corner rounding
-                            const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1,-1], [1,1], [-1,1], [1,-1]];
+                            const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]];
                             if (Math.random() < 0.5) neighbors.reverse();
-                            
+
                             for (const [nx, ny] of neighbors) {
                                 let nx_sub = x + nx;
                                 let ny_sub = y + ny;
@@ -603,7 +609,7 @@ export class HeatMap {
 
                                 const nIdx = ny_sub * this.subDiv + nx_sub;
                                 const nhData = this.hpData.get(nKey);
-                                
+
                                 // Spill only into other empty spaces
                                 if (!nhData || nhData[nIdx] <= 0) {
                                     let n_nmData = this.moltenData.get(nKey);
@@ -614,9 +620,9 @@ export class HeatMap {
                                     }
 
                                     // Flow rate doubled again (2.0 vs 1.0) to increase spread
-                                    const flowRate = 2.0 * (1 + nextData[idx]); 
+                                    const flowRate = 2.0 * (1 + nextData[idx]);
                                     const spreadAmount = (pressure - 0.05) * flowRate * effectiveDT;
-                                    
+
                                     if (spreadAmount > 0.001) {
                                         n_nmData[nIdx] = Math.min(2.0, n_nmData[nIdx] + spreadAmount);
                                         nextMolten[idx] -= spreadAmount * 0.9;
@@ -642,16 +648,16 @@ export class HeatMap {
                             burningSubTiles++;
                             nextFire[idx] += effectiveDT * 0.5; // Fire grows
                             nextData[idx] = Math.min(1.0, nextData[idx] + nextFire[idx] * 0.2); // Fire heats up tile
-                            
+
                             // Damage block
                             if (hData) hData[idx] -= effectiveDT * 10; // 1 second to destroy
 
                             // Spread fire every 100ms per layer (approx)
                             if (nextFire[idx] > 0.3) {
-                                const neighbors = [[-1,0], [1,0], [0,-1], [0,1]];
+                                const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
                                 for (const [nx, ny] of neighbors) {
                                     const nIdx = (y + ny) * this.subDiv + (x + nx);
-                                    if (x+nx >= 0 && x+nx < this.subDiv && y+ny >= 0 && y+ny < this.subDiv) {
+                                    if (x + nx >= 0 && x + nx < this.subDiv && y + ny >= 0 && y + ny < this.subDiv) {
                                         if (nextFire[nIdx] === 0 && hData && hData[nIdx] > 0) {
                                             nextFire[nIdx] = 0.05;
                                         }
@@ -678,13 +684,13 @@ export class HeatMap {
                 const worldY = ty * this.tileSize + this.tileSize / 2;
                 soundMgr.updateAreaSound('fire', worldX, worldY, burningSubTiles);
             }
-            
+
             if (data) data.set(nextData);
             if (fData && nextFire) fData.set(nextFire);
             if (nextMolten) {
                 // Only save if there's actual molten metal
                 let hasMolten = false;
-                for(let i=0; i<nextMolten.length; i++) if(nextMolten[i] > 0) { hasMolten = true; break; }
+                for (let i = 0; i < nextMolten.length; i++) if (nextMolten[i] > 0) { hasMolten = true; break; }
                 if (hasMolten) this.moltenData.set(key, nextMolten);
                 else this.moltenData.delete(key);
             }
@@ -741,7 +747,7 @@ export class HeatMap {
             if (heatData) {
                 sCtx.clearRect(0, 0, this.subDiv, this.subDiv);
                 let hasSignificantHeat = false;
-                
+
                 const imgData = sCtx.createImageData(this.subDiv, this.subDiv);
                 for (let i = 0; i < heatData.length; i++) {
                     const h = heatData[i];
@@ -751,15 +757,15 @@ export class HeatMap {
                         const alpha = Math.floor((h < 0.8 ? (0.4 + h * 0.6) : 1.0) * 255);
                         const idx = i * 4;
                         imgData.data[idx] = color.r;
-                        imgData.data[idx+1] = color.g;
-                        imgData.data[idx+2] = color.b;
-                        imgData.data[idx+3] = alpha;
+                        imgData.data[idx + 1] = color.g;
+                        imgData.data[idx + 2] = color.b;
+                        imgData.data[idx + 3] = alpha;
                     }
                 }
 
                 if (hasSignificantHeat) {
                     sCtx.putImageData(imgData, 0, 0);
-                    
+
                     ctx.save();
                     ctx.imageSmoothingEnabled = true;
                     ctx.drawImage(sCanv, worldX, worldY, this.tileSize, this.tileSize);
@@ -772,7 +778,7 @@ export class HeatMap {
             if (mld) {
                 sCtx.clearRect(0, 0, this.subDiv, this.subDiv);
                 let hasMolten = false;
-                
+
                 const imgData = sCtx.createImageData(this.subDiv, this.subDiv);
                 for (let i = 0; i < mld.length; i++) {
                     const m = mld[i];
@@ -781,31 +787,31 @@ export class HeatMap {
                         const alpha = Math.floor(Math.min(1.0, m) * 255);
                         const idx = i * 4;
                         imgData.data[idx] = 255;
-                        imgData.data[idx+1] = 200;
-                        imgData.data[idx+2] = 0;
-                        imgData.data[idx+3] = alpha;
+                        imgData.data[idx + 1] = 200;
+                        imgData.data[idx + 2] = 0;
+                        imgData.data[idx + 3] = alpha;
                     }
                 }
 
                 if (hasMolten) {
                     sCtx.putImageData(imgData, 0, 0);
-                    
+
                     ctx.save();
                     ctx.imageSmoothingEnabled = true;
                     // Stable alpha for puddles (no flickering)
                     const staticAlpha = 0.95;
-                    
+
                     // Layer 1: Outer Glow (Soft & Wide)
                     ctx.globalAlpha = staticAlpha * 0.5;
                     ctx.shadowBlur = 15; // Increased blur for rounding
                     ctx.shadowColor = '#ff6600';
                     ctx.drawImage(sCanv, worldX - 3, worldY - 3, this.tileSize + 6, this.tileSize + 6);
-                    
+
                     // Layer 2: Inner Liquid Core
                     ctx.shadowBlur = 0;
                     ctx.globalAlpha = staticAlpha;
                     ctx.drawImage(sCanv, worldX - 1, worldY - 1, this.tileSize + 2, this.tileSize + 2);
-                    
+
                     ctx.restore();
                 }
             }
@@ -827,11 +833,11 @@ export class HeatMap {
                             const fw = this.fireAsset.width / frameCount;
                             const fh = this.fireAsset.height;
                             const fx = frame * fw;
-                            ctx.drawImage(this.fireAsset, fx, 0, fw, fh, rx - subSize*0.5, ry - subSize, subSize*2, subSize*2);
+                            ctx.drawImage(this.fireAsset, fx, 0, fw, fh, rx - subSize * 0.5, ry - subSize, subSize * 2, subSize * 2);
                         } else {
                             // Blended procedural fire fallback
                             const pulse = 0.6 + Math.sin(time * 30 + i) * 0.4;
-                            const grad = ctx.createRadialGradient(rx + subSize/2, ry + subSize/2, 0, rx + subSize/2, ry + subSize/2, subSize * 1.5);
+                            const grad = ctx.createRadialGradient(rx + subSize / 2, ry + subSize / 2, 0, rx + subSize / 2, ry + subSize / 2, subSize * 1.5);
                             grad.addColorStop(0, `rgba(255, 200, 0, ${fire * pulse})`);
                             grad.addColorStop(0.5, `rgba(255, 50, 0, ${fire * pulse * 0.5})`);
                             grad.addColorStop(1, 'rgba(255, 0, 0, 0)');
@@ -940,20 +946,20 @@ export class HeatMap {
      */
     public getDeltaState(): any[] {
         const delta: any[] = [];
-        
+
         // Add active tiles
         this.activeTiles.forEach(key => {
             const h = this.heatData.get(key);
             const f = this.fireData.get(key);
             const s = this.scorchData.get(key);
             const m = this.moltenData.get(key);
-            
+
             if (h || f || s || m) {
                 const dObj: any = { k: key };
                 if (h) dObj.h = this.compressFloatArray(h);
                 if (f) dObj.f = this.compressFloatArray(f);
                 if (m) dObj.m = this.compressFloatArray(m);
-                if (s) dObj.s = Array.from(s); 
+                if (s) dObj.s = Array.from(s);
                 delta.push(dObj);
             }
         });
@@ -971,11 +977,11 @@ export class HeatMap {
         // If Host sends a "reset" or we want to track inactive tiles:
         // For now, Host sends a list of keys that are active.
         // We might want to remove local tiles that the host didn't send if they are "old".
-        
+
         delta.forEach(d => {
             const key = d.k;
             const [tx, ty] = key.split(',').map(Number);
-            
+
             // Special "Clear" command from Host
             if (d.c === 1) {
                 this.forceClear(key);
@@ -1001,13 +1007,13 @@ export class HeatMap {
             }
             if (d.s) {
                 let s = this.scorchData.get(key);
-                if (!s) { 
-                    s = new Uint8Array(this.subDiv * this.subDiv); 
-                    this.scorchData.set(key, s); 
+                if (!s) {
+                    s = new Uint8Array(this.subDiv * this.subDiv);
+                    this.scorchData.set(key, s);
                 }
                 const serverS = d.s;
                 let changed = false;
-                for(let i=0; i<serverS.length; i++) {
+                for (let i = 0; i < serverS.length; i++) {
                     if (s[i] !== serverS[i]) {
                         s[i] = serverS[i];
                         changed = true;
@@ -1032,7 +1038,7 @@ export class HeatMap {
     private compressFloatArray(arr: Float32Array): number[] {
         const res: number[] = [];
         let hasNonZero = false;
-        for(let i=0; i<arr.length; i++) {
+        for (let i = 0; i < arr.length; i++) {
             const v = Math.round(arr[i] * 100) / 100;
             res.push(v);
             if (v > 0.01) hasNonZero = true; // Use threshold
@@ -1045,14 +1051,13 @@ export class HeatMap {
             target.fill(0);
             return;
         }
-        for(let i=0; i<Math.min(source.length, target.length); i++) {
+        for (let i = 0; i < Math.min(source.length, target.length); i++) {
             target[i] = source[i];
         }
     }
 }
 
-    
 
-        
 
-    
+
+
