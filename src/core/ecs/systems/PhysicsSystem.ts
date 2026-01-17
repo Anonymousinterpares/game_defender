@@ -68,12 +68,14 @@ export class PhysicsSystem implements System {
             // Store state for interpolation
             transform.prevX = transform.x;
             transform.prevY = transform.y;
+            transform.prevZ = transform.z;
 
             if (physics.isStatic || (health && !health.active)) continue;
 
             // 1. Force Accumulator
             let forceX = 0;
             let forceY = 0;
+            let forceZ = 0; // Vertical force
 
             // 2. Handle Input (Thrust)
             if (input) {
@@ -114,6 +116,13 @@ export class PhysicsSystem implements System {
             // 5. Physics Update (Euler integration)
             const ax = forceX / physics.mass;
             const ay = forceY / physics.mass;
+            
+            // Apply Gravity to Z if in air
+            if (transform.z < 0 || physics.vz !== 0) {
+                forceZ += physics.mass * gravity * 50; // Simple gravity factor
+                const az = forceZ / physics.mass;
+                physics.vz += az * dt;
+            }
 
             physics.vx += ax * dt;
             physics.vy += ay * dt;
@@ -121,6 +130,13 @@ export class PhysicsSystem implements System {
             // 6. Predict Position
             let nextX = transform.x + physics.vx * dt;
             let nextY = transform.y + physics.vy * dt;
+            let nextZ = transform.z + physics.vz * dt;
+
+            // Landing logic
+            if (nextZ > 0) {
+                nextZ = 0;
+                physics.vz = 0;
+            }
 
             // Log if enabled
             if (physicsLogs) {
@@ -179,6 +195,7 @@ export class PhysicsSystem implements System {
             // 10. Commit Final Position
             transform.x = nextX;
             transform.y = nextY;
+            transform.z = nextZ;
         }
     }
 

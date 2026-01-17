@@ -1,6 +1,6 @@
 {
   "name": "modular-rogue",
-  "version": "0.20",
+  "version": "0.21",
   "description": "Modular Arcade Roguelike",
   "main": "src/main.ts",
   "scripts": {

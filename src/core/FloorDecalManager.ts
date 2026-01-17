@@ -282,5 +282,6 @@ export class FloorDecalManager {
 
     public clear(): void {
         this.decals = [];
+        this.needsRedraw = true;
     }
 }

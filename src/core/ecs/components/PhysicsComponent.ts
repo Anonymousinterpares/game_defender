@@ -11,6 +11,7 @@ export class PhysicsComponent implements Component {
         public steeringForceX: number = 0,
         public steeringForceY: number = 0,
         public frictionMultiplier: number = 1.0,
-        public alignRotationToVelocity: boolean = false
+        public alignRotationToVelocity: boolean = false,
+        public vz: number = 0
     ) {}
 }

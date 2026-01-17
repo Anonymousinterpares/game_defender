@@ -247,6 +247,25 @@ export class CombatSystem {
                             health.active = false;
                         }
 
+                        // Apply Physical Knockback (Vertical & Horizontal)
+                        const physics = this.parent.entityManager.getComponent(rootId, 'physics');
+                        const transform = this.parent.entityManager.getComponent(rootId, 'transform');
+                        if (physics && transform && !physics.isStatic) {
+                            const power = (radius / (dist + 1)) * 125; // Reduced from 500 (75% weaker)
+                            const angle = Math.atan2(dy, dx);
+                            
+                            // Horizontal push
+                            physics.vx += Math.cos(angle) * power;
+                            physics.vy += Math.sin(angle) * power;
+                            
+                            // Vertical Knock-up (Negative vz is UP)
+                            // Only knock up if reasonably close to center
+                            if (dist < radius * 0.8) {
+                                physics.vz = -100 * falloff; // Reduced from -200 (50% speed)
+                                transform.z = -5; // Instant lift to ensure PhysicsSystem catches it
+                            }
+                        }
+
                         // Sync for multiplayer
                         const tag = this.parent.entityManager.getComponent(rootId, 'tag')?.tag;
                         if (isMyExplosion && (tag === 'remote_player' || (tag === 'player' && this.parent.myId !== 'local'))) {

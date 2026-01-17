@@ -52,46 +52,82 @@ export class RenderSystem implements System {
             // Interpolation
             let ix = transform.prevX + (transform.x - transform.prevX) * alpha;
             let iy = transform.prevY + (transform.y - transform.prevY) * alpha;
+            let iz = transform.prevZ + (transform.z - transform.prevZ) * alpha;
             const rotation = transform.rotation;
 
-            // Safety check for NaN or undefined (shouldn't happen with proper init, but good to have)
+            // Perspective Shift: Lean away from screen center based on height
+            // We need camera position for this. 
+            // In LightingRenderer, parent has cameraX, cameraY. 
+            // RenderSystem doesn't have it directly. We can pass it or use window center.
+            const centerX = window.innerWidth / 2;
+            const centerY = window.innerHeight / 2;
+            
+            // Offset for drawing: y is shifted by z, x is shifted slightly by perspective
+            const perspectiveFactor = 0.05;
+            const renderX = ix + (ix - (ix)) * iz * perspectiveFactor; // Simplified for now, or use real camera
+            const renderY = iy + iz; // Note: negative z is 'up' in most coordinate systems, but let's check convention.
+            // Looking at LightingRenderer: const screenY = (p.y - this.parent.cameraY) - (camDy * parallaxMult * 10);
+            // And ParticleSystem: vz is positive (gravity). So z > 0 is "ground/below".
+            // Let's stick to: z < 0 is ABOVE ground. 
+            // PhysicsSystem used: nextZ = 0 if nextZ > 0. And gravity is positive. So Z increases downwards.
+            // So if Z < 0, entity is in the air.
+            
+            // Safety check for NaN or undefined
             if (isNaN(ix) || isNaN(iy)) {
                 ix = transform.x;
                 iy = transform.y;
+                iz = transform.z;
             }
 
-            // Sync visual properties from HealthComponent if available (Legacy/Compat)
-            // Ideally RenderComponent should hold these, but logic updates HealthComponent currently.
-            // Let's copy them over for the frame or just use HealthComponent directly.
-            // The RenderComponent now has these fields, but the game logic updates HealthComponent.
-            // We should use the HealthComponent values as source of truth for now.
             const scale = health?.visualScale ?? render.visualScale;
             const damageFlash = health?.damageFlash ?? render.damageFlash;
 
             ctx.save();
 
-            // Apply scale if needed
+            // 1. Draw Shadow first (on the ground)
+            this.drawShadow(ctx, ix, iy, render.radius, iz, scale);
+
+            // 2. Draw Entity with Z-offset
+            ctx.save();
             if (scale !== 1.0) {
-                ctx.translate(ix, iy);
+                ctx.translate(ix, iy + iz);
                 ctx.scale(scale, scale);
-                ctx.translate(-ix, -iy);
+                ctx.translate(-ix, -(iy + iz));
             }
 
             if (render.renderFn) {
-                render.renderFn(ctx, ix, iy, rotation, scale);
+                render.renderFn(ctx, ix, iy + iz, rotation, scale);
             } else {
-                this.drawByType(ctx, id, entityManager, render, ix, iy, rotation, scale, damageFlash, health, fire);
+                this.drawByType(ctx, id, entityManager, render, ix, iy + iz, rotation, scale, damageFlash, health, fire);
             }
+            ctx.restore();
 
             ctx.restore();
 
-            // Render Fire Effect on top (without scale affect usually, or with? 
-            // Original code: "Render fire if burning (outside the scale/tint for clarity)"
-            // So we draw it here, after restore.
+            // Render Fire Effect on top
             if (fire?.isOnFire) {
-                this.drawFire(ctx, ix, iy, render.radius, id);
+                this.drawFire(ctx, ix, iy + iz, render.radius, id);
             }
         }
+    }
+
+    private drawShadow(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, z: number, scale: number): void {
+        // Shadow gets smaller and lighter as Z increases (more negative)
+        // PhysicsSystem: z is 0 on ground, z < 0 in air.
+        const heightFactor = Math.abs(z) / 200; // Normalized height
+        const shadowScale = Math.max(0.4, 1.0 - heightFactor * 0.5) * scale;
+        const shadowAlpha = Math.max(0.1, 0.4 - heightFactor * 0.3);
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(shadowScale, shadowScale * 0.6); // Flattened ellipse
+        
+        ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.restore();
     }
 
     private drawByType(
@@ -478,36 +514,39 @@ export class RenderSystem implements System {
             // Interpolation
             const ix = transform.prevX + (transform.x - transform.prevX) * alpha;
             const iy = transform.prevY + (transform.y - transform.prevY) * alpha;
+            const iz = transform.prevZ + (transform.z - transform.prevZ) * alpha;
             const rotation = transform.rotation;
             const scale = health?.visualScale ?? render.visualScale;
 
             ctx.save();
 
             if (scale !== 1.0) {
-                ctx.translate(ix, iy);
+                ctx.translate(ix, iy + iz);
                 ctx.scale(scale, scale);
-                ctx.translate(-ix, -iy);
+                ctx.translate(-ix, -(iy + iz));
             }
 
             // Draw Silhouette
             ctx.fillStyle = color;
 
+            const ry = iy + iz;
+
             switch (render.renderType) {
                 case 'player':
                     // Head
                     ctx.beginPath();
-                    ctx.arc(ix, iy, render.radius, 0, Math.PI * 2);
+                    ctx.arc(ix, ry, render.radius, 0, Math.PI * 2);
                     ctx.fill();
                     // Cannon (optional for silhouette? Yes, adds detail)
                     ctx.save();
-                    ctx.translate(ix, iy);
+                    ctx.translate(ix, ry);
                     ctx.rotate(rotation);
                     ctx.fillRect(0, -3, 25, 6);
                     ctx.restore();
                     break;
                 case 'player_segment':
                     ctx.beginPath();
-                    ctx.arc(ix, iy, render.radius, 0, Math.PI * 2);
+                    ctx.arc(ix, ry, render.radius, 0, Math.PI * 2);
                     ctx.fill();
                     break;
                 case 'enemy':
@@ -516,18 +555,18 @@ export class RenderSystem implements System {
 
                     ctx.beginPath();
                     if (shape === 'square') {
-                        ctx.translate(ix, iy);
+                        ctx.translate(ix, ry);
                         ctx.rotate(rotation);
                         ctx.rect(-render.radius, -render.radius, render.radius * 2, render.radius * 2);
                     } else if (shape === 'triangle') {
-                        ctx.translate(ix, iy);
+                        ctx.translate(ix, ry);
                         ctx.rotate(rotation);
                         ctx.moveTo(render.radius, 0);
                         ctx.lineTo(-render.radius, -render.radius);
                         ctx.lineTo(-render.radius, render.radius);
                         ctx.closePath();
                     } else if (shape === 'rocket') {
-                        ctx.translate(ix, iy);
+                        ctx.translate(ix, ry);
                         ctx.rotate(rotation);
                         ctx.moveTo(render.radius, 0);
                         ctx.lineTo(-render.radius, -render.radius * 0.8);
@@ -535,7 +574,7 @@ export class RenderSystem implements System {
                         ctx.lineTo(-render.radius, render.radius * 0.8);
                         ctx.closePath();
                     } else {
-                        ctx.arc(ix, iy, render.radius, 0, Math.PI * 2);
+                        ctx.arc(ix, ry, render.radius, 0, Math.PI * 2);
                     }
                     ctx.fill();
                     break;
@@ -543,7 +582,7 @@ export class RenderSystem implements System {
                     // Projectiles usually don't cast shadows/block light in this game? 
                     // But if they do:
                     ctx.beginPath();
-                    ctx.arc(ix, iy, render.radius, 0, Math.PI * 2);
+                    ctx.arc(ix, ry, render.radius, 0, Math.PI * 2);
                     ctx.fill();
                     break;
             }
