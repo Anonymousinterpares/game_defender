@@ -179,7 +179,7 @@ export class LightingRenderer {
 
         const cameraCenterX = this.parent.cameraX + w / 2;
         const cameraCenterY = this.parent.cameraY + h / 2;
-        const WALL_HEIGHT = -32;
+        const wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
 
         tctx.save();
         tctx.translate(-this.parent.cameraX, -this.parent.cameraY);
@@ -203,10 +203,10 @@ export class LightingRenderer {
                 const y1 = worldY + tileSize;
 
                 // Projected points for the top face
-                const v0 = ProjectionUtils.projectPoint(x0, y0, WALL_HEIGHT, cameraCenterX, cameraCenterY);
-                const v1 = ProjectionUtils.projectPoint(x1, y0, WALL_HEIGHT, cameraCenterX, cameraCenterY);
-                const v2 = ProjectionUtils.projectPoint(x1, y1, WALL_HEIGHT, cameraCenterX, cameraCenterY);
-                const v3 = ProjectionUtils.projectPoint(x0, y1, WALL_HEIGHT, cameraCenterX, cameraCenterY);
+                const v0 = ProjectionUtils.projectPoint(x0, y0, wallHeight, cameraCenterX, cameraCenterY);
+                const v1 = ProjectionUtils.projectPoint(x1, y0, wallHeight, cameraCenterX, cameraCenterY);
+                const v2 = ProjectionUtils.projectPoint(x1, y1, wallHeight, cameraCenterX, cameraCenterY);
+                const v3 = ProjectionUtils.projectPoint(x0, y1, wallHeight, cameraCenterX, cameraCenterY);
 
                 // Draw Side silhouettes (Neighbor Culling)
                 const hasTop = ty > 0 && this.parent.world!.getTile(tx, ty - 1) !== MaterialType.NONE;
@@ -256,15 +256,23 @@ export class LightingRenderer {
                     const subDiv = 10;
                     for (let sy = 0; sy < subDiv; sy++) {
                         const fsy0 = sy / subDiv;
+                        const fsy1 = (sy + 1) / subDiv;
                         for (let sx = 0; sx < subDiv; sx++) {
                             const idx = sy * subDiv + sx;
                             if (hpData && hpData[idx] > 0) {
                                 const fsx0 = sx / subDiv;
-                                const p0x = v0.x + (v1.x - v0.x) * fsx0 + (v3.x - v0.x) * fsy0;
-                                const p0y = v0.y + (v1.y - v0.y) * fsx0 + (v3.y - v0.y) * fsy0;
-                                const subSizeW = (v1.x - v0.x) / subDiv;
-                                const subSizeH = (v3.y - v0.y) / subDiv;
-                                tctx.fillRect(p0x, p0y, subSizeW, subSizeH);
+                                const fsx1 = (sx + 1) / subDiv;
+
+                                // Bilinear interpolation for sub-tile vertices
+                                const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
+                                const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
+                                const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
+                                const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
+
+                                tctx.beginPath();
+                                tctx.moveTo(p0.x, p0.y); tctx.lineTo(p1.x, p1.y);
+                                tctx.lineTo(p2.x, p2.y); tctx.lineTo(p3.x, p3.y);
+                                tctx.fill();
                             }
                         }
                     }
@@ -281,6 +289,18 @@ export class LightingRenderer {
         }
 
         targetCtx.drawImage(this.tempCanvas, 0, 0);
+    }
+
+    private lerpQuad(v0: Point, v1: Point, v2: Point, v3: Point, x: number, y: number): Point {
+        const topX = v0.x + (v1.x - v0.x) * x;
+        const topY = v0.y + (v1.y - v0.y) * x;
+        const botX = v3.x + (v2.x - v3.x) * x;
+        const botY = v3.y + (v2.y - v3.y) * x;
+
+        return {
+            x: topX + (botX - topX) * y,
+            y: topY + (botY - topY) * y
+        };
     }
 
     private renderLighting(ctx: CanvasRenderingContext2D): void {
@@ -670,6 +690,11 @@ export class LightingRenderer {
         const dx = source.direction.x * source.shadowLen;
         const dy = source.direction.y * source.shadowLen;
 
+        const wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
+        // Bake center - using chunk center as reference to keep bake stable
+        const cameraCenterX = worldX + this.chunkSize / 2;
+        const cameraCenterY = worldY + this.chunkSize / 2;
+
         for (let ty = startTy; ty <= endTy; ty++) {
             if (ty < 0 || ty >= this.parent.world!.getHeight()) continue;
             for (let tx = startTx; tx <= endTx; tx++) {
@@ -679,22 +704,102 @@ export class LightingRenderer {
                     const x = tx * tileSize;
                     const y = ty * tileSize;
 
-                    // Project shadow from the wall's rectangular footprint
-                    sctx.beginPath();
-                    sctx.moveTo(x - worldX, y - worldY);
-                    sctx.lineTo(x + tileSize - worldX, y - worldY);
-                    sctx.lineTo(x + tileSize + dx - worldX, y + dy - worldY);
-                    sctx.lineTo(x + dx - worldX, y + dy - worldY);
-                    sctx.closePath();
-                    sctx.fill();
+                    // Project shadow source (the wall's 3D top)
+                    const v0 = ProjectionUtils.projectPoint(x, y, wallHeight, cameraCenterX, cameraCenterY);
+                    const v1 = ProjectionUtils.projectPoint(x + tileSize, y, wallHeight, cameraCenterX, cameraCenterY);
+                    const v2 = ProjectionUtils.projectPoint(x + tileSize, y + tileSize, wallHeight, cameraCenterX, cameraCenterY);
+                    const v3 = ProjectionUtils.projectPoint(x, y + tileSize, wallHeight, cameraCenterX, cameraCenterY);
 
-                    sctx.beginPath();
-                    sctx.moveTo(x - worldX, y + tileSize - worldY);
-                    sctx.lineTo(x + tileSize - worldX, y + tileSize - worldY);
-                    sctx.lineTo(x + tileSize + dx - worldX, y + tileSize + dy - worldY);
-                    sctx.lineTo(x + dx - worldX, y + tileSize + dy - worldY);
-                    sctx.closePath();
-                    sctx.fill();
+                    const heatMap = this.parent.world!.getHeatMap();
+                    const hpData = heatMap ? heatMap.getTileHP(tx, ty) : null;
+                    const isDamaged = heatMap?.hasTileData(tx, ty);
+
+                    if (!isDamaged) {
+                        // Project shadow from the projected TOP face
+                        // Edge 0-1
+                        sctx.beginPath();
+                        sctx.moveTo(x - worldX, y - worldY);
+                        sctx.lineTo(x + tileSize - worldX, y - worldY);
+                        sctx.lineTo(v1.x + dx - worldX, v1.y + dy - worldY);
+                        sctx.lineTo(v0.x + dx - worldX, v0.y + dy - worldY);
+                        sctx.fill();
+
+                        // Edge 1-2
+                        sctx.beginPath();
+                        sctx.moveTo(x + tileSize - worldX, y - worldY);
+                        sctx.lineTo(x + tileSize - worldX, y + tileSize - worldY);
+                        sctx.lineTo(v2.x + dx - worldX, v2.y + dy - worldY);
+                        sctx.lineTo(v1.x + dx - worldX, v1.y + dy - worldY);
+                        sctx.fill();
+
+                        // Edge 2-3
+                        sctx.beginPath();
+                        sctx.moveTo(x + tileSize - worldX, y + tileSize - worldY);
+                        sctx.lineTo(x - worldX, y + tileSize - worldY);
+                        sctx.lineTo(v3.x + dx - worldX, v3.y + dy - worldY);
+                        sctx.lineTo(v2.x + dx - worldX, v2.y + dy - worldY);
+                        sctx.fill();
+
+                        // Edge 3-0
+                        sctx.beginPath();
+                        sctx.moveTo(x - worldX, y + tileSize - worldY);
+                        sctx.lineTo(x - worldX, y - worldY);
+                        sctx.lineTo(v0.x + dx - worldX, v0.y + dy - worldY);
+                        sctx.lineTo(v3.x + dx - worldX, v3.y + dy - worldY);
+                        sctx.fill();
+                    } else if (hpData) {
+                        const subDiv = 10;
+                        for (let sy = 0; sy < subDiv; sy++) {
+                            const fsy0 = sy / subDiv;
+                            const fsy1 = (sy + 1) / subDiv;
+                            for (let sx = 0; sx < subDiv; sx++) {
+                                const idx = sy * subDiv + sx;
+                                if (hpData[idx] > 0) {
+                                    const fsx0 = sx / subDiv;
+                                    const fsx1 = (sx + 1) / subDiv;
+
+                                    const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
+                                    const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
+                                    const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
+                                    const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
+
+                                    const bx0 = x + fsx0 * tileSize;
+                                    const by0 = y + fsy0 * tileSize;
+                                    const bx1 = x + fsx1 * tileSize;
+                                    const by1 = y + fsy1 * tileSize;
+
+                                    // Bridge each sub-tile base to its projected top shadow
+                                    sctx.beginPath();
+                                    sctx.moveTo(bx0 - worldX, by0 - worldY);
+                                    sctx.lineTo(bx1 - worldX, by0 - worldY);
+                                    sctx.lineTo(p1.x + dx - worldX, p1.y + dy - worldY);
+                                    sctx.lineTo(p0.x + dx - worldX, p0.y + dy - worldY);
+                                    sctx.fill();
+
+                                    sctx.beginPath();
+                                    sctx.moveTo(bx1 - worldX, by0 - worldY);
+                                    sctx.lineTo(bx1 - worldX, by1 - worldY);
+                                    sctx.lineTo(p2.x + dx - worldX, p2.y + dy - worldY);
+                                    sctx.lineTo(p1.x + dx - worldX, p1.y + dy - worldY);
+                                    sctx.fill();
+
+                                    sctx.beginPath();
+                                    sctx.moveTo(bx1 - worldX, by1 - worldY);
+                                    sctx.lineTo(bx0 - worldX, by1 - worldY);
+                                    sctx.lineTo(p3.x + dx - worldX, p3.y + dy - worldY);
+                                    sctx.lineTo(p2.x + dx - worldX, p2.y + dy - worldY);
+                                    sctx.fill();
+
+                                    sctx.beginPath();
+                                    sctx.moveTo(bx0 - worldX, by1 - worldY);
+                                    sctx.lineTo(bx0 - worldX, by0 - worldY);
+                                    sctx.lineTo(p0.x + dx - worldX, p0.y + dy - worldY);
+                                    sctx.lineTo(p3.x + dx - worldX, p3.y + dy - worldY);
+                                    sctx.fill();
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

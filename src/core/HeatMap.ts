@@ -741,6 +741,7 @@ export class HeatMap {
                                 if (this.worldRef) {
                                     this.worldRef.markMeshDirty();
                                     this.worldRef.notifyTileChange(tx, ty);
+                                    this.worldRef.checkTileDestruction(tx, ty);
                                 }
                                 nextFire[idx] = 0;
                                 nextData[idx] = 0;
