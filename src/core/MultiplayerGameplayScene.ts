@@ -26,6 +26,7 @@ import { TagComponent } from './ecs/components/TagComponent';
 import { SegmentComponent } from './ecs/components/SegmentComponent';
 import { WeatherTimePlugin } from './plugins/WeatherTimePlugin';
 import { ChaosPlugin } from './plugins/ChaosPlugin';
+import { ProjectionUtils } from '../utils/ProjectionUtils';
 
 export class MultiplayerGameplayScene extends GameplayScene {
     private remotePlayersMap: Map<string, RemotePlayer> = new Map();
@@ -340,8 +341,16 @@ export class MultiplayerGameplayScene extends GameplayScene {
                     const alpha = this.simulation.physicsSystem.alpha;
                     const rx = rp.prevX + (rp.x - rp.prevX) * alpha;
                     const ry = rp.prevY + (rp.y - rp.prevY) * alpha;
+                    const rz = (rp as any).prevZ !== undefined ? (rp as any).prevZ + ((rp as any).z - (rp as any).prevZ) * alpha : (rp.z || 0);
 
-                    ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(endX, endY);
+                    // Perspective offset for the beam start point
+                    const centerX = this.cameraX + ctx.canvas.width / 2;
+                    const centerY = this.cameraY + ctx.canvas.height / 2;
+                    const pOffset = ProjectionUtils.getProjectedOffset(rx, ry, rz, centerX, centerY);
+
+                    ctx.beginPath(); 
+                    ctx.moveTo(rx + pOffset.x, ry + rz + pOffset.y); 
+                    ctx.lineTo(endX, endY);
                     ctx.strokeStyle = type === 'laser' ? '#ff0000' : 'rgba(0, 255, 255, 0.8)';
                     ctx.lineWidth = type === 'laser' ? 2 : 15; ctx.stroke();
                 }
@@ -355,11 +364,13 @@ export class MultiplayerGameplayScene extends GameplayScene {
         const enemyData = this.enemies.map(e => {
             const id = (e as any).id;
             const type = (e as any).type || 'Scout';
+            const transform = this.simulation.entityManager.getComponent<TransformComponent>(id, 'transform');
             return {
                 id,
                 t: type,
                 x: Math.round(e.x),
                 y: Math.round(e.y),
+                z: transform ? Math.round(transform.z) : 0,
                 r: Math.round((e.rotation || 0) * 100) / 100,
                 h: Math.round((e as any).health || 0)
             };
@@ -428,9 +439,11 @@ export class MultiplayerGameplayScene extends GameplayScene {
                     if (distSq > 10000) { // Large jump
                         transform.prevX = ed.x;
                         transform.prevY = ed.y;
+                        transform.prevZ = ed.z || 0;
                     }
                     transform.x = ed.x;
                     transform.y = ed.y;
+                    transform.z = ed.z || 0;
                     transform.rotation = ed.r;
                 }
                 const health = em.getComponent<HealthComponent>(ed.id, 'health');
@@ -535,9 +548,10 @@ export class MultiplayerGameplayScene extends GameplayScene {
         const state = {
             id: MultiplayerManager.getInstance().myId,
             x: Math.round(this.player.x), y: Math.round(this.player.y),
+            z: Math.round(this.player.z),
             r: Math.round(this.player.rotation * 1000), n: MultiplayerManager.getInstance().myName,
             h: Math.round(this.player.health), l: this.player.segments.length,
-            segs: this.player.segments.map(s => ({ x: Math.round(s.x), y: Math.round(s.y), f: s.isOnFire })),
+            segs: this.player.segments.map(s => ({ x: Math.round(s.x), y: Math.round(s.y), z: Math.round(s.z), f: s.isOnFire })),
             f: this.player.isOnFire, w: ConfigManager.getInstance().get<string>('Player', 'activeWeapon'),
             a: this.player.active
         };
@@ -545,7 +559,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
     }
 
     private handlePlayerState(data: any): void {
-        const { id, x, y, r, n, h, l, segs, f, w, a } = data;
+        const { id, x, y, z, r, n, h, l, segs, f, w, a } = data;
         if (id === MultiplayerManager.getInstance().myId) return;
         let rp = this.remotePlayersMap.get(id);
         if (!rp) {
@@ -556,7 +570,7 @@ export class MultiplayerGameplayScene extends GameplayScene {
             // ECS Link for Remote Player
             rp.setEntityManager(this.simulation.entityManager);
             this.simulation.entityManager.addComponent(rp.id, new TagComponent('remote_player'));
-            this.simulation.entityManager.addComponent(rp.id, new TransformComponent(x, y, r / 1000));
+            this.simulation.entityManager.addComponent(rp.id, new TransformComponent(x, y, r / 1000, z || 0));
             this.simulation.entityManager.addComponent(rp.id, new PhysicsComponent(0, 0, rp.radius));
             this.simulation.entityManager.addComponent(rp.id, new HealthComponent(h, 100));
             this.simulation.entityManager.addComponent(rp.id, new FireComponent());
@@ -577,7 +591,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
                 seg.setEntityManager(this.simulation.entityManager);
                 const sx = segs && segs[i] ? segs[i].x : seg.x;
                 const sy = segs && segs[i] ? segs[i].y : seg.y;
-                this.simulation.entityManager.addComponent(seg.id, new TransformComponent(sx, sy, 0));
+                const sz = segs && segs[i] ? (segs[i].z || 0) : 0;
+                this.simulation.entityManager.addComponent(seg.id, new TransformComponent(sx, sy, 0, sz));
                 this.simulation.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
                 this.simulation.entityManager.addComponent(seg.id, new HealthComponent(100, 100));
                 this.simulation.entityManager.addComponent(seg.id, new FireComponent());
@@ -591,13 +606,13 @@ export class MultiplayerGameplayScene extends GameplayScene {
         if (segs && segs.length === rp.segments.length) {
             for (let i = 0; i < segs.length; i++) {
                 const s = rp.segments[i];
-                // Position and interpolation now handled STICKTLY by ECS PlayerSegmentSystem
-                // to avoid jitter/fighting with network snapping. 
+                if (segs[i].z !== undefined) s.z = segs[i].z;
                 if (segs[i].f !== undefined) s.isOnFire = segs[i].f;
             }
         }
         if (w) (rp as any).activeWeapon = w;
         if (f !== undefined) rp.isOnFire = f;
+        rp.z = z || 0;
         rp.updateFromNetwork(x, y, r / 1000, n, h);
     }
 }

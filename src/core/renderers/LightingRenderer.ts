@@ -11,6 +11,8 @@ import { ConfigManager } from '../../config/MasterConfig';
 import { WeatherManager, WeatherType, CloudType } from '../WeatherManager';
 import { PerfMonitor } from '../../utils/PerfMonitor';
 import { Simulation } from '../Simulation';
+import { ProjectionUtils } from '../../utils/ProjectionUtils';
+import { MaterialType } from '../HeatMap';
 
 export interface LightingParent {
     world: World | null;
@@ -82,7 +84,6 @@ export class LightingRenderer {
 
         this.generateCloudShapes();
         this.generateFogNoise();
-        this.initParticles();
         this.initWorkers();
     }
 
@@ -162,10 +163,6 @@ export class LightingRenderer {
         }
     }
 
-    private initParticles(): void {
-        // Particles now managed by WeatherSystemECS
-    }
-
     public render(ctx: CanvasRenderingContext2D): void {
         this.renderLighting(ctx);
     }
@@ -174,29 +171,93 @@ export class LightingRenderer {
         const tctx = this.tempCtx;
         tctx.clearRect(0, 0, w, h);
 
-        const startGX = Math.floor(this.parent.cameraX / this.chunkSize);
-        const startGY = Math.floor(this.parent.cameraY / this.chunkSize);
-        const endGX = Math.floor((this.parent.cameraX + w) / this.chunkSize);
-        const endGY = Math.floor((this.parent.cameraY + h) / this.chunkSize);
+        const tileSize = this.parent.world!.getTileSize();
+        const startTx = Math.floor(this.parent.cameraX / tileSize);
+        const endTx = Math.ceil((this.parent.cameraX + w) / tileSize);
+        const startTy = Math.floor(this.parent.cameraY / tileSize);
+        const endTy = Math.ceil((this.parent.cameraY + h) / tileSize);
 
-        for (let gy = startGY; gy <= endGY; gy++) {
-            for (let gx = startGX; gx <= endGX; gx++) {
-                const key = `${gx},${gy}`;
-                let chunk = this.silhouetteChunks.get(key);
-                if (!chunk) {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = this.chunkSize;
-                    canvas.height = this.chunkSize;
-                    chunk = { canvas, ctx: canvas.getContext('2d')!, version: -1 };
-                    this.silhouetteChunks.set(key, chunk);
+        const cameraCenterX = this.parent.cameraX + w / 2;
+        const cameraCenterY = this.parent.cameraY + h / 2;
+        const WALL_HEIGHT = -32;
+
+        tctx.save();
+        tctx.translate(-this.parent.cameraX, -this.parent.cameraY);
+        tctx.fillStyle = '#ffffff';
+
+        for (let ty = startTy; ty <= endTy; ty++) {
+            if (ty < 0 || ty >= this.parent.world!.getHeight()) continue;
+            for (let tx = startTx; tx <= endTx; tx++) {
+                if (tx < 0 || tx >= this.parent.world!.getWidth()) continue;
+
+                const material = this.parent.world!.getTile(tx, ty);
+                if (material === MaterialType.NONE) continue;
+
+                const worldX = tx * tileSize;
+                const worldY = ty * tileSize;
+                
+                // Base points
+                const x0 = worldX;
+                const y0 = worldY;
+                const x1 = worldX + tileSize;
+                const y1 = worldY + tileSize;
+
+                // Projected points for the top face
+                const offset = ProjectionUtils.getProjectedOffset(worldX + tileSize/2, worldY + tileSize/2, WALL_HEIGHT, cameraCenterX, cameraCenterY);
+                const tx0 = x0 + offset.x;
+                const ty0 = y0 + offset.y;
+                const tx1 = x1 + offset.x;
+                const ty1 = y1 + offset.y;
+
+                // Draw Side silhouettes (only if visible)
+                // Top side (visible if leaning down)
+                if (offset.y > 0) {
+                    tctx.beginPath();
+                    tctx.moveTo(x0, y0); tctx.lineTo(x1, y0);
+                    tctx.lineTo(tx1, ty0); tctx.lineTo(tx0, ty0);
+                    tctx.fill();
                 }
-                if (chunk.version !== meshVersion) {
-                    this.rebuildSilhouetteChunk(chunk, gx, gy);
-                    chunk.version = meshVersion;
+                // Bottom side (visible if leaning up)
+                if (offset.y < 0) {
+                    tctx.beginPath();
+                    tctx.moveTo(x0, y1); tctx.lineTo(x1, y1);
+                    tctx.lineTo(tx1, ty1); tctx.lineTo(tx0, ty1);
+                    tctx.fill();
                 }
-                tctx.drawImage(chunk.canvas, gx * this.chunkSize - this.parent.cameraX, gy * this.chunkSize - this.parent.cameraY);
+                // Left side (visible if leaning right)
+                if (offset.x > 0) {
+                    tctx.beginPath();
+                    tctx.moveTo(x0, y0); tctx.lineTo(x0, y1);
+                    tctx.lineTo(tx0, ty1); tctx.lineTo(tx0, ty0);
+                    tctx.fill();
+                }
+                // Right side (visible if leaning left)
+                if (offset.x < 0) {
+                    tctx.beginPath();
+                    tctx.moveTo(x1, y0); tctx.lineTo(x1, y1);
+                    tctx.lineTo(tx1, ty1); tctx.lineTo(tx1, ty0);
+                    tctx.fill();
+                }
+
+                // Draw Top Face silhouette
+                const heatMap = this.parent.world!.getHeatMap();
+                const hpData = heatMap ? heatMap.getTileHP(tx, ty) : null;
+                if (!hpData) {
+                    tctx.fillRect(tx0, ty0, tileSize, tileSize);
+                } else {
+                    const subDiv = 10;
+                    const subSize = tileSize / subDiv;
+                    for (let sy = 0; sy < subDiv; sy++) {
+                        for (let sx = 0; sx < subDiv; sx++) {
+                            if (hpData[sy * subDiv + sx] > 0) {
+                                tctx.fillRect(tx0 + sx * subSize, ty0 + sy * subSize, subSize, subSize);
+                            }
+                        }
+                    }
+                }
             }
         }
+        tctx.restore();
 
         if (color) {
             tctx.globalCompositeOperation = 'source-in';
@@ -206,17 +267,6 @@ export class LightingRenderer {
         }
 
         targetCtx.drawImage(this.tempCanvas, 0, 0);
-    }
-
-    private rebuildSilhouetteChunk(chunk: any, gx: number, gy: number): void {
-        const ctx = chunk.ctx;
-        ctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
-        const worldX = gx * this.chunkSize;
-        const worldY = gy * this.chunkSize;
-
-        if (this.parent.worldRenderer) {
-            this.parent.worldRenderer.renderAsSilhouette(ctx, worldX, worldY, '#ffffff');
-        }
     }
 
     private renderLighting(ctx: CanvasRenderingContext2D): void {
@@ -290,7 +340,7 @@ export class LightingRenderer {
 
         lctx.translate(-this.parent.cameraX, -this.parent.cameraY);
         const alpha = this.parent.simulation.physicsSystem.alpha;
-        this.parent.simulation.renderSystem.renderSilhouettes(this.parent.simulation.entityManager, lctx, alpha, silColor);
+        this.parent.simulation.renderSystem.renderSilhouettes(this.parent.simulation.entityManager, lctx, alpha, silColor, this.parent.cameraX, this.parent.cameraY);
         lctx.restore();
 
         // 4. VISION
@@ -337,8 +387,6 @@ export class LightingRenderer {
 
         fctx.clearRect(0, 0, w, h);
 
-        // Calculate dynamic fog color based on global light level
-        // During night, fog color scales with moonlight
         const lightIntensity = isDaylight ? sun.intensity : Math.max(moon.intensity, 0.02);
         const baseFogRGB = weather.type === WeatherType.SNOW ? [210, 225, 255] : [160, 170, 190];
 
@@ -347,12 +395,10 @@ export class LightingRenderer {
         const b = Math.floor(baseFogRGB[2] * lightIntensity);
         const fogColor = `rgb(${r}, ${g}, ${b})`;
 
-        // Update fog offset based on wind
         const dt = 1 / 60;
         this.fogOffset.x += weather.windDir.x * weather.windSpeed * 10 * dt;
         this.fogOffset.y += weather.windDir.y * weather.windSpeed * 10 * dt;
 
-        // 1. Render noise to fog buffer
         if (this.fogNoise) {
             const spacing = 512;
             const startX = Math.floor((this.parent.cameraX + this.fogOffset.x) / spacing) * spacing - (this.parent.cameraX + this.fogOffset.x);
@@ -367,14 +413,12 @@ export class LightingRenderer {
             fctx.restore();
         }
 
-        // 2. Color the noise in the buffer
         fctx.save();
         fctx.globalCompositeOperation = 'source-in';
         fctx.fillStyle = fogColor;
         fctx.fillRect(0, 0, w, h);
         fctx.restore();
 
-        // 3. Add base haze layer to the buffer
         fctx.save();
         fctx.globalCompositeOperation = 'destination-over';
         fctx.fillStyle = fogColor;
@@ -382,14 +426,11 @@ export class LightingRenderer {
         fctx.fillRect(0, 0, w, h);
         fctx.restore();
 
-        // 4. Draw fog buffer to main context
         ctx.save();
         if (isDaylight) {
-            // Day: Screen adds light to simulate scattering
             ctx.globalCompositeOperation = 'screen';
             ctx.globalAlpha = weather.fogDensity * 0.5;
         } else {
-            // Night: Source-over obscures/darkens the world based on light level
             ctx.globalCompositeOperation = 'source-over';
             ctx.globalAlpha = weather.fogDensity * 0.7;
         }
@@ -398,7 +439,6 @@ export class LightingRenderer {
     }
 
     private renderCloudShadows(lctx: CanvasRenderingContext2D, weather: any, w: number, h: number): void {
-        // Update cloud offset based on independent cloud wind
         const dt = 1 / 60;
         this.cloudOffset.x += weather.cloudWindDir.x * weather.cloudWindSpeed * 15 * dt;
         this.cloudOffset.y += weather.cloudWindDir.y * weather.cloudWindSpeed * 15 * dt;
@@ -406,31 +446,24 @@ export class LightingRenderer {
         lctx.save();
         lctx.globalCompositeOperation = 'multiply';
 
-        // 1. If OVERCAST (100% coverage), just apply a global dimming to the lightmap
         if (weather.cloudType === CloudType.OVERCAST) {
-            lctx.fillStyle = 'rgba(120, 130, 150, 0.5)'; // Cool grey tint
+            lctx.fillStyle = 'rgba(120, 130, 150, 0.5)';
             lctx.fillRect(0, 0, w, h);
             lctx.restore();
             return;
         }
 
-        // 2. If SCATTERED/BROKEN, render individual distinct cloud shadows
-        // More dramatic shadows for visibility
         lctx.globalAlpha = 0.4;
-
         const spacing = 400;
         const startX = Math.floor((this.parent.cameraX + this.cloudOffset.x) / spacing) * spacing - (this.parent.cameraX + this.cloudOffset.x);
         const startY = Math.floor((this.parent.cameraY + this.cloudOffset.y) / spacing) * spacing - (this.parent.cameraY + this.cloudOffset.y);
 
         for (let ox = startX; ox < w + spacing; ox += spacing) {
             for (let oy = startY; oy < h + spacing; oy += spacing) {
-                // Determine the absolute world tile index for this cloud
                 const worldX = ox + this.parent.cameraX + this.cloudOffset.x;
                 const worldY = oy + this.parent.cameraY + this.cloudOffset.y;
                 const gx = Math.round(worldX / spacing);
                 const gy = Math.round(worldY / spacing);
-
-                // Deterministic noise based on stable grid coordinates
                 const noise = Math.abs(Math.sin(gx * 12.9898 + gy * 78.233) * 43758.5453) % 1;
 
                 let threshold = 0.25;
@@ -438,22 +471,15 @@ export class LightingRenderer {
 
                 if (noise < threshold) {
                     const shapeIdx = Math.floor(noise * 100) % this.cloudShapes.length;
-
-                    // Use noise to derive deterministic random properties
                     const rotation = noise * Math.PI * 2;
                     const scale = 0.8 + (noise * 10 % 1) * 0.7;
                     const jitterX = ((noise * 20 % 1) - 0.5) * (spacing * 0.4);
                     const jitterY = ((noise * 30 % 1) - 0.5) * (spacing * 0.4);
-
-                    const individualAlpha = 0.3 + (noise / threshold) * 0.2;
-                    lctx.globalAlpha = individualAlpha;
-
+                    lctx.globalAlpha = 0.3 + (noise / threshold) * 0.2;
                     lctx.save();
-                    // Translate to center of shadow placement
                     lctx.translate(ox + spacing / 2 + jitterX, oy + spacing / 2 + jitterY);
                     lctx.rotate(rotation);
                     lctx.scale(scale, scale);
-                    // Draw centered
                     lctx.drawImage(this.cloudShapes[shapeIdx], -spacing / 2, -spacing / 2, spacing, spacing);
                     lctx.restore();
                 }
@@ -472,22 +498,18 @@ export class LightingRenderer {
         const dt = this.lastParticleUpdate ? (now - this.lastParticleUpdate) / 1000 : 0.016;
         this.lastParticleUpdate = now;
 
-        // Camera movement delta for parallax
         const camDx = (this.parent.cameraX - (this as any)._lastCamX || 0);
         const camDy = (this.parent.cameraY - (this as any)._lastCamY || 0);
         (this as any)._lastCamX = this.parent.cameraX;
         (this as any)._lastCamY = this.parent.cameraY;
 
         ctx.save();
-
-        // 1. RENDER SPLASHES (On Ground)
         this.splashes = this.splashes.filter(s => s.life > 0);
         this.splashes.forEach(s => {
             s.life -= dt * 4;
             const sx = s.x - this.parent.cameraX;
             const sy = s.y - this.parent.cameraY;
-            if (sx < -50 || sx > w + 50 || sy < -50 || sy > h + 50) s.life = 0; // Cull off-screen splashes
-
+            if (sx < -50 || sx > w + 50 || sy < -50 || sy > h + 50) s.life = 0;
             if (s.life > 0) {
                 if (s.type === 'rain') {
                     ctx.strokeStyle = `rgba(180, 200, 255, ${s.life * 0.4})`;
@@ -498,54 +520,31 @@ export class LightingRenderer {
                     ctx.fillStyle = `rgba(255, 255, 255, ${s.life * 0.6})`;
                     ctx.beginPath();
                     ctx.arc(sx, sy, (1 - s.life) * 4, 0, Math.PI * 2);
+                    ctx.fill();
                 }
             }
         });
 
-        // 2. RENDER FALLING PARTICLES
         const particles = this.parent.simulation.weatherSystemECS.getParticles();
-
-        // Consume splash queue from weather repulsion
         const weatherSplashes = this.parent.simulation.weatherSystemECS.getSplashes();
         weatherSplashes.forEach(splash => {
-            this.splashes.push({
-                x: splash.x,
-                y: splash.y,
-                life: 1.0,
-                type: splash.type as 'rain' | 'snow'
-            });
+            this.splashes.push({ x: splash.x, y: splash.y, life: 1.0, type: splash.type as 'rain' | 'snow' });
         });
 
         if (weather.precipitationIntensity > 0.05) {
             if (weather.type === WeatherType.RAIN) {
                 ctx.strokeStyle = 'rgba(160, 190, 255, 0.4)';
                 ctx.lineWidth = 1;
-                particles.forEach(p => {
+                particles.forEach((p: any) => {
                     const parallaxMult = p.z / 500;
-
-                    // Simple WORLD SPACE rendering
-                    // We just subtract camera position
-                    // Parallax shifts the visual position slightly based on Z
                     const screenX = (p.x - this.parent.cameraX) - (camDx * parallaxMult * 10);
                     const screenY = (p.y - this.parent.cameraY) - (camDy * parallaxMult * 10);
-
-                    // Skip off-screen particles
                     if (screenX < -50 || screenX > w + 50 || screenY < -50 || screenY > h + 50) return;
-
-                    // Impact ground visual
                     if (p.z <= 10 && Math.random() < 0.2 && this.splashes.length < 200) {
-                        this.splashes.push({
-                            x: screenX + this.parent.cameraX,
-                            y: screenY + this.parent.cameraY,
-                            life: 1.0,
-                            type: 'rain'
-                        });
+                        this.splashes.push({ x: screenX + this.parent.cameraX, y: screenY + this.parent.cameraY, life: 1.0, type: 'rain' });
                     }
-
-                    // Cinematic Stretching
                     const speedSq = p.vx * p.vx + p.vy * p.vy;
                     const speedFactor = Math.min(2.0, 1.0 + speedSq / 200000);
-
                     ctx.beginPath();
                     ctx.moveTo(screenX, screenY - p.z * 0.2);
                     ctx.lineTo(screenX + p.vx * 0.03 * speedFactor, (screenY - p.z * 0.2) + 15 * speedFactor);
@@ -553,23 +552,14 @@ export class LightingRenderer {
                 });
             } else if (weather.type === WeatherType.SNOW) {
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-                particles.forEach(p => {
+                particles.forEach((p: any) => {
                     const parallaxMult = p.z / 500;
-
                     const screenX = (p.x - this.parent.cameraX) - (camDx * parallaxMult * 10);
                     const screenY = (p.y - this.parent.cameraY) - (camDy * parallaxMult * 10);
-
                     if (screenX < -50 || screenX > w + 50 || screenY < -50 || screenY > h + 50) return;
-
                     if (p.z <= 10 && Math.random() < 0.1 && this.splashes.length < 200) {
-                        this.splashes.push({
-                            x: screenX + this.parent.cameraX,
-                            y: screenY + this.parent.cameraY,
-                            life: 1.0,
-                            type: 'snow'
-                        });
+                        this.splashes.push({ x: screenX + this.parent.cameraX, y: screenY + this.parent.cameraY, life: 1.0, type: 'snow' });
                     }
-
                     ctx.beginPath();
                     ctx.arc(screenX, screenY - p.z * 0.2, 1 + Math.random() * 2, 0, Math.PI * 2);
                     ctx.fill();
@@ -582,22 +572,14 @@ export class LightingRenderer {
     private renderDirectionalLight(targetCtx: CanvasRenderingContext2D, source: any, type: string, worldVersion: number, w: number, h: number): void {
         const sctx = this.sourceCtx;
         const mctx = this.maskCtx;
-
         sctx.clearRect(0, 0, w, h);
         mctx.clearRect(0, 0, w, h);
-
         sctx.save();
         mctx.save();
-
-        // Match lctx scale (low-res lightmap)
         sctx.scale(this.resolutionScale, this.resolutionScale);
         mctx.scale(this.resolutionScale, this.resolutionScale);
-
-        // Align to World Space
         sctx.translate(-this.parent.cameraX, -this.parent.cameraY);
         mctx.translate(-this.parent.cameraX, -this.parent.cameraY);
-
-        sctx.globalCompositeOperation = 'source-over';
         sctx.fillStyle = source.color;
         sctx.fillRect(this.parent.cameraX, this.parent.cameraY, w / this.resolutionScale, h / this.resolutionScale);
 
@@ -610,29 +592,23 @@ export class LightingRenderer {
 
         mctx.fillStyle = '#000000';
         let rebuildsThisFrame = 0;
-
         for (let gy = startGY; gy <= endGY; gy++) {
             for (let gx = startGX; gx <= endGX; gx++) {
                 const key = `${gx},${gy}_${type}`;
                 let chunk = this.shadowChunks.get(key);
                 if (!chunk) {
                     const canvas = document.createElement('canvas');
-                    canvas.width = this.chunkSize;
-                    canvas.height = this.chunkSize;
+                    canvas.width = this.chunkSize; canvas.height = this.chunkSize;
                     chunk = { canvas, ctx: canvas.getContext('2d')!, version: '' };
                     this.shadowChunks.set(key, chunk);
                 }
-
                 if (chunk.version !== bakeVersion) {
                     if (rebuildsThisFrame < this.MAX_REBUILDS_PER_FRAME) {
                         this.rebuildShadowChunk(chunk, gx, gy, source);
                         chunk.version = bakeVersion;
                         rebuildsThisFrame++;
-                    } else {
-                        // Mark as needing rebuild later if not already in queue
-                        if (!this.rebuildQueue.includes(key)) {
-                            this.rebuildQueue.push(key);
-                        }
+                    } else if (!this.rebuildQueue.includes(key)) {
+                        this.rebuildQueue.push(key);
                     }
                 }
                 mctx.drawImage(chunk.canvas, gx * this.chunkSize, gy * this.chunkSize);
@@ -644,15 +620,13 @@ export class LightingRenderer {
         entities.push(...this.parent.enemies);
         entities.forEach(e => { if (e.active) this.renderEntityShadow(mctx, e, source.direction, source.shadowLen); });
 
-        // Erase object footprints from shadow mask
         mctx.globalCompositeOperation = 'destination-out';
         if (this.parent.worldRenderer) this.parent.worldRenderer.renderAsSilhouette(mctx, this.parent.cameraX, this.parent.cameraY);
         const alphaShadow = this.parent.simulation.physicsSystem.alpha;
-        this.parent.simulation.renderSystem.renderSilhouettes(this.parent.simulation.entityManager, mctx, alphaShadow, '#ffffff');
+        this.parent.simulation.renderSystem.renderSilhouettes(this.parent.simulation.entityManager, mctx, alphaShadow, '#ffffff', this.parent.cameraX, this.parent.cameraY);
 
         mctx.restore();
         sctx.restore();
-
         sctx.save();
         sctx.globalCompositeOperation = 'destination-out';
         sctx.drawImage(this.maskCanvas, 0, 0);
@@ -668,28 +642,20 @@ export class LightingRenderer {
     private rebuildShadowChunk(chunk: any, gx: number, gy: number, source: any): void {
         const sctx = chunk.ctx;
         sctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
-
         const worldX = gx * this.chunkSize;
         const worldY = gy * this.chunkSize;
         const padding = 300;
         const segments = this.parent.world!.getOcclusionSegments(worldX - padding, worldY - padding, this.chunkSize + padding * 2, this.chunkSize + padding * 2);
-
         sctx.fillStyle = '#000000';
         const dx = source.direction.x * source.shadowLen;
         const dy = source.direction.y * source.shadowLen;
-        const wallHeight = 8; // Offset from ground to roof
-
-        segments.forEach(seg => {
-            // Shadow volume connects Ground(A,B) to ProjectedRoof(A,B)
-            // This ensures base width matches wall width perfectly
-            const groundA = seg.a;
-            const groundB = seg.b;
+        const wallHeight = 8;
+        segments.forEach((seg: any) => {
+            const groundA = seg.a; const groundB = seg.b;
             const roofA = { x: groundA.x, y: groundA.y - wallHeight };
             const roofB = { x: groundB.x, y: groundB.y - wallHeight };
-
             const projA = { x: roofA.x + dx, y: roofA.y + dy };
             const projB = { x: roofB.x + dx, y: roofB.y + dy };
-
             sctx.beginPath();
             sctx.moveTo(groundA.x - worldX, groundA.y - worldY);
             sctx.lineTo(groundB.x - worldX, groundB.y - worldY);
@@ -701,127 +667,61 @@ export class LightingRenderer {
     }
 
     private renderEntityShadow(ctx: CanvasRenderingContext2D, e: Entity, dir: { x: number, y: number }, len: number): void {
-        const ex = e.x;
-        const ey = e.y;
-        const r = e.radius;
+        const ex = e.x; const ey = e.y; const r = e.radius;
         const angle = Math.atan2(dir.y, dir.x);
-
         const t1x = ex + Math.cos(angle - Math.PI / 2) * r;
         const t1y = ey + Math.sin(angle - Math.PI / 2) * r;
         const t2x = ex + Math.cos(angle + Math.PI / 2) * r;
         const t2y = ey + Math.sin(angle + Math.PI / 2) * r;
-        const t3x = t2x + dir.x * len;
-        const t3y = t2y + dir.y * len;
-        const t4x = t1x + dir.x * len;
-        const t4y = t1y + dir.y * len;
-
-        ctx.beginPath();
-        ctx.moveTo(t1x, t1y);
-        ctx.lineTo(t2x, t2y);
-        ctx.lineTo(t3x, t3y);
-        ctx.lineTo(t4x, t4y);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(ex + dir.x * len, ey + dir.y * len, r, 0, Math.PI * 2);
-        ctx.fill();
+        const t3x = t2x + dir.x * len; const t3y = t2y + dir.y * len;
+        const t4x = t1x + dir.x * len; const t4y = t1y + dir.y * len;
+        ctx.beginPath(); ctx.moveTo(t1x, t1y); ctx.lineTo(t2x, t2y); ctx.lineTo(t3x, t3y); ctx.lineTo(t4x, t4y); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.arc(ex + dir.x * len, ey + dir.y * len, r, 0, Math.PI * 2); ctx.fill();
     }
 
     private renderPointLights(lctx: CanvasRenderingContext2D, ambientIntensity: number, meshVersion: number, w: number, h: number): void {
         const lights = LightManager.getInstance().getLights();
         const globalSegments = this.parent.world!.getOcclusionSegments(this.parent.cameraX, this.parent.cameraY, w, h);
-
         lctx.save();
         lctx.globalCompositeOperation = 'screen';
-
         let shadowLightsCount = 0;
-        const MAX_SHADOW_LIGHTS = 8; // Primary bottleneck fix: don't calculate shadows for too many lights
-
+        const MAX_SHADOW_LIGHTS = 8;
         lights.forEach(light => {
             const screenX = light.x - this.parent.cameraX;
             const screenY = light.y - this.parent.cameraY;
             if (screenX < -light.radius || screenX > w + light.radius || screenY < -light.radius || screenY > h + light.radius) return;
-
             lctx.save();
             lctx.globalAlpha = light.intensity * (1.0 - ambientIntensity * 0.5);
-
             if (light.castsShadows && shadowLightsCount < MAX_SHADOW_LIGHTS) {
                 shadowLightsCount++;
                 const polygon = this.lightPolygonCache.get(light.id);
                 const lastPos = (light as any)._lastShadowPos || { x: 0, y: 0 };
                 const hasMoved = Math.abs(light.x - lastPos.x) > 2 || Math.abs(light.y - lastPos.y) > 2;
-
                 if (meshVersion !== this.meshVersion || hasMoved) {
                     if (!this.pendingRequests.has(light.id)) {
                         this.pendingRequests.set(light.id, true);
                         const worker = this.workers[this.workerIndex];
                         this.workerIndex = (this.workerIndex + 1) % this.workers.length;
-
-                        // Cache and reuse segments for this light
                         let cachedSegs = (light as any)._cachedSegments;
                         if (meshVersion !== this.meshVersion || !cachedSegs || hasMoved) {
-                            if (light.radius < 600) {
-                                cachedSegs = this.parent.world!.getOcclusionSegments(
-                                    light.x - light.radius, light.y - light.radius,
-                                    light.radius * 2, light.radius * 2
-                                );
-                            } else {
-                                cachedSegs = globalSegments;
-                            }
+                            cachedSegs = this.parent.world!.getOcclusionSegments(light.x - light.radius, light.y - light.radius, light.radius * 2, light.radius * 2);
                             (light as any)._cachedSegments = cachedSegs;
                         }
-
-                        worker.postMessage({
-                            type: 'calculateVisibility',
-                            data: {
-                                id: light.id,
-                                origin: { x: light.x, y: light.y },
-                                segments: cachedSegs,
-                                radius: light.radius
-                            }
-                        });
+                        worker.postMessage({ type: 'calculateVisibility', data: { id: light.id, origin: { x: light.x, y: light.y }, segments: cachedSegs, radius: light.radius } });
                         (light as any)._lastShadowPos = { x: light.x, y: light.y };
                     }
                 }
-
                 if (polygon && polygon.length > 0) {
                     lctx.beginPath();
                     lctx.moveTo(polygon[0].x - this.parent.cameraX, polygon[0].y - this.parent.cameraY);
-                    for (let i = 1; i < polygon.length; i++) {
-                        lctx.lineTo(polygon[i].x - this.parent.cameraX, polygon[i].y - this.parent.cameraY);
-                    }
-                    lctx.closePath();
-                    lctx.clip();
+                    for (let i = 1; i < polygon.length; i++) lctx.lineTo(polygon[i].x - this.parent.cameraX, polygon[i].y - this.parent.cameraY);
+                    lctx.closePath(); lctx.clip();
                 }
-            } else if (light.castsShadows) {
-                // If we hit the limit, downgrade the light to a non-shadow caster 
-                // rather than not rendering it at all.
             }
-
             const grad = lctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, light.radius);
-            grad.addColorStop(0, light.color);
-            grad.addColorStop(1, 'rgba(0,0,0,0)');
-            lctx.fillStyle = grad;
-            lctx.fillRect(screenX - light.radius, screenY - light.radius, light.radius * 2, light.radius * 2);
+            grad.addColorStop(0, light.color); grad.addColorStop(1, 'rgba(0,0,0,0)');
+            lctx.fillStyle = grad; lctx.fillRect(screenX - light.radius, screenY - light.radius, light.radius * 2, light.radius * 2);
             lctx.restore();
-
-            // Halo logic...
-            const weather = WeatherManager.getInstance().getWeatherState();
-            if (weather.fogDensity > 0.1) {
-                lctx.save();
-                lctx.globalCompositeOperation = 'screen';
-                const haloRadius = light.radius * (1.5 + weather.fogDensity * 2.0);
-                const haloAlpha = light.intensity * weather.fogDensity * 0.4;
-                lctx.globalAlpha = haloAlpha;
-
-                const haloGrad = lctx.createRadialGradient(screenX, screenY, light.radius * 0.2, screenX, screenY, haloRadius);
-                haloGrad.addColorStop(0, light.color);
-                haloGrad.addColorStop(1, 'rgba(0,0,0,0)');
-                lctx.fillStyle = haloGrad;
-                lctx.fillRect(screenX - haloRadius, screenY - haloRadius, haloRadius * 2, haloRadius * 2);
-                lctx.restore();
-            }
         });
         lctx.restore();
     }
@@ -830,60 +730,34 @@ export class LightingRenderer {
         if (!this.parent.player || !this.parent.world) return;
         const { moonPhase } = WorldClock.getInstance().getTimeState();
         const tileSize = ConfigManager.getInstance().get<number>('World', 'tileSize');
-        const revealIntensity = 0.5 + (moonPhase * 0.3);
-        const revealColor = `rgba(180, 200, 255, ${revealIntensity})`;
-
+        const revealColor = `rgba(180, 200, 255, ${0.5 + (moonPhase * 0.3)})`;
         const segRad = ConfigManager.getInstance().get<number>('Visuals', 'segmentVisibilityRadius') * tileSize;
         const coneDist = ConfigManager.getInstance().get<number>('Visuals', 'coneDistance') * tileSize;
         const coneAngleRad = (ConfigManager.getInstance().get<number>('Visuals', 'coneAngle') * Math.PI) / 180;
 
-        // Core reveal (instant)
-        this.parent.player.getAllBodies().forEach(b => {
+        this.parent.player.getAllBodies().forEach((b: any) => {
             const screenX = b.x - this.parent.cameraX;
             const screenY = b.y - this.parent.cameraY;
             const grad = lctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, segRad);
-            grad.addColorStop(0, revealColor);
-            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-            lctx.fillStyle = grad;
-            lctx.beginPath();
-            lctx.arc(screenX, screenY, segRad, 0, Math.PI * 2);
-            lctx.fill();
+            grad.addColorStop(0, revealColor); grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            lctx.fillStyle = grad; lctx.beginPath(); lctx.arc(screenX, screenY, segRad, 0, Math.PI * 2); lctx.fill();
         });
 
         const playerScreenX = this.parent.player.x - this.parent.cameraX;
         const playerScreenY = this.parent.player.y - this.parent.cameraY;
         const startAngle = this.parent.player.rotation - coneAngleRad / 2;
         const endAngle = this.parent.player.rotation + coneAngleRad / 2;
-
         const visionId = 'player_vision';
         const lastVisionPos = (this.parent.player as any)._lastVisionPos || { x: 0, y: 0, rot: 0 };
-        const hasMoved = Math.abs(this.parent.player.x - lastVisionPos.x) > 1 ||
-            Math.abs(this.parent.player.y - lastVisionPos.y) > 1 ||
-            Math.abs(this.parent.player.rotation - lastVisionPos.rot) > 0.05;
+        const hasMoved = Math.abs(this.parent.player.x - lastVisionPos.x) > 1 || Math.abs(this.parent.player.y - lastVisionPos.y) > 1 || Math.abs(this.parent.player.rotation - lastVisionPos.rot) > 0.05;
 
         if (this.parent.world.getMeshVersion() !== this.meshVersion || hasMoved) {
             if (!this.pendingRequests.has(visionId)) {
                 this.pendingRequests.set(visionId, true);
-                const segments = this.parent.world!.getOcclusionSegments(
-                    this.parent.player.x - coneDist,
-                    this.parent.player.y - coneDist,
-                    coneDist * 2,
-                    coneDist * 2
-                );
-
+                const segments = this.parent.world!.getOcclusionSegments(this.parent.player.x - coneDist, this.parent.player.y - coneDist, coneDist * 2, coneDist * 2);
                 const worker = this.workers[this.workerIndex];
                 this.workerIndex = (this.workerIndex + 1) % this.workers.length;
-                worker.postMessage({
-                    type: 'calculateVisibility',
-                    data: {
-                        id: visionId,
-                        origin: { x: this.parent.player.x, y: this.parent.player.y },
-                        segments,
-                        radius: coneDist,
-                        startAngle,
-                        endAngle
-                    }
-                });
+                worker.postMessage({ type: 'calculateVisibility', data: { id: visionId, origin: { x: this.parent.player.x, y: this.parent.player.y }, segments, radius: coneDist, startAngle, endAngle } });
                 (this.parent.player as any)._lastVisionPos = { x: this.parent.player.x, y: this.parent.player.y, rot: this.parent.player.rotation };
             }
         }
@@ -893,46 +767,13 @@ export class LightingRenderer {
         if (polygon && polygon.length > 0) {
             lctx.beginPath();
             lctx.moveTo(polygon[0].x - this.parent.cameraX, polygon[0].y - this.parent.cameraY);
-            for (let i = 1; i < polygon.length; i++) {
-                lctx.lineTo(polygon[i].x - this.parent.cameraX, polygon[i].y - this.parent.cameraY);
-            }
-            lctx.lineTo(playerScreenX, playerScreenY);
-            lctx.closePath();
-            lctx.clip();
+            for (let i = 1; i < polygon.length; i++) lctx.lineTo(polygon[i].x - this.parent.cameraX, polygon[i].y - this.parent.cameraY);
+            lctx.lineTo(playerScreenX, playerScreenY); lctx.closePath(); lctx.clip();
         }
-
         const coneGrad = lctx.createRadialGradient(playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, coneDist);
-        coneGrad.addColorStop(0, revealColor);
-        coneGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        lctx.fillStyle = coneGrad;
-        lctx.fillRect(playerScreenX - coneDist, playerScreenY - coneDist, coneDist * 2, coneDist * 2);
+        coneGrad.addColorStop(0, revealColor); coneGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        lctx.fillStyle = coneGrad; lctx.fillRect(playerScreenX - coneDist, playerScreenY - coneDist, coneDist * 2, coneDist * 2);
         lctx.restore();
-
-        // FOG CONE SCATTER
-        const weather = WeatherManager.getInstance().getWeatherState();
-        if (weather.fogDensity > 0.1) {
-            lctx.save();
-            lctx.globalCompositeOperation = 'screen';
-            lctx.globalAlpha = weather.fogDensity * 0.25;
-
-            // Draw the same cone but without world occlusion clipping, 
-            // and slightly larger/softer to simulate light scattering in air
-            lctx.beginPath();
-            lctx.moveTo(playerScreenX, playerScreenY);
-            const startAngleScatter = this.parent.player.rotation - (coneAngleRad * 1.2) / 2;
-            for (let i = 0; i <= 30; i++) {
-                const angle = startAngleScatter + (i / 30) * (coneAngleRad * 1.2);
-                lctx.lineTo(playerScreenX + Math.cos(angle) * coneDist * 0.8, playerScreenY + Math.sin(angle) * coneDist * 0.8);
-            }
-            lctx.closePath();
-
-            const scatterGrad = lctx.createRadialGradient(playerScreenX, playerScreenY, 0, playerScreenX, playerScreenY, coneDist);
-            scatterGrad.addColorStop(0, revealColor);
-            scatterGrad.addColorStop(1, 'rgba(0,0,0,0)');
-            lctx.fillStyle = scatterGrad;
-            lctx.fill();
-            lctx.restore();
-        }
     }
 
     public clearCache(): void {

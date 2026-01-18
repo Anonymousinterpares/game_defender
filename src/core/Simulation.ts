@@ -376,8 +376,8 @@ export class Simulation implements WeaponParent, CombatParent {
         this.heatMap.update(dt);
     }
 
-    public render(ctx: CanvasRenderingContext2D): void {
-        this.renderSystem.update(0, this.entityManager, ctx, this.physicsSystem.alpha);
+    public render(ctx: CanvasRenderingContext2D, cameraX: number = 0, cameraY: number = 0): void {
+        this.renderSystem.update(0, this.entityManager, ctx, this.physicsSystem.alpha, cameraX, cameraY);
     }
 
     private updateSpawning(dt: number): void {

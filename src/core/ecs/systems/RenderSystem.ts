@@ -8,35 +8,28 @@ import { AIComponent } from "../components/AIComponent";
 import { ProjectileType } from "../components/ProjectileComponent";
 import { DropType } from "../components/DropComponent";
 import { AssetRegistry } from "../../AssetRegistry";
+import { ProjectionUtils } from "../../../utils/ProjectionUtils";
 
 export class RenderSystem implements System {
     public readonly id = 'render';
 
     private fireAsset: HTMLImageElement | null = null;
 
-    constructor() {
-        // Pre-load fire asset if possible, or wait for it
-        try {
-            // We can't guarantee it's loaded yet, but we can try to get it if it is.
-            // A safer way is to check in update or trust AssetRegistry's state.
-            // For now, we'll lazily fetch it in drawFire if needed, or cache it here.
-        } catch (e) {
-            // Asset might not be loaded yet
-        }
-    }
+    constructor() { }
 
-    update(dt: number, entityManager: EntityManager, ctx: CanvasRenderingContext2D, alpha: number = 0): void {
+    update(dt: number, entityManager: EntityManager, ctx: CanvasRenderingContext2D, alpha: number = 0, cameraX: number = 0, cameraY: number = 0): void {
         const entities = entityManager.query(['transform', 'render']);
+
+        const viewWidth = ctx.canvas.width;
+        const viewHeight = ctx.canvas.height;
+        const centerX = cameraX + viewWidth / 2;
+        const centerY = cameraY + viewHeight / 2;
 
         // Ensure fire asset is ready
         if (!this.fireAsset) {
             try {
-                // We check if AssetRegistry is loaded. 
-                // If the game has started, assets should be loaded.
                 this.fireAsset = AssetRegistry.getInstance().getImage('fire_spritesheet');
-            } catch (e) {
-                // Not ready yet
-            }
+            } catch (e) { }
         }
 
         for (const id of entities) {
@@ -55,24 +48,11 @@ export class RenderSystem implements System {
             let iz = transform.prevZ + (transform.z - transform.prevZ) * alpha;
             const rotation = transform.rotation;
 
-            // Perspective Shift: Lean away from screen center based on height
-            // We need camera position for this. 
-            // In LightingRenderer, parent has cameraX, cameraY. 
-            // RenderSystem doesn't have it directly. We can pass it or use window center.
-            const centerX = window.innerWidth / 2;
-            const centerY = window.innerHeight / 2;
+            // Perspective Projection: Lean away from center
+            const offset = ProjectionUtils.getProjectedOffset(ix, iy, iz, centerX, centerY);
+            const renderX = ix + offset.x;
+            const renderY = iy + iz + offset.y;
             
-            // Offset for drawing: y is shifted by z, x is shifted slightly by perspective
-            const perspectiveFactor = 0.05;
-            const renderX = ix + (ix - (ix)) * iz * perspectiveFactor; // Simplified for now, or use real camera
-            const renderY = iy + iz; // Note: negative z is 'up' in most coordinate systems, but let's check convention.
-            // Looking at LightingRenderer: const screenY = (p.y - this.parent.cameraY) - (camDy * parallaxMult * 10);
-            // And ParticleSystem: vz is positive (gravity). So z > 0 is "ground/below".
-            // Let's stick to: z < 0 is ABOVE ground. 
-            // PhysicsSystem used: nextZ = 0 if nextZ > 0. And gravity is positive. So Z increases downwards.
-            // So if Z < 0, entity is in the air.
-            
-            // Safety check for NaN or undefined
             if (isNaN(ix) || isNaN(iy)) {
                 ix = transform.x;
                 iy = transform.y;
@@ -84,21 +64,23 @@ export class RenderSystem implements System {
 
             ctx.save();
 
-            // 1. Draw Shadow first (on the ground)
+            // 1. Draw Shadow first (on the ground plane, but shifted by parallax!)
+            // The shadow stays at z=0, so its parallax is calculated at z=0 (which is zero offset)
+            // But actually, the ground itself isn't projected, only height is.
             this.drawShadow(ctx, ix, iy, render.radius, iz, scale);
 
-            // 2. Draw Entity with Z-offset
+            // 2. Draw Entity with Z-offset and perspective lean
             ctx.save();
             if (scale !== 1.0) {
-                ctx.translate(ix, iy + iz);
+                ctx.translate(renderX, renderY);
                 ctx.scale(scale, scale);
-                ctx.translate(-ix, -(iy + iz));
+                ctx.translate(-renderX, -renderY);
             }
 
             if (render.renderFn) {
-                render.renderFn(ctx, ix, iy + iz, rotation, scale);
+                render.renderFn(ctx, renderX, renderY, rotation, scale);
             } else {
-                this.drawByType(ctx, id, entityManager, render, ix, iy + iz, rotation, scale, damageFlash, health, fire);
+                this.drawByType(ctx, id, entityManager, render, renderX, renderY, rotation, scale, damageFlash, health, fire);
             }
             ctx.restore();
 
@@ -106,7 +88,7 @@ export class RenderSystem implements System {
 
             // Render Fire Effect on top
             if (fire?.isOnFire) {
-                this.drawFire(ctx, ix, iy + iz, render.radius, id);
+                this.drawFire(ctx, renderX, renderY, render.radius, id);
             }
         }
     }
@@ -499,8 +481,13 @@ export class RenderSystem implements System {
         }
     }
 
-    public renderSilhouettes(entityManager: EntityManager, ctx: CanvasRenderingContext2D, alpha: number, color: string): void {
+    public renderSilhouettes(entityManager: EntityManager, ctx: CanvasRenderingContext2D, alpha: number, color: string, cameraX: number = 0, cameraY: number = 0): void {
         const entities = entityManager.query(['transform', 'render']);
+
+        const viewWidth = ctx.canvas.width;
+        const viewHeight = ctx.canvas.height;
+        const centerX = cameraX + viewWidth / 2;
+        const centerY = cameraY + viewHeight / 2;
 
         for (const id of entities) {
             const health = entityManager.getComponent<HealthComponent>(id, 'health');
@@ -509,7 +496,7 @@ export class RenderSystem implements System {
             const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
             const render = entityManager.getComponent<RenderComponent>(id, 'render')!;
 
-            if (render.renderType === 'custom') continue; // Custom entities handled elsewhere? Or skip?
+            if (render.renderType === 'custom') continue; 
 
             // Interpolation
             const ix = transform.prevX + (transform.x - transform.prevX) * alpha;
@@ -518,35 +505,38 @@ export class RenderSystem implements System {
             const rotation = transform.rotation;
             const scale = health?.visualScale ?? render.visualScale;
 
+            // Perspective Projection
+            const offset = ProjectionUtils.getProjectedOffset(ix, iy, iz, centerX, centerY);
+            const renderX = ix + offset.x;
+            const renderY = iy + iz + offset.y;
+
             ctx.save();
 
             if (scale !== 1.0) {
-                ctx.translate(ix, iy + iz);
+                ctx.translate(renderX, renderY);
                 ctx.scale(scale, scale);
-                ctx.translate(-ix, -(iy + iz));
+                ctx.translate(-renderX, -renderY);
             }
 
             // Draw Silhouette
             ctx.fillStyle = color;
 
-            const ry = iy + iz;
-
             switch (render.renderType) {
                 case 'player':
                     // Head
                     ctx.beginPath();
-                    ctx.arc(ix, ry, render.radius, 0, Math.PI * 2);
+                    ctx.arc(renderX, renderY, render.radius, 0, Math.PI * 2);
                     ctx.fill();
-                    // Cannon (optional for silhouette? Yes, adds detail)
+                    // Cannon
                     ctx.save();
-                    ctx.translate(ix, ry);
+                    ctx.translate(renderX, renderY);
                     ctx.rotate(rotation);
                     ctx.fillRect(0, -3, 25, 6);
                     ctx.restore();
                     break;
                 case 'player_segment':
                     ctx.beginPath();
-                    ctx.arc(ix, ry, render.radius, 0, Math.PI * 2);
+                    ctx.arc(renderX, renderY, render.radius, 0, Math.PI * 2);
                     ctx.fill();
                     break;
                 case 'enemy':
@@ -555,18 +545,18 @@ export class RenderSystem implements System {
 
                     ctx.beginPath();
                     if (shape === 'square') {
-                        ctx.translate(ix, ry);
+                        ctx.translate(renderX, renderY);
                         ctx.rotate(rotation);
                         ctx.rect(-render.radius, -render.radius, render.radius * 2, render.radius * 2);
                     } else if (shape === 'triangle') {
-                        ctx.translate(ix, ry);
+                        ctx.translate(renderX, renderY);
                         ctx.rotate(rotation);
                         ctx.moveTo(render.radius, 0);
                         ctx.lineTo(-render.radius, -render.radius);
                         ctx.lineTo(-render.radius, render.radius);
                         ctx.closePath();
                     } else if (shape === 'rocket') {
-                        ctx.translate(ix, ry);
+                        ctx.translate(renderX, renderY);
                         ctx.rotate(rotation);
                         ctx.moveTo(render.radius, 0);
                         ctx.lineTo(-render.radius, -render.radius * 0.8);
@@ -574,15 +564,13 @@ export class RenderSystem implements System {
                         ctx.lineTo(-render.radius, render.radius * 0.8);
                         ctx.closePath();
                     } else {
-                        ctx.arc(ix, ry, render.radius, 0, Math.PI * 2);
+                        ctx.arc(renderX, renderY, render.radius, 0, Math.PI * 2);
                     }
                     ctx.fill();
                     break;
                 case 'projectile':
-                    // Projectiles usually don't cast shadows/block light in this game? 
-                    // But if they do:
                     ctx.beginPath();
-                    ctx.arc(ix, ry, render.radius, 0, Math.PI * 2);
+                    ctx.arc(renderX, renderY, render.radius, 0, Math.PI * 2);
                     ctx.fill();
                     break;
             }

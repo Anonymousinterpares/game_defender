@@ -9,10 +9,13 @@ import { FireComponent } from './ecs/components/FireComponent';
 export interface PhysicsBody {
     x: number;
     y: number;
+    z: number;
     vx: number;
     vy: number;
+    vz: number;
     prevX: number;
     prevY: number;
+    prevZ: number;
     radius: number;
     isStatic: boolean;
 }
@@ -45,6 +48,15 @@ export abstract class Entity implements PhysicsBody {
       if (t) t.y = val; else this._rawY = val;
   }
 
+  public get z(): number {
+      const t = this._entityManager?.getComponent<TransformComponent>(this.id, 'transform');
+      return t ? t.z : this._rawZ;
+  }
+  public set z(val: number) {
+      const t = this._entityManager?.getComponent<TransformComponent>(this.id, 'transform');
+      if (t) t.z = val; else this._rawZ = val;
+  }
+
   public get vx(): number {
       const p = this._entityManager?.getComponent<PhysicsComponent>(this.id, 'physics');
       return p ? p.vx : this._rawVx;
@@ -61,6 +73,15 @@ export abstract class Entity implements PhysicsBody {
   public set vy(val: number) {
       const p = this._entityManager?.getComponent<PhysicsComponent>(this.id, 'physics');
       if (p) p.vy = val; else this._rawVy = val;
+  }
+
+  public get vz(): number {
+      const p = this._entityManager?.getComponent<PhysicsComponent>(this.id, 'physics');
+      return p ? p.vz : this._rawVz;
+  }
+  public set vz(val: number) {
+      const p = this._entityManager?.getComponent<PhysicsComponent>(this.id, 'physics');
+      if (p) p.vz = val; else this._rawVz = val;
   }
 
   public get prevX(): number {
@@ -81,6 +102,15 @@ export abstract class Entity implements PhysicsBody {
       if (t) t.prevY = val; else this._rawPrevY = val;
   }
 
+  public get prevZ(): number {
+      const t = this._entityManager?.getComponent<TransformComponent>(this.id, 'transform');
+      return t ? t.prevZ : this._rawPrevZ;
+  }
+  public set prevZ(val: number) {
+      const t = this._entityManager?.getComponent<TransformComponent>(this.id, 'transform');
+      if (t) t.prevZ = val; else this._rawPrevZ = val;
+  }
+
   public get rotation(): number {
       const t = this._entityManager?.getComponent<TransformComponent>(this.id, 'transform');
       return t ? t.rotation : this._rawRotation;
@@ -93,10 +123,13 @@ export abstract class Entity implements PhysicsBody {
   // Raw values for when ECS isn't active for this entity
   private _rawX: number = 0;
   private _rawY: number = 0;
+  private _rawZ: number = 0;
   private _rawVx: number = 0;
   private _rawVy: number = 0;
+  private _rawVz: number = 0;
   private _rawPrevX: number = 0;
   private _rawPrevY: number = 0;
+  private _rawPrevZ: number = 0;
   private _rawRotation: number = 0;
 
   public radius: number = 10;

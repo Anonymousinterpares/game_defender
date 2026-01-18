@@ -191,9 +191,6 @@ export class FlashParticle extends Entity {
 
 export class MoltenMetalParticle extends Particle {
     private gravity: number = 80; // Very low gravity for slow motion feel
-    private vz: number = -60 - Math.random() * 40; // Gentle upward burst
-    public z: number = 0;
-    private prevZ: number = 0;
     public damage: number = 5;
 
     constructor(x: number, y: number, vx: number, vy: number) {
@@ -203,7 +200,7 @@ export class MoltenMetalParticle extends Particle {
 
     public reset(x: number, y: number, colorOrVx: string | number, vxOrVy: number, vyOrLife?: number, life?: number): void {
         if (typeof colorOrVx === 'string') {
-            // Called with base Particle signature (not expected but for type safety)
+            // Called with base Particle signature
             super.reset(x, y, colorOrVx, vxOrVy, vyOrLife || 0, life);
         } else {
             // Called with MoltenMetal signature: x, y, vx, vy
