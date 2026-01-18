@@ -6,6 +6,25 @@ export class ProjectionUtils {
     private static readonly PERSPECTIVE_STRENGTH = 0.0015;
 
     /**
+     * Projects a 3D world point into 2D screen space with perspective lean.
+     * @param x World X
+     * @param y World Y (Ground plane)
+     * @param z Height (usually negative for 'up')
+     * @param cameraCenterX World X of screen center
+     * @param cameraCenterY World Y of screen center
+     */
+    public static projectPoint(x: number, y: number, z: number, cameraCenterX: number, cameraCenterY: number) {
+        const h = -z; // Height above ground
+        const dx = x - cameraCenterX;
+        const dy = y - cameraCenterY;
+
+        return {
+            x: x + dx * h * this.PERSPECTIVE_STRENGTH,
+            y: y + z + dy * h * this.PERSPECTIVE_STRENGTH
+        };
+    }
+
+    /**
      * Calculates the screen offset for an object based on its height and distance from the camera center.
      * @param worldX Object world X
      * @param worldY Object world Y

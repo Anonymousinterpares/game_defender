@@ -23,6 +23,7 @@ import { BenchmarkSystem } from '../utils/BenchmarkSystem';
 import { Rect } from '../utils/Quadtree';
 import { Simulation, SimulationRole } from './Simulation';
 import { WorldRenderer } from './renderers/WorldRenderer';
+import { MaterialType } from './HeatMap';
 import { WeatherTimePlugin } from './plugins/WeatherTimePlugin';
 import { ChaosPlugin } from './plugins/ChaosPlugin';
 
@@ -239,18 +240,57 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         PerfMonitor.getInstance().begin('render_world');
         ctx.save();
         ctx.translate(-this.cameraX, -this.cameraY);
+
+        const viewW = window.innerWidth;
+        const viewH = window.innerHeight;
+        const centerX = this.cameraX + viewW / 2;
+        const centerY = this.cameraY + viewH / 2;
+
+        // 1. Render Ground
         this.worldRenderer.render(ctx, this.cameraX, this.cameraY);
         FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY, this.world.getWidthPixels(), this.world.getHeightPixels());
         if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY);
 
-        // ECS Rendering
-        this.simulation.render(ctx);
+        // 2. Render Wall Sides (Bottom to Top)
+        this.worldRenderer.renderSides(ctx, this.cameraX, this.cameraY);
 
-        const viewport: Rect = { x: this.cameraX, y: this.cameraY, w: window.innerWidth, h: window.innerHeight };
+        // 3. COLLECT & SORT FOREGROUND (Entities + Wall Tops)
+        const alpha = this.simulation.physicsSystem.alpha;
+        const renderables: any[] = this.simulation.renderSystem.collectRenderables(this.simulation.entityManager, alpha, centerX, centerY);
+
+        // Add Wall Tops as renderables
+        const tileSize = this.world.getTileSize();
+        const startTx = Math.floor(this.cameraX / tileSize);
+        const endTx = Math.ceil((this.cameraX + viewW) / tileSize);
+        const startTy = Math.floor(this.cameraY / tileSize);
+        const endTy = Math.ceil((this.cameraY + viewH) / tileSize);
+
+        for (let ty = startTy; ty <= endTy; ty++) {
+            if (ty < 0 || ty >= this.world.getHeight()) continue;
+            for (let tx = startTx; tx <= endTx; tx++) {
+                if (tx < 0 || tx >= this.world.getWidth()) continue;
+                const material = this.world.getTile(tx, ty);
+                if (material === MaterialType.NONE) continue;
+                
+                renderables.push({
+                    y: (ty + 1) * tileSize, // Base Y of the wall
+                    render: (c: CanvasRenderingContext2D) => {
+                        this.worldRenderer.renderWallTopOnly(c, tx, ty, material, centerX, centerY);
+                    }
+                });
+            }
+        }
+
+        // Sort by Y (Painter's Algorithm)
+        renderables.sort((a, b) => a.y - b.y);
+
+        // DRAW SORTED
+        renderables.forEach(r => r.render(ctx));
+
+        // 4. Custom Entities & Plugins
+        const viewport: Rect = { x: this.cameraX, y: this.cameraY, w: viewW, h: viewH };
         const visibleEntities = this.simulation.spatialGrid.retrieve(viewport);
         visibleEntities.forEach(e => {
-            // If it's in ECS, the RenderSystem already drew it (unless it's 'custom' type).
-            // We draw entities that aren't ECS-integrated yet OR those marked as 'custom'.
             const render = this.simulation.entityManager.getComponent<any>(e.id, 'render');
             if (!render || render.renderType === 'custom') {
                 if (typeof (e as any).render === 'function') {
@@ -259,7 +299,6 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
             }
         });
 
-        // Plugin Rendering
         this.simulation.pluginManager.render(ctx);
 
         PerfMonitor.getInstance().begin('render_particles');

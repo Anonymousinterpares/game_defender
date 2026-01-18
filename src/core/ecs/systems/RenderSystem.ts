@@ -17,13 +17,9 @@ export class RenderSystem implements System {
 
     constructor() { }
 
-    update(dt: number, entityManager: EntityManager, ctx: CanvasRenderingContext2D, alpha: number = 0, cameraX: number = 0, cameraY: number = 0): void {
+    public collectRenderables(entityManager: EntityManager, alpha: number, centerX: number, centerY: number): any[] {
         const entities = entityManager.query(['transform', 'render']);
-
-        const viewWidth = ctx.canvas.width;
-        const viewHeight = ctx.canvas.height;
-        const centerX = cameraX + viewWidth / 2;
-        const centerY = cameraY + viewHeight / 2;
+        const renderables: any[] = [];
 
         // Ensure fire asset is ready
         if (!this.fireAsset) {
@@ -43,9 +39,9 @@ export class RenderSystem implements System {
             if (render.renderType === 'custom') continue;
 
             // Interpolation
-            let ix = transform.prevX + (transform.x - transform.prevX) * alpha;
-            let iy = transform.prevY + (transform.y - transform.prevY) * alpha;
-            let iz = transform.prevZ + (transform.z - transform.prevZ) * alpha;
+            const ix = transform.prevX + (transform.x - transform.prevX) * alpha;
+            const iy = transform.prevY + (transform.y - transform.prevY) * alpha;
+            const iz = transform.prevZ + (transform.z - transform.prevZ) * alpha;
             const rotation = transform.rotation;
 
             // Perspective Projection: Lean away from center
@@ -53,44 +49,52 @@ export class RenderSystem implements System {
             const renderX = ix + offset.x;
             const renderY = iy + iz + offset.y;
             
-            if (isNaN(ix) || isNaN(iy)) {
-                ix = transform.x;
-                iy = transform.y;
-                iz = transform.z;
-            }
-
             const scale = health?.visualScale ?? render.visualScale;
             const damageFlash = health?.damageFlash ?? render.damageFlash;
 
-            ctx.save();
+            renderables.push({
+                y: iy, // Sorting by ground Y
+                render: (ctx: CanvasRenderingContext2D) => {
+                    ctx.save();
+                    // 1. Draw Shadow first
+                    this.drawShadow(ctx, ix, iy, render.radius, iz, scale);
 
-            // 1. Draw Shadow first (on the ground plane, but shifted by parallax!)
-            // The shadow stays at z=0, so its parallax is calculated at z=0 (which is zero offset)
-            // But actually, the ground itself isn't projected, only height is.
-            this.drawShadow(ctx, ix, iy, render.radius, iz, scale);
+                    // 2. Draw Entity with Z-offset and perspective lean
+                    ctx.save();
+                    if (scale !== 1.0) {
+                        ctx.translate(renderX, renderY);
+                        ctx.scale(scale, scale);
+                        ctx.translate(-renderX, -renderY);
+                    }
 
-            // 2. Draw Entity with Z-offset and perspective lean
-            ctx.save();
-            if (scale !== 1.0) {
-                ctx.translate(renderX, renderY);
-                ctx.scale(scale, scale);
-                ctx.translate(-renderX, -renderY);
-            }
+                    if (render.renderFn) {
+                        render.renderFn(ctx, renderX, renderY, rotation, scale);
+                    } else {
+                        this.drawByType(ctx, id, entityManager, render, renderX, renderY, rotation, scale, damageFlash, health, fire);
+                    }
+                    ctx.restore();
 
-            if (render.renderFn) {
-                render.renderFn(ctx, renderX, renderY, rotation, scale);
-            } else {
-                this.drawByType(ctx, id, entityManager, render, renderX, renderY, rotation, scale, damageFlash, health, fire);
-            }
-            ctx.restore();
-
-            ctx.restore();
-
-            // Render Fire Effect on top
-            if (fire?.isOnFire) {
-                this.drawFire(ctx, renderX, renderY, render.radius, id);
-            }
+                    // Render Fire Effect on top
+                    if (fire?.isOnFire) {
+                        this.drawFire(ctx, renderX, renderY, render.radius, id);
+                    }
+                    ctx.restore();
+                }
+            });
         }
+        return renderables;
+    }
+
+    update(dt: number, entityManager: EntityManager, ctx: CanvasRenderingContext2D, alpha: number = 0, cameraX: number = 0, cameraY: number = 0): void {
+        const viewWidth = ctx.canvas.width;
+        const viewHeight = ctx.canvas.height;
+        const centerX = cameraX + viewWidth / 2;
+        const centerY = cameraY + viewHeight / 2;
+
+        const renderables = this.collectRenderables(entityManager, alpha, centerX, centerY);
+        // In simple update, we just render them unsorted for now, 
+        // but GameplayScene will use collectRenderables + sorting.
+        renderables.forEach(r => r.render(ctx));
     }
 
     private drawShadow(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, z: number, scale: number): void {

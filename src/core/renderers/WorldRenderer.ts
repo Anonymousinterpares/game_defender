@@ -52,8 +52,6 @@ export class WorldRenderer {
     public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
         const viewWidth = ctx.canvas.width;
         const viewHeight = ctx.canvas.height;
-        const cameraCenterX = cameraX + viewWidth / 2;
-        const cameraCenterY = cameraY + viewHeight / 2;
 
         const currentSnow = WeatherManager.getInstance().getSnowAccumulation();
         if (Math.abs(currentSnow - this.lastSnowAccumulation) > 0.05) {
@@ -63,15 +61,116 @@ export class WorldRenderer {
 
         // 1. RENDER GROUND PLANE (Cached Chunks)
         this.renderGround(ctx, cameraX, cameraY, viewWidth, viewHeight);
+    }
 
-        // 2. RENDER DYNAMIC WALLS (Center-Out Parallax)
-        this.renderWalls(ctx, cameraX, cameraY, viewWidth, viewHeight, cameraCenterX, cameraCenterY);
+    public renderSides(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
+        const viewWidth = ctx.canvas.width;
+        const viewHeight = ctx.canvas.height;
+        const centerX = cameraX + viewWidth / 2;
+        const centerY = cameraY + viewHeight / 2;
+
+        const startTx = Math.floor(cameraX / this.tileSize);
+        const endTx = Math.ceil((cameraX + viewWidth) / this.tileSize);
+        const startTy = Math.floor(cameraY / this.tileSize);
+        const endTy = Math.ceil((cameraY + viewHeight) / this.tileSize);
+
+        for (let ty = startTy; ty <= endTy; ty++) {
+            if (ty < 0 || ty >= this.world.getHeight()) continue;
+            for (let tx = startTx; tx <= endTx; tx++) {
+                if (tx < 0 || tx >= this.world.getWidth()) continue;
+                const material = this.world.getTile(tx, ty);
+                if (material === MaterialType.NONE) continue;
+                this.renderWallSidesOnly(ctx, tx, ty, material, centerX, centerY);
+            }
+        }
+    }
+
+    private renderWallSidesOnly(ctx: CanvasRenderingContext2D, tx: number, ty: number, material: MaterialType, centerX: number, centerY: number): void {
+        const worldX = tx * this.tileSize;
+        const worldY = ty * this.tileSize;
+        const ts = this.tileSize;
+        
+        const x0 = worldX; const y0 = worldY;
+        const x1 = worldX + ts; const y1 = worldY + ts;
+
+        const v0 = ProjectionUtils.projectPoint(x0, y0, this.WALL_HEIGHT, centerX, centerY);
+        const v1 = ProjectionUtils.projectPoint(x1, y0, this.WALL_HEIGHT, centerX, centerY);
+        const v2 = ProjectionUtils.projectPoint(x1, y1, this.WALL_HEIGHT, centerX, centerY);
+        const v3 = ProjectionUtils.projectPoint(x0, y1, this.WALL_HEIGHT, centerX, centerY);
+
+        let sideColor = '#1a1a1a';
+        switch (material) {
+            case MaterialType.WOOD: sideColor = '#3e2723'; break;
+            case MaterialType.BRICK: sideColor = '#800000'; break;
+            case MaterialType.STONE: sideColor = '#424242'; break;
+            case MaterialType.METAL: sideColor = '#263238'; break;
+            case MaterialType.INDESTRUCTIBLE: sideColor = '#000000'; break;
+        }
+
+        ctx.fillStyle = sideColor;
+        const hasTop = ty > 0 && this.world.getTile(tx, ty - 1) !== MaterialType.NONE;
+        const hasBottom = ty < this.world.getHeight() - 1 && this.world.getTile(tx, ty + 1) !== MaterialType.NONE;
+        const hasLeft = tx > 0 && this.world.getTile(tx - 1, ty) !== MaterialType.NONE;
+        const hasRight = tx < this.world.getWidth() - 1 && this.world.getTile(tx + 1, ty) !== MaterialType.NONE;
+
+        if (!hasTop && v0.y > y0) {
+            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.lineTo(v1.x, v1.y); ctx.lineTo(v0.x, v0.y); ctx.fill();
+        }
+        if (!hasBottom && v3.y < y1) {
+            ctx.beginPath(); ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y); ctx.fill();
+        }
+        if (!hasLeft && v0.x > x0) {
+            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); ctx.lineTo(v3.x, v3.y); ctx.lineTo(v0.x, v0.y); ctx.fill();
+        }
+        if (!hasRight && v1.x < x1) {
+            ctx.beginPath(); ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v1.x, v1.y); ctx.fill();
+        }
+    }
+
+    public renderWallTopOnly(ctx: CanvasRenderingContext2D, tx: number, ty: number, material: MaterialType, centerX: number, centerY: number): void {
+        const worldX = tx * this.tileSize;
+        const worldY = ty * this.tileSize;
+        const ts = this.tileSize;
+
+        const v0 = ProjectionUtils.projectPoint(worldX, worldY, this.WALL_HEIGHT, centerX, centerY);
+        const v1 = ProjectionUtils.projectPoint(worldX + ts, worldY, this.WALL_HEIGHT, centerX, centerY);
+        const v2 = ProjectionUtils.projectPoint(worldX + ts, worldY + ts, this.WALL_HEIGHT, centerX, centerY);
+        const v3 = ProjectionUtils.projectPoint(worldX, worldY + ts, this.WALL_HEIGHT, centerX, centerY);
+
+        let topColorBase = '#444';
+        switch (material) {
+            case MaterialType.WOOD: topColorBase = '#795548'; break;
+            case MaterialType.BRICK: topColorBase = '#c62828'; break;
+            case MaterialType.STONE: topColorBase = '#9e9e9e'; break;
+            case MaterialType.METAL: topColorBase = '#546e7a'; break;
+            case MaterialType.INDESTRUCTIBLE: topColorBase = '#333333'; break;
+        }
+
+        this.renderWallTop(ctx, tx, ty, v0, v1, v2, v3, material, topColorBase);
     }
 
     public renderAsSilhouette(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, color?: string): void {
-        // For walls, we just render them normally into the silhouette buffer.
-        // The LightingRenderer will use globalCompositeOperation to color them.
-        this.render(ctx, cameraX, cameraY);
+        // Ground is never silhouette, only walls.
+        this.renderSides(ctx, cameraX, cameraY);
+        const viewWidth = ctx.canvas.width;
+        const viewHeight = ctx.canvas.height;
+        const centerX = cameraX + viewWidth / 2;
+        const centerY = cameraY + viewHeight / 2;
+
+        const startTx = Math.floor(cameraX / this.tileSize);
+        const endTx = Math.ceil((cameraX + viewWidth) / this.tileSize);
+        const startTy = Math.floor(cameraY / this.tileSize);
+        const endTy = Math.ceil((cameraY + viewHeight) / this.tileSize);
+
+        for (let ty = startTy; ty <= endTy; ty++) {
+            if (ty < 0 || ty >= this.world.getHeight()) continue;
+            for (let tx = startTx; tx <= endTx; tx++) {
+                if (tx < 0 || tx >= this.world.getWidth()) continue;
+                const material = this.world.getTile(tx, ty);
+                if (material === MaterialType.NONE) continue;
+                this.renderWallTopOnly(ctx, tx, ty, material, centerX, centerY);
+            }
+        }
     }
 
     private renderGround(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, viewWidth: number, viewHeight: number): void {
@@ -118,158 +217,94 @@ export class WorldRenderer {
         }
     }
 
-    private renderWalls(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, viewWidth: number, viewHeight: number, centerX: number, centerY: number): void {
-        const startTx = Math.floor(cameraX / this.tileSize);
-        const endTx = Math.ceil((cameraX + viewWidth) / this.tileSize);
-        const startTy = Math.floor(cameraY / this.tileSize);
-        const endTy = Math.ceil((cameraY + viewHeight) / this.tileSize);
-
-        // Painter's Algorithm: Sort order based on camera to avoid overlap issues
-        const yDir = centerY > (startTy + endTy) * this.tileSize / 2 ? 1 : -1;
-        const xDir = centerX > (startTx + endTx) * this.tileSize / 2 ? 1 : -1;
-
-        const yRange = [];
-        for (let ty = startTy; ty <= endTy; ty++) yRange.push(ty);
-        if (yDir === -1) yRange.reverse();
-
-        const xRange = [];
-        for (let tx = startTx; tx <= endTx; tx++) xRange.push(tx);
-        if (xDir === -1) xRange.reverse();
-
-        for (const ty of yRange) {
-            if (ty < 0 || ty >= this.world.getHeight()) continue;
-            for (const tx of xRange) {
-                if (tx < 0 || tx >= this.world.getWidth()) continue;
-
-                const material = this.world.getTile(tx, ty);
-                if (material === MaterialType.NONE) continue;
-
-                this.renderSingleWall(ctx, tx, ty, material, centerX, centerY);
-            }
-        }
-    }
-
-    private renderSingleWall(ctx: CanvasRenderingContext2D, tx: number, ty: number, material: MaterialType, centerX: number, centerY: number): void {
-        const worldX = tx * this.tileSize;
-        const worldY = ty * this.tileSize;
-        
-        // Base points
-        const x0 = worldX;
-        const y0 = worldY;
-        const x1 = worldX + this.tileSize;
-        const y1 = worldY + this.tileSize;
-
-        // Projected points for the top face
-        const offset = ProjectionUtils.getProjectedOffset(worldX + this.tileSize/2, worldY + this.tileSize/2, this.WALL_HEIGHT, centerX, centerY);
-        const tx0 = x0 + offset.x;
-        const ty0 = y0 + offset.y;
-        const tx1 = x1 + offset.x;
-        const ty1 = y1 + offset.y;
-
-        let color = '#2a2a2a';
-        let sideColor = '#1a1a1a';
-        let topColorBase = '#444';
-
-        switch (material) {
-            case MaterialType.WOOD: color = '#5d4037'; sideColor = '#3e2723'; topColorBase = '#795548'; break;
-            case MaterialType.BRICK: color = '#a52a2a'; sideColor = '#800000'; topColorBase = '#c62828'; break;
-            case MaterialType.STONE: color = '#616161'; sideColor = '#424242'; topColorBase = '#9e9e9e'; break;
-            case MaterialType.METAL: color = '#37474f'; sideColor = '#263238'; topColorBase = '#546e7a'; break;
-            case MaterialType.INDESTRUCTIBLE: color = '#1a1a1a'; sideColor = '#000000'; topColorBase = '#333333'; break;
-        }
-
-        // Draw Sides (only if visible based on camera position)
-        ctx.fillStyle = sideColor;
-        
-        // Top side (visible if leaning down)
-        if (offset.y > 0) {
-            ctx.beginPath();
-            ctx.moveTo(x0, y0); ctx.lineTo(x1, y0);
-            ctx.lineTo(tx1, ty0); ctx.lineTo(tx0, ty0);
-            ctx.fill();
-        }
-        // Bottom side (visible if leaning up)
-        if (offset.y < 0) {
-            ctx.beginPath();
-            ctx.moveTo(x0, y1); ctx.lineTo(x1, y1);
-            ctx.lineTo(tx1, ty1); ctx.lineTo(tx0, ty1);
-            ctx.fill();
-        }
-        // Left side (visible if leaning right)
-        if (offset.x > 0) {
-            ctx.beginPath();
-            ctx.moveTo(x0, y0); ctx.lineTo(x0, y1);
-            ctx.lineTo(tx0, ty1); ctx.lineTo(tx0, ty0);
-            ctx.fill();
-        }
-        // Right side (visible if leaning left)
-        if (offset.x < 0) {
-            ctx.beginPath();
-            ctx.moveTo(x1, y0); ctx.lineTo(x1, y1);
-            ctx.lineTo(tx1, ty1); ctx.lineTo(tx1, ty0);
-            ctx.fill();
-        }
-
-        // Draw Top Face (with 10x10 destruction logic)
-        this.renderWallTop(ctx, tx, ty, tx0, ty0, material, topColorBase);
-    }
-
-    private renderWallTop(ctx: CanvasRenderingContext2D, tx: number, ty: number, px: number, py: number, material: MaterialType, topColorBase: string): void {
+    private renderWallTop(ctx: CanvasRenderingContext2D, tx: number, ty: number, v0: any, v1: any, v2: any, v3: any, material: MaterialType, topColorBase: string): void {
         const heatMap = this.world.getHeatMap();
         const hpData = heatMap ? heatMap.getTileHP(tx, ty) : null;
         const heatData = heatMap ? heatMap.getTileHeat(tx, ty) : null;
         const sData = heatMap ? heatMap.getTileScorch(tx, ty) : null;
         const snow = WeatherManager.getInstance().getSnowAccumulation();
 
-        if (!hpData) {
+        // Optimized Path: If tile is NOT damaged, draw as a single quadrilateral
+        const isDamaged = heatMap?.hasTileData(tx, ty);
+
+        if (!isDamaged) {
             ctx.fillStyle = topColorBase;
-            ctx.fillRect(px, py, this.tileSize, this.tileSize);
+            ctx.beginPath();
+            ctx.moveTo(v0.x, v0.y); ctx.lineTo(v1.x, v1.y);
+            ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y);
+            ctx.fill();
+
             if (snow > 0.1) {
                 ctx.fillStyle = `rgba(240, 245, 255, ${snow})`;
-                ctx.fillRect(px, py, this.tileSize, this.tileSize);
+                ctx.fill(); // Re-use path
             }
             return;
         }
 
+        // Detailed Path (Sub-tile loop)
         const subDiv = 10;
-        const subSize = this.tileSize / subDiv;
-
+        
         for (let sy = 0; sy < subDiv; sy++) {
+            const fsy0 = sy / subDiv;
+            const fsy1 = (sy + 1) / subDiv;
+
             for (let sx = 0; sx < subDiv; sx++) {
                 const idx = sy * subDiv + sx;
-                if (hpData[idx] > 0) {
-                    const lx = px + sx * subSize;
-                    const ly = py + sy * subSize;
+                if (hpData && hpData[idx] <= 0) continue;
 
-                    ctx.fillStyle = topColorBase;
-                    ctx.fillRect(lx, ly, subSize, subSize);
+                const fsx0 = sx / subDiv;
+                const fsx1 = (sx + 1) / subDiv;
 
-                    if (sData && sData[idx]) {
-                        ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
-                        ctx.fillRect(lx, ly, subSize, subSize);
-                    }
+                // Bilinear interpolation for sub-tile vertices
+                const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
+                const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
+                const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
+                const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
 
-                    if (heatData && heatData[idx] > 0.05) {
-                        const heat = heatData[idx];
-                        const r = Math.floor(100 + 155 * Math.min(1, heat / 0.6));
-                        ctx.fillStyle = `rgba(${r}, 0, 0, ${0.2 + heat * 0.4})`;
-                        ctx.fillRect(lx, ly, subSize, subSize);
-                    }
+                ctx.fillStyle = topColorBase;
+                ctx.beginPath();
+                ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
+                ctx.fill();
 
-                    if (snow > 0.1) {
-                        const tileHeat = heatData && heatData[idx] ? heatData[idx] : 0;
-                        if (tileHeat < 0.3) {
-                            const removalData = WeatherManager.getInstance().getTileSnowRemoval(tx, ty);
-                            const snowFactor = removalData ? removalData[idx] : 1.0;
-                            if (snowFactor > 0.01) {
-                                ctx.fillStyle = `rgba(240, 245, 255, ${snow * snowFactor})`;
-                                ctx.fillRect(lx, ly, subSize, subSize);
-                            }
+                if (sData && sData[idx]) {
+                    ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
+                    ctx.fill();
+                }
+
+                if (heatData && heatData[idx] > 0.05) {
+                    const heat = heatData[idx];
+                    const r = Math.floor(100 + 155 * Math.min(1, heat / 0.6));
+                    ctx.fillStyle = `rgba(${r}, 0, 0, ${0.2 + heat * 0.4})`;
+                    ctx.fill();
+                }
+
+                if (snow > 0.1) {
+                    const tileHeat = heatData && heatData[idx] ? heatData[idx] : 0;
+                    if (tileHeat < 0.3) {
+                        const removalData = WeatherManager.getInstance().getTileSnowRemoval(tx, ty);
+                        const snowFactor = removalData ? removalData[idx] : 1.0;
+                        if (snowFactor > 0.01) {
+                            ctx.fillStyle = `rgba(240, 245, 255, ${snow * snowFactor})`;
+                            ctx.fill();
                         }
                     }
                 }
             }
         }
+    }
+
+    private lerpQuad(v0: any, v1: any, v2: any, v3: any, x: number, y: number) {
+        // Bilinear interpolation between 4 points
+        const topX = v0.x + (v1.x - v0.x) * x;
+        const topY = v0.y + (v1.y - v0.y) * x;
+        const botX = v3.x + (v2.x - v3.x) * x;
+        const botY = v3.y + (v2.y - v3.y) * x;
+
+        return {
+            x: topX + (botX - topX) * y,
+            y: topY + (botY - topY) * y
+        };
     }
 
     private renderMeltedGround(ctx: CanvasRenderingContext2D, startTx: number, startTy: number, w: number, h: number, camX: number, camY: number): void {
