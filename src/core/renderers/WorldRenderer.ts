@@ -12,7 +12,7 @@ export class WorldRenderer {
     private lastSnowAccumulation: number = 0;
 
     // Wall settings
-    private readonly WALL_HEIGHT = -32; // Negative for UP
+    private wallHeight: number = -32; // Negative for UP
 
     private scratchCanvas: HTMLCanvasElement;
     private scratchCtx: CanvasRenderingContext2D;
@@ -50,6 +50,7 @@ export class WorldRenderer {
     }
 
     public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
+        this.wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
         const viewWidth = ctx.canvas.width;
         const viewHeight = ctx.canvas.height;
 
@@ -64,6 +65,7 @@ export class WorldRenderer {
     }
 
     public renderSides(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
+        this.wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
         const viewWidth = ctx.canvas.width;
         const viewHeight = ctx.canvas.height;
         const centerX = cameraX + viewWidth / 2;
@@ -93,10 +95,10 @@ export class WorldRenderer {
         const x0 = worldX; const y0 = worldY;
         const x1 = worldX + ts; const y1 = worldY + ts;
 
-        const v0 = ProjectionUtils.projectPoint(x0, y0, this.WALL_HEIGHT, centerX, centerY);
-        const v1 = ProjectionUtils.projectPoint(x1, y0, this.WALL_HEIGHT, centerX, centerY);
-        const v2 = ProjectionUtils.projectPoint(x1, y1, this.WALL_HEIGHT, centerX, centerY);
-        const v3 = ProjectionUtils.projectPoint(x0, y1, this.WALL_HEIGHT, centerX, centerY);
+        const v0 = ProjectionUtils.projectPoint(x0, y0, this.wallHeight, centerX, centerY);
+        const v1 = ProjectionUtils.projectPoint(x1, y0, this.wallHeight, centerX, centerY);
+        const v2 = ProjectionUtils.projectPoint(x1, y1, this.wallHeight, centerX, centerY);
+        const v3 = ProjectionUtils.projectPoint(x0, y1, this.wallHeight, centerX, centerY);
 
         let sideColor = '#1a1a1a';
         switch (material) {
@@ -128,14 +130,15 @@ export class WorldRenderer {
     }
 
     public renderWallTopOnly(ctx: CanvasRenderingContext2D, tx: number, ty: number, material: MaterialType, centerX: number, centerY: number): void {
+        this.wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
         const worldX = tx * this.tileSize;
         const worldY = ty * this.tileSize;
         const ts = this.tileSize;
 
-        const v0 = ProjectionUtils.projectPoint(worldX, worldY, this.WALL_HEIGHT, centerX, centerY);
-        const v1 = ProjectionUtils.projectPoint(worldX + ts, worldY, this.WALL_HEIGHT, centerX, centerY);
-        const v2 = ProjectionUtils.projectPoint(worldX + ts, worldY + ts, this.WALL_HEIGHT, centerX, centerY);
-        const v3 = ProjectionUtils.projectPoint(worldX, worldY + ts, this.WALL_HEIGHT, centerX, centerY);
+        const v0 = ProjectionUtils.projectPoint(worldX, worldY, this.wallHeight, centerX, centerY);
+        const v1 = ProjectionUtils.projectPoint(worldX + ts, worldY, this.wallHeight, centerX, centerY);
+        const v2 = ProjectionUtils.projectPoint(worldX + ts, worldY + ts, this.wallHeight, centerX, centerY);
+        const v3 = ProjectionUtils.projectPoint(worldX, worldY + ts, this.wallHeight, centerX, centerY);
 
         let topColorBase = '#444';
         switch (material) {

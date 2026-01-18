@@ -22,6 +22,7 @@ export const MasterConfig: GameConfigSchema = {
     width: { value: 50, type: 'number', min: 10, max: 5000, step: 10, description: 'Map Width (Tiles)' },
     height: { value: 50, type: 'number', min: 10, max: 5000, step: 10, description: 'Map Height (Tiles)' },
     tileSize: { value: 32, type: 'number', min: 16, max: 128, step: 1, description: 'Tile Size (Pixels)' },
+    wallHeight: { value: 32, type: 'number', min: 4, max: 128, step: 1, description: 'Wall Height (Pixels)' },
     renderDistance: { value: 50, type: 'number', min: 10, max: 100, step: 1, description: 'Render Distance (Units)' }
   },
   Player: {
