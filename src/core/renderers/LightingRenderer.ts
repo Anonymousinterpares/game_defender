@@ -690,11 +690,6 @@ export class LightingRenderer {
         const dx = source.direction.x * source.shadowLen;
         const dy = source.direction.y * source.shadowLen;
 
-        const wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
-        // Bake center - using chunk center as reference to keep bake stable
-        const cameraCenterX = worldX + this.chunkSize / 2;
-        const cameraCenterY = worldY + this.chunkSize / 2;
-
         for (let ty = startTy; ty <= endTy; ty++) {
             if (ty < 0 || ty >= this.parent.world!.getHeight()) continue;
             for (let tx = startTx; tx <= endTx; tx++) {
@@ -704,101 +699,69 @@ export class LightingRenderer {
                     const x = tx * tileSize;
                     const y = ty * tileSize;
 
-                    // Project shadow source (the wall's 3D top)
-                    const v0 = ProjectionUtils.projectPoint(x, y, wallHeight, cameraCenterX, cameraCenterY);
-                    const v1 = ProjectionUtils.projectPoint(x + tileSize, y, wallHeight, cameraCenterX, cameraCenterY);
-                    const v2 = ProjectionUtils.projectPoint(x + tileSize, y + tileSize, wallHeight, cameraCenterX, cameraCenterY);
-                    const v3 = ProjectionUtils.projectPoint(x, y + tileSize, wallHeight, cameraCenterX, cameraCenterY);
-
                     const heatMap = this.parent.world!.getHeatMap();
                     const hpData = heatMap ? heatMap.getTileHP(tx, ty) : null;
                     const isDamaged = heatMap?.hasTileData(tx, ty);
 
                     if (!isDamaged) {
-                        // Project shadow from the projected TOP face
-                        // Edge 0-1
+                        // Project shadow from the wall's rectangular footprint (Parallel)
                         sctx.beginPath();
                         sctx.moveTo(x - worldX, y - worldY);
                         sctx.lineTo(x + tileSize - worldX, y - worldY);
-                        sctx.lineTo(v1.x + dx - worldX, v1.y + dy - worldY);
-                        sctx.lineTo(v0.x + dx - worldX, v0.y + dy - worldY);
-                        sctx.fill();
-
-                        // Edge 1-2
-                        sctx.beginPath();
-                        sctx.moveTo(x + tileSize - worldX, y - worldY);
-                        sctx.lineTo(x + tileSize - worldX, y + tileSize - worldY);
-                        sctx.lineTo(v2.x + dx - worldX, v2.y + dy - worldY);
-                        sctx.lineTo(v1.x + dx - worldX, v1.y + dy - worldY);
-                        sctx.fill();
-
-                        // Edge 2-3
-                        sctx.beginPath();
-                        sctx.moveTo(x + tileSize - worldX, y + tileSize - worldY);
-                        sctx.lineTo(x - worldX, y + tileSize - worldY);
-                        sctx.lineTo(v3.x + dx - worldX, v3.y + dy - worldY);
-                        sctx.lineTo(v2.x + dx - worldX, v2.y + dy - worldY);
-                        sctx.fill();
-
-                        // Edge 3-0
-                        sctx.beginPath();
+                        sctx.lineTo(x + tileSize + dx - worldX, y + dy - worldY);
+                        sctx.lineTo(x + dx - worldX, y + dy - worldY);
+                        sctx.closePath();
+                        
                         sctx.moveTo(x - worldX, y + tileSize - worldY);
-                        sctx.lineTo(x - worldX, y - worldY);
-                        sctx.lineTo(v0.x + dx - worldX, v0.y + dy - worldY);
-                        sctx.lineTo(v3.x + dx - worldX, v3.y + dy - worldY);
+                        sctx.lineTo(x + tileSize - worldX, y + tileSize - worldY);
+                        sctx.lineTo(x + tileSize + dx - worldX, y + tileSize + dy - worldY);
+                        sctx.lineTo(x + dx - worldX, y + tileSize + dy - worldY);
+                        sctx.closePath();
                         sctx.fill();
                     } else if (hpData) {
                         const subDiv = 10;
+                        const subSize = tileSize / subDiv;
+                        sctx.beginPath();
                         for (let sy = 0; sy < subDiv; sy++) {
-                            const fsy0 = sy / subDiv;
-                            const fsy1 = (sy + 1) / subDiv;
+                            const by0 = y + (sy / subDiv) * tileSize;
+                            const by1 = y + ((sy + 1) / subDiv) * tileSize;
                             for (let sx = 0; sx < subDiv; sx++) {
                                 const idx = sy * subDiv + sx;
                                 if (hpData[idx] > 0) {
-                                    const fsx0 = sx / subDiv;
-                                    const fsx1 = (sx + 1) / subDiv;
+                                    const bx0 = x + (sx / subDiv) * tileSize;
+                                    const bx1 = x + ((sx + 1) / subDiv) * tileSize;
 
-                                    const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
-                                    const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
-                                    const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
-                                    const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
-
-                                    const bx0 = x + fsx0 * tileSize;
-                                    const by0 = y + fsy0 * tileSize;
-                                    const bx1 = x + fsx1 * tileSize;
-                                    const by1 = y + fsy1 * tileSize;
-
-                                    // Bridge each sub-tile base to its projected top shadow
-                                    sctx.beginPath();
+                                    // Top edge projection
                                     sctx.moveTo(bx0 - worldX, by0 - worldY);
                                     sctx.lineTo(bx1 - worldX, by0 - worldY);
-                                    sctx.lineTo(p1.x + dx - worldX, p1.y + dy - worldY);
-                                    sctx.lineTo(p0.x + dx - worldX, p0.y + dy - worldY);
-                                    sctx.fill();
+                                    sctx.lineTo(bx1 + dx - worldX, by0 + dy - worldY);
+                                    sctx.lineTo(bx0 + dx - worldX, by0 + dy - worldY);
+                                    sctx.closePath();
 
-                                    sctx.beginPath();
+                                    // Bottom edge projection
+                                    sctx.moveTo(bx0 - worldX, by1 - worldY);
+                                    sctx.lineTo(bx1 - worldX, by1 - worldY);
+                                    sctx.lineTo(bx1 + dx - worldX, by1 + dy - worldY);
+                                    sctx.lineTo(bx0 + dx - worldX, by1 + dy - worldY);
+                                    sctx.closePath();
+                                    
+                                    // Left edge projection
+                                    sctx.moveTo(bx0 - worldX, by0 - worldY);
+                                    sctx.lineTo(bx0 - worldX, by1 - worldY);
+                                    sctx.lineTo(bx0 + dx - worldX, by1 + dy - worldY);
+                                    sctx.lineTo(bx0 + dx - worldX, by0 + dy - worldY);
+                                    sctx.closePath();
+                                    
+                                    // Right edge projection
                                     sctx.moveTo(bx1 - worldX, by0 - worldY);
                                     sctx.lineTo(bx1 - worldX, by1 - worldY);
-                                    sctx.lineTo(p2.x + dx - worldX, p2.y + dy - worldY);
-                                    sctx.lineTo(p1.x + dx - worldX, p1.y + dy - worldY);
-                                    sctx.fill();
-
-                                    sctx.beginPath();
-                                    sctx.moveTo(bx1 - worldX, by1 - worldY);
-                                    sctx.lineTo(bx0 - worldX, by1 - worldY);
-                                    sctx.lineTo(p3.x + dx - worldX, p3.y + dy - worldY);
-                                    sctx.lineTo(p2.x + dx - worldX, p2.y + dy - worldY);
-                                    sctx.fill();
-
-                                    sctx.beginPath();
-                                    sctx.moveTo(bx0 - worldX, by1 - worldY);
-                                    sctx.lineTo(bx0 - worldX, by0 - worldY);
-                                    sctx.lineTo(p0.x + dx - worldX, p0.y + dy - worldY);
-                                    sctx.lineTo(p3.x + dx - worldX, p3.y + dy - worldY);
-                                    sctx.fill();
+                                    sctx.lineTo(bx1 + dx - worldX, by1 + dy - worldY);
+                                    sctx.lineTo(bx1 + dx - worldX, by0 + dy - worldY);
+                                    sctx.closePath();
                                 }
                             }
                         }
+                        sctx.fill();
                     }
                 }
             }

@@ -115,17 +115,83 @@ export class WorldRenderer {
         const hasLeft = tx > 0 && this.world.getTile(tx - 1, ty) !== MaterialType.NONE;
         const hasRight = tx < this.world.getWidth() - 1 && this.world.getTile(tx + 1, ty) !== MaterialType.NONE;
 
-        if (!hasTop && v0.y > y0) {
-            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.lineTo(v1.x, v1.y); ctx.lineTo(v0.x, v0.y); ctx.fill();
-        }
-        if (!hasBottom && v3.y < y1) {
-            ctx.beginPath(); ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y); ctx.fill();
-        }
-        if (!hasLeft && v0.x > x0) {
-            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); ctx.lineTo(v3.x, v3.y); ctx.lineTo(v0.x, v0.y); ctx.fill();
-        }
-        if (!hasRight && v1.x < x1) {
-            ctx.beginPath(); ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v1.x, v1.y); ctx.fill();
+        const heatMap = this.world.getHeatMap();
+        const hpData = heatMap?.getTileHP(tx, ty);
+        const isDamaged = heatMap?.hasTileData(tx, ty) && hpData;
+        const subDiv = 10;
+
+        if (!isDamaged) {
+            // Fast path for healthy tiles (No batching needed for 1-4 fills)
+            if (!hasTop && v0.y > y0) {
+                ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.lineTo(v1.x, v1.y); ctx.lineTo(v0.x, v0.y); ctx.fill();
+            }
+            if (!hasBottom && v3.y < y1) {
+                ctx.beginPath(); ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y); ctx.fill();
+            }
+            if (!hasLeft && v0.x > x0) {
+                ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); ctx.lineTo(v3.x, v3.y); ctx.lineTo(v0.x, v0.y); ctx.fill();
+            }
+            if (!hasRight && v1.x < x1) {
+                ctx.beginPath(); ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v1.x, v1.y); ctx.fill();
+            }
+        } else {
+            // Detailed path: Batched Segmented Sides
+            // Top Side
+            if (!hasTop && v0.y > y0) {
+                ctx.beginPath();
+                for (let sx = 0; sx < subDiv; sx++) {
+                    if (hpData[sx] > 0) {
+                        const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
+                        const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, 0);
+                        const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, 0);
+                        const bx0 = x0 + fsx0 * ts; const bx1 = x0 + fsx1 * ts;
+                        ctx.moveTo(bx0, y0); ctx.lineTo(bx1, y0); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p0.x, p0.y);
+                    }
+                }
+                ctx.fill();
+            }
+            // Bottom Side
+            if (!hasBottom && v3.y < y1) {
+                ctx.beginPath();
+                for (let sx = 0; sx < subDiv; sx++) {
+                    if (hpData[90 + sx] > 0) {
+                        const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
+                        const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, 1);
+                        const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, 1);
+                        const bx0 = x0 + fsx0 * ts; const bx1 = x0 + fsx1 * ts;
+                        ctx.moveTo(bx0, y1); ctx.lineTo(bx1, y1); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
+                    }
+                }
+                ctx.fill();
+            }
+            // Left Side
+            if (!hasLeft && v0.x > x0) {
+                ctx.beginPath();
+                for (let sy = 0; sy < subDiv; sy++) {
+                    if (hpData[sy * subDiv] > 0) {
+                        const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
+                        const p0 = this.lerpQuad(v0, v1, v2, v3, 0, fsy0);
+                        const p3 = this.lerpQuad(v0, v1, v2, v3, 0, fsy1);
+                        const by0 = y0 + fsy0 * ts; const by1 = y0 + fsy1 * ts;
+                        ctx.moveTo(x0, by0); ctx.lineTo(x0, by1); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p0.x, p0.y);
+                    }
+                }
+                ctx.fill();
+            }
+            // Right Side
+            if (!hasRight && v1.x < x1) {
+                ctx.beginPath();
+                for (let sy = 0; sy < subDiv; sy++) {
+                    if (hpData[sy * subDiv + 9] > 0) {
+                        const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
+                        const p1 = this.lerpQuad(v0, v1, v2, v3, 1, fsy0);
+                        const p2 = this.lerpQuad(v0, v1, v2, v3, 1, fsy1);
+                        const by0 = y0 + fsy0 * ts; const by1 = y0 + fsy1 * ts;
+                        ctx.moveTo(x1, by0); ctx.lineTo(x1, by1); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p1.x, p1.y);
+                    }
+                }
+                ctx.fill();
+            }
         }
     }
 
