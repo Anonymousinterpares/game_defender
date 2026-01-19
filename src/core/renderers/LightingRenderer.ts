@@ -167,130 +167,6 @@ export class LightingRenderer {
         this.renderLighting(ctx);
     }
 
-    private drawWorldSilhouette(targetCtx: CanvasRenderingContext2D, color: string | null, meshVersion: number, w: number, h: number): void {
-        const tctx = this.tempCtx;
-        tctx.clearRect(0, 0, w, h);
-
-        const tileSize = this.parent.world!.getTileSize();
-        const startTx = Math.floor(this.parent.cameraX / tileSize);
-        const endTx = Math.ceil((this.parent.cameraX + w) / tileSize);
-        const startTy = Math.floor(this.parent.cameraY / tileSize);
-        const endTy = Math.ceil((this.parent.cameraY + h) / tileSize);
-
-        const cameraCenterX = this.parent.cameraX + w / 2;
-        const cameraCenterY = this.parent.cameraY + h / 2;
-        const wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
-
-        tctx.save();
-        tctx.translate(-this.parent.cameraX, -this.parent.cameraY);
-        tctx.fillStyle = '#ffffff';
-
-        for (let ty = startTy; ty <= endTy; ty++) {
-            if (ty < 0 || ty >= this.parent.world!.getHeight()) continue;
-            for (let tx = startTx; tx <= endTx; tx++) {
-                if (tx < 0 || tx >= this.parent.world!.getWidth()) continue;
-
-                const material = this.parent.world!.getTile(tx, ty);
-                if (material === MaterialType.NONE) continue;
-
-                const worldX = tx * tileSize;
-                const worldY = ty * tileSize;
-                
-                // Base points
-                const x0 = worldX;
-                const y0 = worldY;
-                const x1 = worldX + tileSize;
-                const y1 = worldY + tileSize;
-
-                // Projected points for the top face
-                const v0 = ProjectionUtils.projectPoint(x0, y0, wallHeight, cameraCenterX, cameraCenterY);
-                const v1 = ProjectionUtils.projectPoint(x1, y0, wallHeight, cameraCenterX, cameraCenterY);
-                const v2 = ProjectionUtils.projectPoint(x1, y1, wallHeight, cameraCenterX, cameraCenterY);
-                const v3 = ProjectionUtils.projectPoint(x0, y1, wallHeight, cameraCenterX, cameraCenterY);
-
-                // Draw Side silhouettes (Neighbor Culling)
-                const hasTop = ty > 0 && this.parent.world!.getTile(tx, ty - 1) !== MaterialType.NONE;
-                const hasBottom = ty < this.parent.world!.getHeight() - 1 && this.parent.world!.getTile(tx, ty + 1) !== MaterialType.NONE;
-                const hasLeft = tx > 0 && this.parent.world!.getTile(tx - 1, ty) !== MaterialType.NONE;
-                const hasRight = tx < this.parent.world!.getWidth() - 1 && this.parent.world!.getTile(tx + 1, ty) !== MaterialType.NONE;
-
-                // Top side (leaning down)
-                if (!hasTop && v0.y > y0) {
-                    tctx.beginPath();
-                    tctx.moveTo(x0, y0); tctx.lineTo(x1, y0);
-                    tctx.lineTo(v1.x, v1.y); tctx.lineTo(v0.x, v0.y);
-                    tctx.fill();
-                }
-                // Bottom side (leaning up)
-                if (!hasBottom && v3.y < y1) {
-                    tctx.beginPath();
-                    tctx.moveTo(x0, y1); tctx.lineTo(x1, y1);
-                    tctx.lineTo(v2.x, v2.y); tctx.lineTo(v3.x, v3.y);
-                    tctx.fill();
-                }
-                // Left side (leaning right)
-                if (!hasLeft && v0.x > x0) {
-                    tctx.beginPath();
-                    tctx.moveTo(x0, y0); tctx.lineTo(x0, y1);
-                    tctx.lineTo(v3.x, v3.y); tctx.lineTo(v0.x, v0.y);
-                    tctx.fill();
-                }
-                // Right side (leaning left)
-                if (!hasRight && v1.x < x1) {
-                    tctx.beginPath();
-                    tctx.moveTo(x1, y0); tctx.lineTo(x1, y1);
-                    tctx.lineTo(v2.x, v2.y); tctx.lineTo(v1.x, v1.y);
-                    tctx.fill();
-                }
-
-                // Draw Top Face silhouette
-                const isDamaged = this.parent.world!.getHeatMap()?.hasTileData(tx, ty);
-                if (!isDamaged) {
-                    tctx.beginPath();
-                    tctx.moveTo(v0.x, v0.y); tctx.lineTo(v1.x, v1.y);
-                    tctx.lineTo(v2.x, v2.y); tctx.lineTo(v3.x, v3.y);
-                    tctx.fill();
-                } else {
-                    const heatMap = this.parent.world!.getHeatMap();
-                    const hpData = heatMap ? heatMap.getTileHP(tx, ty) : null;
-                    const subDiv = 10;
-                    for (let sy = 0; sy < subDiv; sy++) {
-                        const fsy0 = sy / subDiv;
-                        const fsy1 = (sy + 1) / subDiv;
-                        for (let sx = 0; sx < subDiv; sx++) {
-                            const idx = sy * subDiv + sx;
-                            if (hpData && hpData[idx] > 0) {
-                                const fsx0 = sx / subDiv;
-                                const fsx1 = (sx + 1) / subDiv;
-
-                                // Bilinear interpolation for sub-tile vertices
-                                const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
-                                const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
-                                const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
-                                const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
-
-                                tctx.beginPath();
-                                tctx.moveTo(p0.x, p0.y); tctx.lineTo(p1.x, p1.y);
-                                tctx.lineTo(p2.x, p2.y); tctx.lineTo(p3.x, p3.y);
-                                tctx.fill();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        tctx.restore();
-
-        if (color) {
-            tctx.globalCompositeOperation = 'source-in';
-            tctx.fillStyle = color;
-            tctx.fillRect(0, 0, w, h);
-            tctx.globalCompositeOperation = 'source-over';
-        }
-
-        targetCtx.drawImage(this.tempCanvas, 0, 0);
-    }
-
     private lerpQuad(v0: Point, v1: Point, v2: Point, v3: Point, x: number, y: number): Point {
         const topX = v0.x + (v1.x - v0.x) * x;
         const topY = v0.y + (v1.y - v0.y) * x;
@@ -370,7 +246,37 @@ export class LightingRenderer {
         lctx.save();
         lctx.globalCompositeOperation = 'screen';
         const silColor = isDaylight ? 'rgb(70, 65, 60)' : 'rgb(30, 35, 50)';
-        this.drawWorldSilhouette(lctx, silColor, worldMeshVersion, fullW, fullH);
+        
+        // REVEAL WALLS using cached silhouette chunks (Optimized pass)
+        this.sourceCtx.clearRect(0, 0, w, h);
+        this.sourceCtx.save();
+        this.sourceCtx.scale(this.resolutionScale, this.resolutionScale);
+        this.sourceCtx.translate(-this.parent.cameraX, -this.parent.cameraY);
+        
+        const startGX = Math.floor(this.parent.cameraX / this.chunkSize);
+        const endGX = Math.floor((this.parent.cameraX + (w / this.resolutionScale)) / this.chunkSize);
+        const startGY = Math.floor(this.parent.cameraY / this.chunkSize);
+        const endGY = Math.floor((this.parent.cameraY + (h / this.resolutionScale)) / this.chunkSize);
+
+        for (let gy = startGY; gy <= endGY; gy++) {
+            for (let gx = startGX; gx <= endGX; gx++) {
+                const sil = this.silhouetteChunks.get(`${gx},${gy}`);
+                if (sil) {
+                    this.sourceCtx.drawImage(sil.canvas, gx * this.chunkSize, gy * this.chunkSize);
+                }
+            }
+        }
+        this.sourceCtx.restore();
+
+        // Color the collective silhouette mask
+        this.sourceCtx.save();
+        this.sourceCtx.globalCompositeOperation = 'source-in';
+        this.sourceCtx.fillStyle = silColor;
+        this.sourceCtx.fillRect(0, 0, w, h);
+        this.sourceCtx.restore();
+
+        // Draw to lightmap (at logical fullW/fullH because lctx is already resolution-scaled)
+        lctx.drawImage(this.sourceCanvas, 0, 0, fullW, fullH);
 
         lctx.translate(-this.parent.cameraX, -this.parent.cameraY);
         const alpha = this.parent.simulation.physicsSystem.alpha;
@@ -626,6 +532,20 @@ export class LightingRenderer {
 
         mctx.fillStyle = '#000000';
         let rebuildsThisFrame = 0;
+
+        // Process a bit of the queue first
+        while (this.rebuildQueue.length > 0 && rebuildsThisFrame < this.MAX_REBUILDS_PER_FRAME) {
+            const qKey = this.rebuildQueue.shift()!;
+            const [qCoords, qType] = qKey.split('_');
+            const [gx, gy] = qCoords.split(',').map(Number);
+            const chunk = this.shadowChunks.get(qKey);
+            if (chunk && chunk.version !== bakeVersion) {
+                this.rebuildShadowChunk(chunk, gx, gy, source);
+                chunk.version = bakeVersion;
+                rebuildsThisFrame++;
+            }
+        }
+
         for (let gy = startGY; gy <= endGY; gy++) {
             for (let gx = startGX; gx <= endGX; gx++) {
                 const key = `${gx},${gy}_${type}`;
@@ -655,7 +575,33 @@ export class LightingRenderer {
         entities.forEach(e => { if (e.active) this.renderEntityShadow(mctx, e, source.direction, source.shadowLen); });
 
         mctx.globalCompositeOperation = 'destination-out';
-        if (this.parent.worldRenderer) this.parent.worldRenderer.renderAsSilhouette(mctx, this.parent.cameraX, this.parent.cameraY);
+        
+        // Use cached silhouette chunks to avoid redrawing full world 3x per frame
+        for (let gy = startGY; gy <= endGY; gy++) {
+            for (let gx = startGX; gx <= endGX; gx++) {
+                const key = `${gx},${gy}`;
+                let sil = this.silhouetteChunks.get(key);
+                if (!sil) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = this.chunkSize; canvas.height = this.chunkSize;
+                    sil = { canvas, ctx: canvas.getContext('2d')!, version: -1 };
+                    this.silhouetteChunks.set(key, sil);
+                }
+                if (sil.version !== worldVersion) {
+                    sil.ctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
+                    sil.ctx.save();
+                    sil.ctx.translate(-gx * this.chunkSize, -gy * this.chunkSize);
+                    this.parent.worldRenderer.renderAsSilhouette(sil.ctx, gx * this.chunkSize, gy * this.chunkSize);
+                    sil.ctx.restore();
+                    sil.version = worldVersion;
+                }
+                // Apply a tiny offset to the silhouette mask to preserve shadow roots
+                const maskOffsetX = -source.direction.x * 2;
+                const maskOffsetY = -source.direction.y * 2;
+                mctx.drawImage(sil.canvas, gx * this.chunkSize + maskOffsetX, gy * this.chunkSize + maskOffsetY);
+            }
+        }
+
         const alphaShadow = this.parent.simulation.physicsSystem.alpha;
         this.parent.simulation.renderSystem.renderSilhouettes(this.parent.simulation.entityManager, mctx, alphaShadow, '#ffffff', this.parent.cameraX, this.parent.cameraY);
 
@@ -678,7 +624,9 @@ export class LightingRenderer {
         sctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
         const worldX = gx * this.chunkSize;
         const worldY = gy * this.chunkSize;
-        const padding = 300;
+        
+        // Increase padding to account for max shadow length (250px) + wall height projection
+        const padding = 400; 
         
         const tileSize = this.parent.world!.getTileSize();
         const startTx = Math.floor((worldX - padding) / tileSize);
@@ -691,9 +639,8 @@ export class LightingRenderer {
         const dy = source.direction.y * source.shadowLen;
 
         const wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
-        // Use chunk center for stable pseudo-3D projection (no camera jitter)
-        const bakeCenterX = worldX + this.chunkSize / 2;
-        const bakeCenterY = worldY + this.chunkSize / 2;
+        const cameraCenterX = this.parent.cameraX + window.innerWidth / 2;
+        const cameraCenterY = this.parent.cameraY + window.innerHeight / 2;
 
         for (let ty = startTy; ty <= endTy; ty++) {
             if (ty < 0 || ty >= this.parent.world!.getHeight()) continue;
@@ -708,39 +655,63 @@ export class LightingRenderer {
                     const hpData = heatMap ? heatMap.getTileHP(tx, ty) : null;
                     const isDamaged = heatMap?.hasTileData(tx, ty);
 
+                    // Projection of the wall TOP
+                    const v0 = ProjectionUtils.projectPoint(x, y, wallHeight, cameraCenterX, cameraCenterY);
+                    const v1 = ProjectionUtils.projectPoint(x + tileSize, y, wallHeight, cameraCenterX, cameraCenterY);
+                    const v2 = ProjectionUtils.projectPoint(x + tileSize, y + tileSize, wallHeight, cameraCenterX, cameraCenterY);
+                    const v3 = ProjectionUtils.projectPoint(x, y + tileSize, wallHeight, cameraCenterX, cameraCenterY);
+
+                    // Projection of the shadow cast BY the wall top
+                    const s0 = { x: v0.x + dx, y: v0.y + dy };
+                    const s1 = { x: v1.x + dx, y: v1.y + dy };
+                    const s2 = { x: v2.x + dx, y: v2.y + dy };
+                    const s3 = { x: v3.x + dx, y: v3.y + dy };
+
                     if (!isDamaged) {
-                        // Projected points for the top face
-                        const v0 = ProjectionUtils.projectPoint(x, y, wallHeight, bakeCenterX, bakeCenterY);
-                        const v1 = ProjectionUtils.projectPoint(x + tileSize, y, wallHeight, bakeCenterX, bakeCenterY);
-                        const v2 = ProjectionUtils.projectPoint(x + tileSize, y + tileSize, wallHeight, bakeCenterX, bakeCenterY);
-                        const v3 = ProjectionUtils.projectPoint(x, y + tileSize, wallHeight, bakeCenterX, bakeCenterY);
+                        // Healthy Wall: Individual quad fills to avoid winding conflicts
+                        // 1. Base footprint
+                        sctx.beginPath();
+                        sctx.moveTo(x - worldX, y - worldY);
+                        sctx.lineTo(x + tileSize - worldX, y - worldY);
+                        sctx.lineTo(x + tileSize - worldX, y + tileSize - worldY);
+                        sctx.lineTo(x - worldX, y + tileSize - worldY);
+                        sctx.closePath();
+                        sctx.fill();
+
+                        // 2. Bridged sides (connecting base to the top's shadow)
+                        sctx.beginPath();
+                        sctx.moveTo(x - worldX, y - worldY); sctx.lineTo(x + tileSize - worldX, y - worldY);
+                        sctx.lineTo(s1.x - worldX, s1.y - worldY); sctx.lineTo(s0.x - worldX, s0.y - worldY);
+                        sctx.closePath();
+                        sctx.fill();
 
                         sctx.beginPath();
-                        // 1. Fill base footprint
-                        sctx.rect(x - worldX, y - worldY, tileSize, tileSize);
-                        
-                        // 2. Bridge all 4 edges to their projected shadows
-                        // Edge 0-1
-                        sctx.moveTo(x - worldX, y - worldY); sctx.lineTo(x + tileSize - worldX, y - worldY);
-                        sctx.lineTo(v1.x + dx - worldX, v1.y + dy - worldY); sctx.lineTo(v0.x + dx - worldX, v0.y + dy - worldY);
-                        // Edge 1-2
                         sctx.moveTo(x + tileSize - worldX, y - worldY); sctx.lineTo(x + tileSize - worldX, y + tileSize - worldY);
-                        sctx.lineTo(v2.x + dx - worldX, v2.y + dy - worldY); sctx.lineTo(v1.x + dx - worldX, v1.y + dy - worldY);
-                        // Edge 2-3
+                        sctx.lineTo(s2.x - worldX, s2.y - worldY); sctx.lineTo(s1.x - worldX, s1.y - worldY);
+                        sctx.closePath();
+                        sctx.fill();
+
+                        sctx.beginPath();
                         sctx.moveTo(x + tileSize - worldX, y + tileSize - worldY); sctx.lineTo(x - worldX, y + tileSize - worldY);
-                        sctx.lineTo(v3.x + dx - worldX, v3.y + dy - worldY); sctx.lineTo(v2.x + dx - worldX, v2.y + dy - worldY);
-                        // Edge 3-0
+                        sctx.lineTo(s3.x - worldX, s3.y - worldY); sctx.lineTo(s2.x - worldX, s2.y - worldY);
+                        sctx.closePath();
+                        sctx.fill();
+
+                        sctx.beginPath();
                         sctx.moveTo(x - worldX, y + tileSize - worldY); sctx.lineTo(x - worldX, y - worldY);
-                        sctx.lineTo(v0.x + dx - worldX, v0.y + dy - worldY); sctx.lineTo(v3.x + dx - worldX, v3.y + dy - worldY);
-                        
+                        sctx.lineTo(s0.x - worldX, s0.y - worldY); sctx.lineTo(s3.x - worldX, s3.y - worldY);
+                        sctx.closePath();
+                        sctx.fill();
+
+                        // 3. The top face's shadow
+                        sctx.beginPath();
+                        sctx.moveTo(s0.x - worldX, s0.y - worldY); sctx.lineTo(s1.x - worldX, s1.y - worldY);
+                        sctx.lineTo(s2.x - worldX, s2.y - worldY); sctx.lineTo(s3.x - worldX, s3.y - worldY);
+                        sctx.closePath();
                         sctx.fill();
                     } else if (hpData) {
+                        // DAMAGED PATH: Sub-tile detail (Optimized with single fill)
                         const subDiv = 10;
-                        const v0t = ProjectionUtils.projectPoint(x, y, wallHeight, bakeCenterX, bakeCenterY);
-                        const v1t = ProjectionUtils.projectPoint(x + tileSize, y, wallHeight, bakeCenterX, bakeCenterY);
-                        const v2t = ProjectionUtils.projectPoint(x + tileSize, y + tileSize, wallHeight, bakeCenterX, bakeCenterY);
-                        const v3t = ProjectionUtils.projectPoint(x, y + tileSize, wallHeight, bakeCenterX, bakeCenterY);
-
                         sctx.beginPath();
                         for (let sy = 0; sy < subDiv; sy++) {
                             const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
@@ -748,33 +719,43 @@ export class LightingRenderer {
                                 const idx = sy * subDiv + sx;
                                 if (hpData[idx] > 0) {
                                     const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
-                                    const p0 = this.lerpQuad(v0t, v1t, v2t, v3t, fsx0, fsy0);
-                                    const p1 = this.lerpQuad(v0t, v1t, v2t, v3t, fsx1, fsy0);
-                                    const p2 = this.lerpQuad(v0t, v1t, v2t, v3t, fsx1, fsy1);
-                                    const p3 = this.lerpQuad(v0t, v1t, v2t, v3t, fsx0, fsy1);
+                                    const ps0 = this.lerpQuad(s0, s1, s2, s3, fsx0, fsy0);
+                                    const ps1 = this.lerpQuad(s0, s1, s2, s3, fsx1, fsy0);
+                                    const ps2 = this.lerpQuad(s0, s1, s2, s3, fsx1, fsy1);
+                                    const ps3 = this.lerpQuad(s0, s1, s2, s3, fsx0, fsy1);
 
                                     const bx0 = x + fsx0 * tileSize; const bx1 = x + fsx1 * tileSize;
                                     const by0 = y + fsy0 * tileSize; const by1 = y + fsy1 * tileSize;
 
-                                    // Fill sub-tile base
-                                    sctx.rect(bx0 - worldX, by0 - worldY, tileSize/subDiv, tileSize/subDiv);
+                                    // Base footprint sub-quad
+                                    sctx.moveTo(bx0 - worldX, by0 - worldY); 
+                                    sctx.lineTo(bx1 - worldX, by0 - worldY);
+                                    sctx.lineTo(bx1 - worldX, by1 - worldY); 
+                                    sctx.lineTo(bx0 - worldX, by1 - worldY);
+                                    sctx.closePath();
 
-                                    // Bridge sub-tile edges
+                                    // Bridged sides sub-quads (Simplified)
                                     sctx.moveTo(bx0 - worldX, by0 - worldY); sctx.lineTo(bx1 - worldX, by0 - worldY);
-                                    sctx.lineTo(p1.x + dx - worldX, p1.y + dy - worldY); sctx.lineTo(p0.x + dx - worldX, p0.y + dy - worldY);
-
+                                    sctx.lineTo(ps1.x - worldX, ps1.y - worldY); sctx.lineTo(ps0.x - worldX, ps0.y - worldY);
+                                    sctx.closePath();
                                     sctx.moveTo(bx1 - worldX, by0 - worldY); sctx.lineTo(bx1 - worldX, by1 - worldY);
-                                    sctx.lineTo(p2.x + dx - worldX, p2.y + dy - worldY); sctx.lineTo(p1.x + dx - worldX, p1.y + dy - worldY);
-
+                                    sctx.lineTo(ps2.x - worldX, ps2.y - worldY); sctx.lineTo(ps1.x - worldX, ps1.y - worldY);
+                                    sctx.closePath();
                                     sctx.moveTo(bx1 - worldX, by1 - worldY); sctx.lineTo(bx0 - worldX, by1 - worldY);
-                                    sctx.lineTo(p3.x + dx - worldX, p3.y + dy - worldY); sctx.lineTo(p2.x + dx - worldX, p2.y + dy - worldY);
-
+                                    sctx.lineTo(ps3.x - worldX, ps3.y - worldY); sctx.lineTo(ps2.x - worldX, ps2.y - worldY);
+                                    sctx.closePath();
                                     sctx.moveTo(bx0 - worldX, by1 - worldY); sctx.lineTo(bx0 - worldX, by0 - worldY);
-                                    sctx.lineTo(p0.x + dx - worldX, p0.y + dy - worldY); sctx.lineTo(p3.x + dx - worldX, p3.y + dy - worldY);
+                                    sctx.lineTo(ps0.x - worldX, ps0.y - worldY); sctx.lineTo(ps3.x - worldX, ps3.y - worldY);
+                                    sctx.closePath();
+
+                                    // Top face sub-quad
+                                    sctx.moveTo(ps0.x - worldX, ps0.y - worldY); sctx.lineTo(ps1.x - worldX, ps1.y - worldY);
+                                    sctx.lineTo(ps2.x - worldX, ps2.y - worldY); sctx.lineTo(ps3.x - worldX, ps3.y - worldY);
+                                    sctx.closePath();
                                 }
                             }
                         }
-                        sctx.fill();
+                        sctx.fill('evenodd');
                     }
                 }
             }

@@ -66,8 +66,8 @@ export class WorldRenderer {
 
     public renderSides(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
         this.wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
-        const viewWidth = ctx.canvas.width;
-        const viewHeight = ctx.canvas.height;
+        const viewWidth = window.innerWidth;
+        const viewHeight = window.innerHeight;
         const centerX = cameraX + viewWidth / 2;
         const centerY = cameraY + viewHeight / 2;
 
@@ -121,7 +121,7 @@ export class WorldRenderer {
         const subDiv = 10;
 
         if (!isDamaged) {
-            // Fast path for healthy tiles (No batching needed for 1-4 fills)
+            // Fast path for healthy tiles
             if (!hasTop && v0.y > y0) {
                 ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.lineTo(v1.x, v1.y); ctx.lineTo(v0.x, v0.y); ctx.fill();
             }
@@ -135,62 +135,58 @@ export class WorldRenderer {
                 ctx.beginPath(); ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v1.x, v1.y); ctx.fill();
             }
         } else {
-            // Detailed path: Batched Segmented Sides
+            // SEAMLESS SIDES: Draw full side minus holes using Even-Odd rule
             // Top Side
             if (!hasTop && v0.y > y0) {
                 ctx.beginPath();
+                ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.lineTo(v1.x, v1.y); ctx.lineTo(v0.x, v0.y); ctx.closePath();
                 for (let sx = 0; sx < subDiv; sx++) {
-                    if (hpData[sx] > 0) {
+                    if (hpData[sx] <= 0) {
                         const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
-                        const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, 0);
-                        const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, 0);
-                        const bx0 = x0 + fsx0 * ts; const bx1 = x0 + fsx1 * ts;
-                        ctx.moveTo(bx0, y0); ctx.lineTo(bx1, y0); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p0.x, p0.y);
+                        const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, 0); const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, 0);
+                        ctx.moveTo(x0 + fsx0 * ts, y0); ctx.lineTo(x0 + fsx1 * ts, y0); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p0.x, p0.y); ctx.closePath();
                     }
                 }
-                ctx.fill();
+                ctx.fill('evenodd');
             }
             // Bottom Side
             if (!hasBottom && v3.y < y1) {
                 ctx.beginPath();
+                ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y); ctx.closePath();
                 for (let sx = 0; sx < subDiv; sx++) {
-                    if (hpData[90 + sx] > 0) {
+                    if (hpData[90 + sx] <= 0) {
                         const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
-                        const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, 1);
-                        const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, 1);
-                        const bx0 = x0 + fsx0 * ts; const bx1 = x0 + fsx1 * ts;
-                        ctx.moveTo(bx0, y1); ctx.lineTo(bx1, y1); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
+                        const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, 1); const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, 1);
+                        ctx.moveTo(x0 + fsx0 * ts, y1); ctx.lineTo(x0 + fsx1 * ts, y1); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath();
                     }
                 }
-                ctx.fill();
+                ctx.fill('evenodd');
             }
             // Left Side
             if (!hasLeft && v0.x > x0) {
                 ctx.beginPath();
+                ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); ctx.lineTo(v3.x, v3.y); ctx.lineTo(v0.x, v0.y); ctx.closePath();
                 for (let sy = 0; sy < subDiv; sy++) {
-                    if (hpData[sy * subDiv] > 0) {
+                    if (hpData[sy * subDiv] <= 0) {
                         const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
-                        const p0 = this.lerpQuad(v0, v1, v2, v3, 0, fsy0);
-                        const p3 = this.lerpQuad(v0, v1, v2, v3, 0, fsy1);
-                        const by0 = y0 + fsy0 * ts; const by1 = y0 + fsy1 * ts;
-                        ctx.moveTo(x0, by0); ctx.lineTo(x0, by1); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p0.x, p0.y);
+                        const p0 = this.lerpQuad(v0, v1, v2, v3, 0, fsy0); const p3 = this.lerpQuad(v0, v1, v2, v3, 0, fsy1);
+                        ctx.moveTo(x0, y0 + fsy0 * ts); ctx.lineTo(x0, y0 + fsy1 * ts); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p0.x, p0.y); ctx.closePath();
                     }
                 }
-                ctx.fill();
+                ctx.fill('evenodd');
             }
             // Right Side
             if (!hasRight && v1.x < x1) {
                 ctx.beginPath();
+                ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v1.x, v1.y); ctx.closePath();
                 for (let sy = 0; sy < subDiv; sy++) {
-                    if (hpData[sy * subDiv + 9] > 0) {
+                    if (hpData[sy * subDiv + 9] <= 0) {
                         const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
-                        const p1 = this.lerpQuad(v0, v1, v2, v3, 1, fsy0);
-                        const p2 = this.lerpQuad(v0, v1, v2, v3, 1, fsy1);
-                        const by0 = y0 + fsy0 * ts; const by1 = y0 + fsy1 * ts;
-                        ctx.moveTo(x1, by0); ctx.lineTo(x1, by1); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p1.x, p1.y);
+                        const p1 = this.lerpQuad(v0, v1, v2, v3, 1, fsy0); const p2 = this.lerpQuad(v0, v1, v2, v3, 1, fsy1);
+                        ctx.moveTo(x1, y0 + fsy0 * ts); ctx.lineTo(x1, y0 + fsy1 * ts); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p1.x, p1.y); ctx.closePath();
                     }
                 }
-                ctx.fill();
+                ctx.fill('evenodd');
             }
         }
     }
@@ -221,8 +217,8 @@ export class WorldRenderer {
     public renderAsSilhouette(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, color?: string): void {
         // Ground is never silhouette, only walls.
         this.renderSides(ctx, cameraX, cameraY);
-        const viewWidth = ctx.canvas.width;
-        const viewHeight = ctx.canvas.height;
+        const viewWidth = window.innerWidth;
+        const viewHeight = window.innerHeight;
         const centerX = cameraX + viewWidth / 2;
         const centerY = cameraY + viewHeight / 2;
 
@@ -244,16 +240,33 @@ export class WorldRenderer {
 
     private renderGround(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, viewWidth: number, viewHeight: number): void {
         const currentSnow = WeatherManager.getInstance().getSnowAccumulation();
+        const { sun, moon, isDaylight } = (window as any).WorldClockInstance ? (window as any).WorldClockInstance.getTimeState() : { sun: { active: false, color: '#fff', intensity: 0 }, moon: { active: false, color: '#aaf', intensity: 0 }, isDaylight: true };
         
-        let groundColor = '#1c1c1c';
-        if (currentSnow > 0) {
-            const r = Math.floor(28 + (200 - 28) * currentSnow);
-            const g = Math.floor(28 + (210 - 28) * currentSnow);
-            const b = Math.floor(28 + (230 - 28) * currentSnow);
-            groundColor = `rgb(${r},${g},${b})`;
+        // Neutral base color (mid-grey) to allow lightmap multiplication to work
+        let r = 70, g = 70, b = 75;
+
+        // Apply sunlight/moonlight 'reflection' to base ground color
+        if (isDaylight && sun.active) {
+            const sCol = sun.color.match(/\d+/g)?.map(Number) || [255, 255, 255];
+            r = Math.min(255, r + sCol[0] * sun.intensity * 0.2);
+            g = Math.min(255, g + sCol[1] * sun.intensity * 0.2);
+            b = Math.min(255, b + sCol[2] * sun.intensity * 0.2);
+        } else if (moon.active) {
+            const mCol = moon.color.match(/#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})/i);
+            if (mCol) {
+                r = Math.min(255, r + parseInt(mCol[1], 16) * moon.intensity * 0.3);
+                g = Math.min(255, g + parseInt(mCol[2], 16) * moon.intensity * 0.3);
+                b = Math.min(255, b + parseInt(mCol[3], 16) * moon.intensity * 0.3);
+            }
         }
 
-        ctx.fillStyle = groundColor;
+        if (currentSnow > 0) {
+            r = Math.floor(r + (200 - r) * currentSnow);
+            g = Math.floor(g + (210 - g) * currentSnow);
+            b = Math.floor(b + (230 - b) * currentSnow);
+        }
+
+        ctx.fillStyle = `rgb(${Math.floor(r)},${Math.floor(g)},${Math.floor(b)})`;
         ctx.fillRect(cameraX, cameraY, viewWidth, viewHeight);
 
         // Grid (Local view)
@@ -293,7 +306,6 @@ export class WorldRenderer {
         const sData = heatMap ? heatMap.getTileScorch(tx, ty) : null;
         const snow = WeatherManager.getInstance().getSnowAccumulation();
 
-        // Optimized Path: If tile is NOT damaged, draw as a single quadrilateral
         const isDamaged = heatMap?.hasTileData(tx, ty);
 
         if (!isDamaged) {
@@ -305,47 +317,66 @@ export class WorldRenderer {
 
             if (snow > 0.1) {
                 ctx.fillStyle = `rgba(240, 245, 255, ${snow})`;
-                ctx.fill(); // Re-use path
+                ctx.fill();
             }
             return;
         }
 
-        // Detailed Path (Sub-tile loop)
+        // SEAMLESS TOP FACE: Draw solid wall minus holes using Even-Odd rule
+        ctx.fillStyle = topColorBase;
+        ctx.beginPath();
+        // 1. Outer boundary
+        ctx.moveTo(v0.x, v0.y); ctx.lineTo(v1.x, v1.y);
+        ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y);
+        ctx.closePath();
+
         const subDiv = 10;
-        
+        let hasHoles = false;
+        for (let sy = 0; sy < subDiv; sy++) {
+            for (let sx = 0; sx < subDiv; sx++) {
+                if (hpData && hpData[sy * subDiv + sx] <= 0) {
+                    const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
+                    const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
+                    const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
+                    const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
+                    const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
+                    const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
+                    ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
+                    ctx.closePath();
+                    hasHoles = true;
+                }
+            }
+        }
+        ctx.fill('evenodd');
+
+        // Draw overlays (scorching, heat, snow) segmented as before since they are transparent
         for (let sy = 0; sy < subDiv; sy++) {
             const fsy0 = sy / subDiv;
             const fsy1 = (sy + 1) / subDiv;
-
             for (let sx = 0; sx < subDiv; sx++) {
                 const idx = sy * subDiv + sx;
                 if (hpData && hpData[idx] <= 0) continue;
 
                 const fsx0 = sx / subDiv;
                 const fsx1 = (sx + 1) / subDiv;
-
-                // Bilinear interpolation for sub-tile vertices
                 const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
                 const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
                 const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
                 const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
 
-                ctx.fillStyle = topColorBase;
-                ctx.beginPath();
-                ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
-                ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
-                ctx.fill();
-
                 if (sData && sData[idx]) {
                     ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
-                    ctx.fill();
+                    ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
                 }
 
                 if (heatData && heatData[idx] > 0.05) {
                     const heat = heatData[idx];
                     const r = Math.floor(100 + 155 * Math.min(1, heat / 0.6));
                     ctx.fillStyle = `rgba(${r}, 0, 0, ${0.2 + heat * 0.4})`;
-                    ctx.fill();
+                    ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
                 }
 
                 if (snow > 0.1) {
@@ -355,7 +386,8 @@ export class WorldRenderer {
                         const snowFactor = removalData ? removalData[idx] : 1.0;
                         if (snowFactor > 0.01) {
                             ctx.fillStyle = `rgba(240, 245, 255, ${snow * snowFactor})`;
-                            ctx.fill();
+                            ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+                            ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
                         }
                     }
                 }
