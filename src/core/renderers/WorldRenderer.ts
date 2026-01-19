@@ -8,6 +8,11 @@ export class WorldRenderer {
     private world: World;
     private tileSize: number;
     private groundChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, dirty: boolean }> = new Map();
+    private damagedTileCache: Map<string, {
+        exposedFaces: {sx: number, sy: number, face: number}[],
+        holeIndices: number[],
+        solidIndices: number[]
+    }> = new Map();
     private chunkSize: number = 512;
     private lastSnowAccumulation: number = 0;
 
@@ -43,10 +48,57 @@ export class WorldRenderer {
     public invalidateGroundCache(tx: number, ty: number): void {
         const gx = Math.floor((tx * this.tileSize) / this.chunkSize);
         const gy = Math.floor((ty * this.tileSize) / this.chunkSize);
+        this.damagedTileCache.delete(`${tx},${ty}`);
         const chunk = this.groundChunks.get(`${gx},${gy}`);
         if (chunk) {
             chunk.dirty = true;
         }
+    }
+
+    private getDamagedTileData(tx: number, ty: number, hpData: Float32Array): {
+        exposedFaces: {sx: number, sy: number, face: number}[],
+        holeIndices: number[],
+        solidIndices: number[]
+    } {
+        const key = `${tx},${ty}`;
+        if (this.damagedTileCache.has(key)) return this.damagedTileCache.get(key)!;
+
+        const exposedFaces: {sx: number, sy: number, face: number}[] = [];
+        const holeIndices: number[] = [];
+        const solidIndices: number[] = [];
+        const subDiv = 10;
+
+        for (let sy = 0; sy < subDiv; sy++) {
+            for (let sx = 0; sx < subDiv; sx++) {
+                const idx = sy * subDiv + sx;
+                if (hpData[idx] <= 0) {
+                    holeIndices.push(idx);
+                    continue;
+                }
+                solidIndices.push(idx);
+
+                // 0:Top, 1:Bottom, 2:Left, 3:Right
+                if (sy === 0) {
+                    if (this.world.getTile(tx, ty - 1) === MaterialType.NONE) exposedFaces.push({sx, sy, face: 0});
+                } else if (hpData[(sy - 1) * subDiv + sx] <= 0) exposedFaces.push({sx, sy, face: 0});
+
+                if (sy === subDiv - 1) {
+                    if (this.world.getTile(tx, ty + 1) === MaterialType.NONE) exposedFaces.push({sx, sy, face: 1});
+                } else if (hpData[(sy + 1) * subDiv + sx] <= 0) exposedFaces.push({sx, sy, face: 1});
+
+                if (sx === 0) {
+                    if (this.world.getTile(tx - 1, ty) === MaterialType.NONE) exposedFaces.push({sx, sy, face: 2});
+                } else if (hpData[sy * subDiv + (sx - 1)] <= 0) exposedFaces.push({sx, sy, face: 2});
+
+                if (sx === subDiv - 1) {
+                    if (this.world.getTile(tx + 1, ty) === MaterialType.NONE) exposedFaces.push({sx, sy, face: 3});
+                } else if (hpData[sy * subDiv + (sx + 1)] <= 0) exposedFaces.push({sx, sy, face: 3});
+            }
+        }
+
+        const data = { exposedFaces, holeIndices, solidIndices };
+        this.damagedTileCache.set(key, data);
+        return data;
     }
 
     public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
@@ -57,6 +109,7 @@ export class WorldRenderer {
         const currentSnow = WeatherManager.getInstance().getSnowAccumulation();
         if (Math.abs(currentSnow - this.lastSnowAccumulation) > 0.05) {
             this.groundChunks.forEach(c => c.dirty = true);
+            this.damagedTileCache.clear();
             this.lastSnowAccumulation = currentSnow;
         }
 
@@ -137,135 +190,73 @@ export class WorldRenderer {
                 ctx.beginPath(); ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v1.x, v1.y); ctx.fill();
             }
         } else {
-            // SEAMLESS SIDES: Draw full side minus holes using Even-Odd rule
-            // Top Side
-            if (!hasTop && v0.y > y0) {
+            // ROBUST DAMAGED SIDES: Render only exposed sub-tile faces
+            const data = this.getDamagedTileData(tx, ty, hpData);
+            
+            const canSeeTop = v0.y > y0;
+            const canSeeBottom = v3.y < y1;
+            const canSeeLeft = v0.x > x0;
+            const canSeeRight = v1.x < x1;
+
+            data.exposedFaces.forEach(f => {
+                // Only render if camera angle allows seeing this face
+                if (f.face === 0 && !canSeeTop) return;
+                if (f.face === 1 && !canSeeBottom) return;
+                if (f.face === 2 && !canSeeLeft) return;
+                if (f.face === 3 && !canSeeRight) return;
+
+                const fsx0 = f.sx / subDiv; const fsx1 = (f.sx + 1) / subDiv;
+                const fsy0 = f.sy / subDiv; const fsy1 = (f.sy + 1) / subDiv;
+                
+                let p0_side, p1_side, b0_side, b1_side;
+
+                if (f.face === 0) { // Top
+                    p0_side = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
+                    p1_side = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
+                    b0_side = { x: x0 + fsx0 * ts, y: y0 + fsy0 * ts };
+                    b1_side = { x: x0 + fsx1 * ts, y: y0 + fsy0 * ts };
+                } else if (f.face === 1) { // Bottom
+                    p0_side = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
+                    p1_side = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
+                    b0_side = { x: x0 + fsx0 * ts, y: y0 + fsy1 * ts };
+                    b1_side = { x: x0 + fsx1 * ts, y: y0 + fsy1 * ts };
+                } else if (f.face === 2) { // Left
+                    p0_side = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
+                    p1_side = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
+                    b0_side = { x: x0 + fsx0 * ts, y: y0 + fsy0 * ts };
+                    b1_side = { x: x0 + fsx0 * ts, y: y0 + fsy1 * ts };
+                } else { // Right
+                    p0_side = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
+                    p1_side = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
+                    b0_side = { x: x0 + fsx1 * ts, y: y0 + fsy0 * ts };
+                    b1_side = { x: x0 + fsx1 * ts, y: y0 + fsy1 * ts };
+                }
+
+                ctx.fillStyle = sideColor;
                 ctx.beginPath();
-                ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.lineTo(v1.x, v1.y); ctx.lineTo(v0.x, v0.y); ctx.closePath();
-                for (let sx = 0; sx < subDiv; sx++) {
-                    if (hpData[sx] <= 0) {
-                        const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
-                        const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, 0); const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, 0);
-                        ctx.moveTo(x0 + fsx0 * ts, y0); ctx.lineTo(x0 + fsx1 * ts, y0); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p0.x, p0.y); ctx.closePath();
-                    }
-                }
-                ctx.fill('evenodd');
+                ctx.moveTo(b0_side.x, b0_side.y); ctx.lineTo(b1_side.x, b1_side.y);
+                ctx.lineTo(p1_side.x, p1_side.y); ctx.lineTo(p0_side.x, p0_side.y);
+                ctx.fill();
 
-                // Overlays
-                for (let sx = 0; sx < subDiv; sx++) {
-                    const idx = sx;
-                    if (hpData[idx] <= 0) continue;
-                    const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
-                    const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, 0); const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, 0);
-
-                    if (sData && sData[idx]) {
-                        ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
-                        ctx.beginPath(); ctx.moveTo(x0 + fsx0 * ts, y0); ctx.lineTo(x0 + fsx1 * ts, y0); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p0.x, p0.y); ctx.fill();
-                    }
-                    if (heatData && heatData[idx] > 0.05) {
-                        const heat = heatData[idx];
-                        const { r, g, b } = HeatMap.getHeatColorComponents(heat);
-                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
-                        ctx.beginPath(); ctx.moveTo(x0 + fsx0 * ts, y0); ctx.lineTo(x0 + fsx1 * ts, y0); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p0.x, p0.y); ctx.fill();
-                    }
+                // Simple Overlays (Scorch/Heat) on exposed sides
+                const idx = f.sy * subDiv + f.sx;
+                if (sData && sData[idx]) {
+                    ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.4)' : 'rgba(0,0,0,0.25)';
+                    ctx.beginPath();
+                    ctx.moveTo(b0_side.x, b0_side.y); ctx.lineTo(b1_side.x, b1_side.y);
+                    ctx.lineTo(p1_side.x, p1_side.y); ctx.lineTo(p0_side.x, p0_side.y);
+                    ctx.fill();
                 }
-            }
-            // Bottom Side
-            if (!hasBottom && v3.y < y1) {
-                ctx.beginPath();
-                ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y); ctx.closePath();
-                for (let sx = 0; sx < subDiv; sx++) {
-                    if (hpData[90 + sx] <= 0) {
-                        const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
-                        const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, 1); const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, 1);
-                        ctx.moveTo(x0 + fsx0 * ts, y1); ctx.lineTo(x0 + fsx1 * ts, y1); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath();
-                    }
+                if (heatData && heatData[idx] > 0.05) {
+                    const heat = heatData[idx];
+                    const { r, g, b } = HeatMap.getHeatColorComponents(heat);
+                    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.1 + heat * 0.2})`;
+                    ctx.beginPath();
+                    ctx.moveTo(b0_side.x, b0_side.y); ctx.lineTo(b1_side.x, b1_side.y);
+                    ctx.lineTo(p1_side.x, p1_side.y); ctx.lineTo(p0_side.x, p0_side.y);
+                    ctx.fill();
                 }
-                ctx.fill('evenodd');
-
-                // Overlays
-                for (let sx = 0; sx < subDiv; sx++) {
-                    const idx = 90 + sx;
-                    if (hpData[idx] <= 0) continue;
-                    const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
-                    const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, 1); const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, 1);
-
-                    if (sData && sData[idx]) {
-                        ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
-                        ctx.beginPath(); ctx.moveTo(x0 + fsx0 * ts, y1); ctx.lineTo(x0 + fsx1 * ts, y1); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
-                    }
-                    if (heatData && heatData[idx] > 0.05) {
-                        const heat = heatData[idx];
-                        const { r, g, b } = HeatMap.getHeatColorComponents(heat);
-                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
-                        ctx.beginPath(); ctx.moveTo(x0 + fsx0 * ts, y1); ctx.lineTo(x0 + fsx1 * ts, y1); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
-                    }
-                }
-            }
-            // Left Side
-            if (!hasLeft && v0.x > x0) {
-                ctx.beginPath();
-                ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); ctx.lineTo(v3.x, v3.y); ctx.lineTo(v0.x, v0.y); ctx.closePath();
-                for (let sy = 0; sy < subDiv; sy++) {
-                    if (hpData[sy * subDiv] <= 0) {
-                        const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
-                        const p0 = this.lerpQuad(v0, v1, v2, v3, 0, fsy0); const p3 = this.lerpQuad(v0, v1, v2, v3, 0, fsy1);
-                        ctx.moveTo(x0, y0 + fsy0 * ts); ctx.lineTo(x0, y0 + fsy1 * ts); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p0.x, p0.y); ctx.closePath();
-                    }
-                }
-                ctx.fill('evenodd');
-
-                // Overlays
-                for (let sy = 0; sy < subDiv; sy++) {
-                    const idx = sy * subDiv;
-                    if (hpData[idx] <= 0) continue;
-                    const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
-                    const p0 = this.lerpQuad(v0, v1, v2, v3, 0, fsy0); const p3 = this.lerpQuad(v0, v1, v2, v3, 0, fsy1);
-
-                    if (sData && sData[idx]) {
-                        ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
-                        ctx.beginPath(); ctx.moveTo(x0, y0 + fsy0 * ts); ctx.lineTo(x0, y0 + fsy1 * ts); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p0.x, p0.y); ctx.fill();
-                    }
-                    if (heatData && heatData[idx] > 0.05) {
-                        const heat = heatData[idx];
-                        const { r, g, b } = HeatMap.getHeatColorComponents(heat);
-                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
-                        ctx.beginPath(); ctx.moveTo(x0, y0 + fsy0 * ts); ctx.lineTo(x0, y0 + fsy1 * ts); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p0.x, p0.y); ctx.fill();
-                    }
-                }
-            }
-            // Right Side
-            if (!hasRight && v1.x < x1) {
-                ctx.beginPath();
-                ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v1.x, v1.y); ctx.closePath();
-                for (let sy = 0; sy < subDiv; sy++) {
-                    if (hpData[sy * subDiv + 9] <= 0) {
-                        const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
-                        const p1 = this.lerpQuad(v0, v1, v2, v3, 1, fsy0); const p2 = this.lerpQuad(v0, v1, v2, v3, 1, fsy1);
-                        ctx.moveTo(x1, y0 + fsy0 * ts); ctx.lineTo(x1, y0 + fsy1 * ts); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p1.x, p1.y); ctx.closePath();
-                    }
-                }
-                ctx.fill('evenodd');
-
-                // Overlays
-                for (let sy = 0; sy < subDiv; sy++) {
-                    const idx = sy * subDiv + 9;
-                    if (hpData[idx] <= 0) continue;
-                    const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
-                    const p1 = this.lerpQuad(v0, v1, v2, v3, 1, fsy0); const p2 = this.lerpQuad(v0, v1, v2, v3, 1, fsy1);
-
-                    if (sData && sData[idx]) {
-                        ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
-                        ctx.beginPath(); ctx.moveTo(x1, y0 + fsy0 * ts); ctx.lineTo(x1, y0 + fsy1 * ts); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p1.x, p1.y); ctx.fill();
-                    }
-                    if (heatData && heatData[idx] > 0.05) {
-                        const heat = heatData[idx];
-                        const { r, g, b } = HeatMap.getHeatColorComponents(heat);
-                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
-                        ctx.beginPath(); ctx.moveTo(x1, y0 + fsy0 * ts); ctx.lineTo(x1, y0 + fsy1 * ts); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p1.x, p1.y); ctx.fill();
-                    }
-                }
-            }
+            });
         }
     }
 
@@ -384,7 +375,7 @@ export class WorldRenderer {
         const sData = heatMap ? heatMap.getTileScorch(tx, ty) : null;
         const snow = WeatherManager.getInstance().getSnowAccumulation();
 
-        const isDamaged = heatMap?.hasTileData(tx, ty);
+        const isDamaged = heatMap?.hasTileData(tx, ty) && hpData;
 
         if (!isDamaged) {
             ctx.fillStyle = topColorBase;
@@ -400,6 +391,8 @@ export class WorldRenderer {
             return;
         }
 
+        const data = this.getDamagedTileData(tx, ty, hpData!);
+
         // SEAMLESS TOP FACE: Draw solid wall minus holes using Even-Odd rule
         ctx.fillStyle = topColorBase;
         ctx.beginPath();
@@ -409,68 +402,60 @@ export class WorldRenderer {
         ctx.closePath();
 
         const subDiv = 10;
-        let hasHoles = false;
-        for (let sy = 0; sy < subDiv; sy++) {
-            for (let sx = 0; sx < subDiv; sx++) {
-                if (hpData && hpData[sy * subDiv + sx] <= 0) {
-                    const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
-                    const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
-                    const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
-                    const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
-                    const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
-                    const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
-                    ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
-                    ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
-                    ctx.closePath();
-                    hasHoles = true;
-                }
-            }
-        }
+        data.holeIndices.forEach(idx => {
+            const sx = idx % subDiv;
+            const sy = Math.floor(idx / subDiv);
+            const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
+            const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
+            const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
+            const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
+            const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
+            const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
+            ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
+            ctx.closePath();
+        });
         ctx.fill('evenodd');
 
         // Draw overlays (scorching, heat, snow) segmented as before since they are transparent
-        for (let sy = 0; sy < subDiv; sy++) {
-            const fsy0 = sy / subDiv;
-            const fsy1 = (sy + 1) / subDiv;
-            for (let sx = 0; sx < subDiv; sx++) {
-                const idx = sy * subDiv + sx;
-                if (hpData && hpData[idx] <= 0) continue;
+        data.solidIndices.forEach(idx => {
+            const sx = idx % subDiv;
+            const sy = Math.floor(idx / subDiv);
+            const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
+            const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
 
-                const fsx0 = sx / subDiv;
-                const fsx1 = (sx + 1) / subDiv;
-                const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
-                const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
-                const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
-                const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
+            const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
+            const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
+            const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
+            const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
 
-                if (sData && sData[idx]) {
-                    ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
-                    ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
-                    ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
-                }
+            if (sData && sData[idx]) {
+                ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
+                ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
+            }
 
-                if (heatData && heatData[idx] > 0.05) {
-                    const heat = heatData[idx];
-                    const { r, g, b } = HeatMap.getHeatColorComponents(heat);
-                    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
-                    ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
-                    ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
-                }
+            if (heatData && heatData[idx] > 0.05) {
+                const heat = heatData[idx];
+                const { r, g, b } = HeatMap.getHeatColorComponents(heat);
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
+                ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
+            }
 
-                if (snow > 0.1) {
-                    const tileHeat = heatData && heatData[idx] ? heatData[idx] : 0;
-                    if (tileHeat < 0.3) {
-                        const removalData = WeatherManager.getInstance().getTileSnowRemoval(tx, ty);
-                        const snowFactor = removalData ? removalData[idx] : 1.0;
-                        if (snowFactor > 0.01) {
-                            ctx.fillStyle = `rgba(240, 245, 255, ${snow * snowFactor})`;
-                            ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
-                            ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
-                        }
+            if (snow > 0.1) {
+                const tileHeat = heatData && heatData[idx] ? heatData[idx] : 0;
+                if (tileHeat < 0.3) {
+                    const removalData = WeatherManager.getInstance().getTileSnowRemoval(tx, ty);
+                    const snowFactor = removalData ? removalData[idx] : 1.0;
+                    if (snowFactor > 0.01) {
+                        ctx.fillStyle = `rgba(240, 245, 255, ${snow * snowFactor})`;
+                        ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+                        ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
                     }
                 }
             }
-        }
+        });
     }
 
     private lerpQuad(v0: any, v1: any, v2: any, v3: any, x: number, y: number) {
@@ -550,5 +535,6 @@ export class WorldRenderer {
 
     public clearCache(): void {
         this.groundChunks.clear();
+        this.damagedTileCache.clear();
     }
 }
