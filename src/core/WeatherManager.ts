@@ -368,7 +368,10 @@ export class WeatherManager {
      * Remove snow from heated tiles (called by update with HeatMap data)
      * Includes 2-layer spread to neighbors and ground melting
      */
-    public removeSnowFromHeat(tx: number, ty: number, heatData: Float32Array, tileSize: number = 32): void {
+    public removeSnowFromHeat(tx: number, ty: number, heatData: Float32Array, tileSize: number = 32, maxHeat: number = 1.0): void {
+        if (this.snowAccumulation < 0.01) return;
+        if (maxHeat < 0.3) return;
+
         const key = `${tx},${ty}`;
         let data = this.snowRemovalData.get(key);
 

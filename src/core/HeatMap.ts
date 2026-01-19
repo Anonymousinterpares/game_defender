@@ -28,9 +28,17 @@ export const MATERIAL_PROPS: Record<MaterialType, MaterialProperties> = {
     [MaterialType.INDESTRUCTIBLE]: { hp: 999999, flammable: false, vaporizeTime: 999999 }
 };
 
+export interface TileSummary {
+    burningCount: number;
+    maxHeat: number;
+    maxMolten: number;
+    avgHeat: number;
+}
+
 export class HeatMap {
     private heatData: Map<string, Float32Array> = new Map();
     private activeTiles: Set<string> = new Set();
+    private tileSummaries: Map<string, TileSummary> = new Map();
     private scorchData: Map<string, Uint8Array> = new Map();
 
     // New material and HP data
@@ -55,17 +63,46 @@ export class HeatMap {
     private recentlyDeactivated: Set<string> = new Set();
     private scratchCanvas: HTMLCanvasElement | null = null;
     private scratchCtx: CanvasRenderingContext2D | null = null;
+    private scratchImageData: ImageData | null = null;
+    private scratchUint32: Uint32Array | null = null;
 
     // Zero-allocation scratch buffers
     private scratchHeat: Float32Array;
     private scratchFire: Float32Array;
     private scratchMolten: Float32Array;
 
+    private static heatColorLUT: Uint32Array = new Uint32Array(256);
+    private static moltenColorLUT: Uint32Array = new Uint32Array(256);
+    private static lutsInitialized: boolean = false;
+
     constructor(private tileSize: number) {
         this.lastSimTime = performance.now();
         this.scratchHeat = new Float32Array(100); // 10x10
         this.scratchFire = new Float32Array(100);
         this.scratchMolten = new Float32Array(100);
+        
+        if (!HeatMap.lutsInitialized) {
+            this.initLUTs();
+        }
+    }
+
+    private initLUTs() {
+        for (let i = 0; i < 256; i++) {
+            const intensity = i / 255;
+            const components = HeatMap.getHeatColorComponents(intensity);
+            const alpha = Math.floor((intensity < 0.8 ? (0.4 + intensity * 0.6) : 1.0) * 255);
+            // ImageData is RGBA, so Uint32 in Little Endian is 0xAABBGGRR
+            HeatMap.heatColorLUT[i] = (alpha << 24) | (components.b << 16) | (components.g << 8) | components.r;
+            
+            // Molten: Gold/Orange
+            const mAlpha = Math.floor(Math.min(1.0, intensity) * 255);
+            HeatMap.moltenColorLUT[i] = (mAlpha << 24) | (0 << 16) | (200 << 8) | 255;
+        }
+        HeatMap.lutsInitialized = true;
+    }
+
+    public getTileSummary(key: string): TileSummary | undefined {
+        return this.tileSummaries.get(key);
     }
 
     public getTileSize(): number {
@@ -178,55 +215,45 @@ export class HeatMap {
         const fireColor = { r: 255, g: 102, b: 0 }; // Default fire orange
 
         this.activeTiles.forEach(key => {
-            const fData = this.fireData.get(key);
-            const hData = this.heatData.get(key);
-            const mlData = this.moltenData.get(key);
-            if (!fData && !hData && !mlData) return;
+            const summary = this.tileSummaries.get(key);
+            if (!summary) return;
+
+            // Only cluster tiles with significant heat, fire or molten metal
+            if (summary.burningCount === 0 && summary.maxHeat < 0.3 && summary.maxMolten < 0.1) return;
 
             const [tx, ty] = key.split(',').map(Number);
             const worldX = tx * this.tileSize;
             const worldY = ty * this.tileSize;
 
-            const dataLen = this.subDiv * this.subDiv;
-            for (let i = 0; i < dataLen; i++) {
-                const fire = fData ? fData[i] : 0;
-                const heat = hData ? hData[i] : 0;
-                const molten = mlData ? mlData[i] : 0;
+            // Use the center of the tile for the cluster point to avoid sub-tile iteration
+            const px = worldX + this.tileSize / 2;
+            const py = worldY + this.tileSize / 2;
 
-                // Lower threshold to 0.3 for red glow on heated walls
-                if (fire > 0.1 || heat > 0.3 || molten > 0.1) {
-                    const subX = i % this.subDiv;
-                    const subY = Math.floor(i / this.subDiv);
-                    const px = worldX + (subX + 0.5) * (this.tileSize / this.subDiv);
-                    const py = worldY + (subY + 0.5) * (this.tileSize / this.subDiv);
+            const cx = Math.floor(px / gridSize);
+            const cy = Math.floor(py / gridSize);
+            const cKey = `${cx},${cy}`;
 
-                    const cx = Math.floor(px / gridSize);
-                    const cy = Math.floor(py / gridSize);
-                    const cKey = `${cx},${cy}`;
+            let cluster = clusters.get(cKey);
+            if (!cluster) {
+                cluster = { x: 0, y: 0, intensity: 0, count: 0, r: 0, g: 0, b: 0 };
+                clusters.set(cKey, cluster);
+            }
 
-                    let cluster = clusters.get(cKey);
-                    if (!cluster) {
-                        cluster = { x: 0, y: 0, intensity: 0, count: 0, r: 0, g: 0, b: 0 };
-                        clusters.set(cKey, cluster);
-                    }
+            cluster.x += px;
+            cluster.y += py;
 
-                    cluster.x += px;
-                    cluster.y += py;
+            const inst = Math.max(summary.burningCount / 100, (summary.maxHeat - 0.2) * 1.5, summary.maxMolten);
+            cluster.intensity += inst;
+            cluster.count++;
 
-                    const inst = Math.max(fire, (heat - 0.2) * 1.5, molten);
-                    cluster.intensity += inst;
-                    cluster.count++;
-
-                    // Color mix
-                    if (fire > 0.1) {
-                        cluster.r += fireColor.r; cluster.g += fireColor.g; cluster.b += fireColor.b;
-                    } else if (molten > 0.1) {
-                        cluster.r += 255; cluster.g += 170; cluster.b += 0; // Molten gold/orange
-                    } else {
-                        const hc = HeatMap.getHeatColorComponents(heat);
-                        cluster.r += hc.r; cluster.g += hc.g; cluster.b += hc.b;
-                    }
-                }
+            // Color mix based on dominant factor
+            if (summary.burningCount > 0) {
+                cluster.r += fireColor.r; cluster.g += fireColor.g; cluster.b += fireColor.b;
+            } else if (summary.maxMolten > 0.1) {
+                cluster.r += 255; cluster.g += 170; cluster.b += 0; 
+            } else {
+                const hc = HeatMap.getHeatColorComponents(summary.maxHeat);
+                cluster.r += hc.r; cluster.g += hc.g; cluster.b += hc.b;
             }
         });
 
@@ -496,8 +523,9 @@ export class HeatMap {
             }
 
             const data = this.heatData.get(key);
-            if (data) {
-                WeatherManager.getInstance().removeSnowFromHeat(tx, ty, data, this.tileSize);
+            const summary = this.tileSummaries.get(key);
+            if (data && summary) {
+                WeatherManager.getInstance().removeSnowFromHeat(tx, ty, data, this.tileSize, summary.maxHeat);
             }
 
             const fData = this.fireData.get(key);
@@ -509,6 +537,9 @@ export class HeatMap {
 
             let hasActivity = false;
             let burningSubTiles = 0;
+            let maxHeat = 0;
+            let sumHeat = 0;
+            let maxMolten = 0;
 
             // Zero-allocation scratch preparation
             if (data) this.scratchHeat.set(data); else this.scratchHeat.fill(0);
@@ -565,9 +596,15 @@ export class HeatMap {
                         const avg = sum / count;
                         this.scratchHeat[idx] = val + (avg - val) * this.spreadRate;
                         this.scratchHeat[idx] = Math.max(0, this.scratchHeat[idx] - this.decayRate * effectiveDT);
-                        if (this.scratchHeat[idx] > 0.01) hasActivity = true;
+                        
+                        const finalHeat = this.scratchHeat[idx];
+                        if (finalHeat > 0.01) {
+                            hasActivity = true;
+                            if (finalHeat > maxHeat) maxHeat = finalHeat;
+                            sumHeat += finalHeat;
+                        }
 
-                        if (this.scratchHeat[idx] > 0.95 && !isDestroyed) {
+                        if (finalHeat > 0.95 && !isDestroyed) {
                             wData[idx] += effectiveDT;
                             const mat = material as MaterialType;
                             if (wData[idx] >= MATERIAL_PROPS[mat].vaporizeTime) {
@@ -623,49 +660,53 @@ export class HeatMap {
                     }
 
                     // --- MOLTEN LOGIC ---
-                    if (this.scratchMolten[idx] > 0 && isDestroyed) {
-                        hasActivity = true;
-                        const pressure = this.scratchMolten[idx] + (this.scratchHeat[idx] * 0.5);
-                        if (pressure > 0.15) {
-                            const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]];
-                            for (const [nx, ny] of neighbors) {
-                                let nx_sub = x + nx;
-                                let ny_sub = y + ny;
-                                let nKey = key;
+                    const mVal = this.scratchMolten[idx];
+                    if (mVal > 0) {
+                        if (mVal > maxMolten) maxMolten = mVal;
+                        if (isDestroyed) {
+                            hasActivity = true;
+                            const pressure = mVal + (this.scratchHeat[idx] * 0.5);
+                            if (pressure > 0.15) {
+                                const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]];
+                                for (const [nx, ny] of neighbors) {
+                                    let nx_sub = x + nx;
+                                    let ny_sub = y + ny;
+                                    let nKey = key;
 
-                                if (nx_sub < 0 || nx_sub >= this.subDiv || ny_sub < 0 || ny_sub >= this.subDiv) {
-                                    const ntx = tx + (nx_sub < 0 ? -1 : (nx_sub >= this.subDiv ? 1 : 0));
-                                    const nty = ty + (ny_sub < 0 ? -1 : (ny_sub >= this.subDiv ? 1 : 0));
-                                    nKey = `${ntx},${nty}`;
-                                    nx_sub = (nx_sub + this.subDiv) % this.subDiv;
-                                    ny_sub = (ny_sub + this.subDiv) % this.subDiv;
-                                }
-
-                                const nIdx = ny_sub * this.subDiv + nx_sub;
-                                const nhData = this.hpData.get(nKey);
-
-                                if (!nhData || nhData[nIdx] <= 0) {
-                                    let n_nmData = this.moltenData.get(nKey);
-                                    if (!n_nmData) {
-                                        n_nmData = new Float32Array(this.subDiv * this.subDiv);
-                                        this.moltenData.set(nKey, n_nmData);
-                                        this.activeTiles.add(nKey);
+                                    if (nx_sub < 0 || nx_sub >= this.subDiv || ny_sub < 0 || ny_sub >= this.subDiv) {
+                                        const ntx = tx + (nx_sub < 0 ? -1 : (nx_sub >= this.subDiv ? 1 : 0));
+                                        const nty = ty + (ny_sub < 0 ? -1 : (ny_sub >= this.subDiv ? 1 : 0));
+                                        nKey = `${ntx},${nty}`;
+                                        nx_sub = (nx_sub + this.subDiv) % this.subDiv;
+                                        ny_sub = (ny_sub + this.subDiv) % this.subDiv;
                                     }
-                                    const flowRate = 2.0 * (1 + this.scratchHeat[idx]);
-                                    const spreadAmount = (pressure - 0.05) * flowRate * effectiveDT;
-                                    if (spreadAmount > 0.001) {
-                                        n_nmData[nIdx] = Math.min(2.0, n_nmData[nIdx] + spreadAmount);
-                                        this.scratchMolten[idx] -= spreadAmount * 0.9;
+
+                                    const nIdx = ny_sub * this.subDiv + nx_sub;
+                                    const nhData = this.hpData.get(nKey);
+
+                                    if (!nhData || nhData[nIdx] <= 0) {
+                                        let n_nmData = this.moltenData.get(nKey);
+                                        if (!n_nmData) {
+                                            n_nmData = new Float32Array(this.subDiv * this.subDiv);
+                                            this.moltenData.set(nKey, n_nmData);
+                                            this.activeTiles.add(nKey);
+                                        }
+                                        const flowRate = 2.0 * (1 + this.scratchHeat[idx]);
+                                        const spreadAmount = (pressure - 0.05) * flowRate * effectiveDT;
+                                        if (spreadAmount > 0.001) {
+                                            n_nmData[nIdx] = Math.min(2.0, n_nmData[nIdx] + spreadAmount);
+                                            this.scratchMolten[idx] -= spreadAmount * 0.9;
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        if (this.scratchHeat[idx] < 0.2) {
-                            const worldX = tx * this.tileSize + (x + 0.5) * (this.tileSize / this.subDiv);
-                            const worldY = ty * this.tileSize + (y + 0.5) * (this.tileSize / this.subDiv);
-                            FloorDecalManager.getInstance().addCooledMetalMark(worldX, worldY, (this.tileSize / this.subDiv) * (0.5 + this.scratchMolten[idx] * 2.0));
-                            this.scratchMolten[idx] = 0;
+                            if (this.scratchHeat[idx] < 0.2) {
+                                const worldX = tx * this.tileSize + (x + 0.5) * (this.tileSize / this.subDiv);
+                                const worldY = ty * this.tileSize + (y + 0.5) * (this.tileSize / this.subDiv);
+                                FloorDecalManager.getInstance().addCooledMetalMark(worldX, worldY, (this.tileSize / this.subDiv) * (0.5 + this.scratchMolten[idx] * 2.0));
+                                this.scratchMolten[idx] = 0;
+                            }
                         }
                     }
 
@@ -717,6 +758,14 @@ export class HeatMap {
                 }
             }
 
+            // Update summary
+            this.tileSummaries.set(key, {
+                burningCount: burningSubTiles,
+                maxHeat: maxHeat,
+                maxMolten: maxMolten,
+                avgHeat: sumHeat / (this.subDiv * this.subDiv)
+            });
+
             if (burningSubTiles > 0) {
                 const worldX = tx * this.tileSize + this.tileSize / 2;
                 const worldY = ty * this.tileSize + this.tileSize / 2;
@@ -766,10 +815,14 @@ export class HeatMap {
             this.scratchCanvas.width = this.subDiv;
             this.scratchCanvas.height = this.subDiv;
             this.scratchCtx = this.scratchCanvas.getContext('2d')!;
+            this.scratchImageData = this.scratchCtx.createImageData(this.subDiv, this.subDiv);
+            this.scratchUint32 = new Uint32Array(this.scratchImageData.data.buffer);
         }
 
         const sCtx = this.scratchCtx!;
         const sCanv = this.scratchCanvas!;
+        const sData = this.scratchImageData!;
+        const sU32 = this.scratchUint32!;
 
         this.activeTiles.forEach(key => {
             const [tx, ty] = key.split(',').map(Number);
@@ -782,33 +835,27 @@ export class HeatMap {
             const heatData = this.heatData.get(key);
             const fireData = this.fireData.get(key);
             const hData = this.hpData.get(key);
+            const moltenData = this.moltenData.get(key);
 
-            if (!heatData && !fireData) return;
+            if (!heatData && !fireData && !moltenData) return;
 
-            // 1. Render Blended Heat Glow
+            // 1. Render Blended Heat Glow using LUT
             if (heatData) {
-                sCtx.clearRect(0, 0, this.subDiv, this.subDiv);
                 let hasSignificantHeat = false;
+                sU32.fill(0);
 
-                const imgData = sCtx.createImageData(this.subDiv, this.subDiv);
                 for (let i = 0; i < heatData.length; i++) {
                     const h = heatData[i];
                     // Render ground heat glow only if wall is destroyed or not present
                     if (h > 0.4 && (!hData || hData[i] <= 0)) {
                         hasSignificantHeat = true;
-                        const color = HeatMap.getHeatColorComponents(h);
-                        const alpha = Math.floor((h < 0.8 ? (0.4 + h * 0.6) : 1.0) * 255);
-                        const idx = i * 4;
-                        imgData.data[idx] = color.r;
-                        imgData.data[idx + 1] = color.g;
-                        imgData.data[idx + 2] = color.b;
-                        imgData.data[idx + 3] = alpha;
+                        const lutIdx = Math.floor(h * 255);
+                        sU32[i] = HeatMap.heatColorLUT[lutIdx];
                     }
                 }
 
                 if (hasSignificantHeat) {
-                    sCtx.putImageData(imgData, 0, 0);
-
+                    sCtx.putImageData(sData, 0, 0);
                     ctx.save();
                     ctx.imageSmoothingEnabled = true;
                     ctx.drawImage(sCanv, worldX, worldY, this.tileSize, this.tileSize);
@@ -816,44 +863,35 @@ export class HeatMap {
                 }
             }
 
-            // 2. Render Molten Metal Puddles
-            const mld = this.moltenData.get(key);
-            if (mld) {
-                sCtx.clearRect(0, 0, this.subDiv, this.subDiv);
+            // 2. Render Molten Metal Puddles using LUT
+            if (moltenData) {
                 let hasMolten = false;
+                sU32.fill(0);
 
-                const imgData = sCtx.createImageData(this.subDiv, this.subDiv);
-                for (let i = 0; i < mld.length; i++) {
-                    const m = mld[i];
+                for (let i = 0; i < moltenData.length; i++) {
+                    const m = moltenData[i];
                     if (m > 0.05) {
                         hasMolten = true;
-                        const alpha = Math.floor(Math.min(1.0, m) * 255);
-                        const idx = i * 4;
-                        imgData.data[idx] = 255;
-                        imgData.data[idx + 1] = 200;
-                        imgData.data[idx + 2] = 0;
-                        imgData.data[idx + 3] = alpha;
+                        const lutIdx = Math.floor(Math.min(1.0, m) * 255);
+                        sU32[i] = HeatMap.moltenColorLUT[lutIdx];
                     }
                 }
 
                 if (hasMolten) {
-                    sCtx.putImageData(imgData, 0, 0);
-
+                    sCtx.putImageData(sData, 0, 0);
                     ctx.save();
                     ctx.imageSmoothingEnabled = true;
-                    // Stable alpha for puddles (no flickering)
-                    const staticAlpha = 0.95;
-
-                    // Layer 1: Outer Glow (Soft & Wide)
-                    ctx.globalAlpha = staticAlpha * 0.5;
-                    ctx.shadowBlur = 15; // Increased blur for rounding
-                    ctx.shadowColor = '#ff6600';
-                    ctx.drawImage(sCanv, worldX - 3, worldY - 3, this.tileSize + 6, this.tileSize + 6);
-
-                    // Layer 2: Inner Liquid Core
-                    ctx.shadowBlur = 0;
-                    ctx.globalAlpha = staticAlpha;
-                    ctx.drawImage(sCanv, worldX - 1, worldY - 1, this.tileSize + 2, this.tileSize + 2);
+                    
+                    // Optimization: Use additive blending for glow instead of shadowBlur
+                    ctx.globalCompositeOperation = 'screen';
+                    ctx.globalAlpha = 0.5;
+                    // Layer 1: Outer Glow (Scaled up)
+                    ctx.drawImage(sCanv, worldX - 4, worldY - 4, this.tileSize + 8, this.tileSize + 8);
+                    
+                    // Layer 2: Core
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.globalAlpha = 0.95;
+                    ctx.drawImage(sCanv, worldX, worldY, this.tileSize, this.tileSize);
 
                     ctx.restore();
                 }
@@ -862,35 +900,30 @@ export class HeatMap {
             // 3. Render Fire
             if (fireData) {
                 const subSize = this.tileSize / this.subDiv;
-                for (let i = 0; i < fireData.length; i++) {
-                    const fire = fireData[i];
-                    if (fire > 0 && hData && hData[i] > 0) {
-                        const sx = i % this.subDiv;
-                        const sy = Math.floor(i / this.subDiv);
-                        const rx = worldX + sx * subSize;
-                        const ry = worldY + sy * subSize;
+                const summary = this.tileSummaries.get(key);
+                // Only iterate if we know there is fire
+                if (summary && summary.burningCount > 0) {
+                    for (let i = 0; i < fireData.length; i++) {
+                        const fire = fireData[i];
+                        if (fire > 0 && hData && hData[i] > 0) {
+                            const sx = i % this.subDiv;
+                            const sy = Math.floor(i / this.subDiv);
+                            const rx = worldX + sx * subSize;
+                            const ry = worldY + sy * subSize;
 
-                        if (this.fireAsset && this.fireAsset.complete && this.fireAsset.naturalWidth > 0) {
-                            const frameCount = 8;
-                            const frame = Math.floor((time * 15 + i) % frameCount);
-                            const fw = this.fireAsset.width / frameCount;
-                            const fh = this.fireAsset.height;
-                            const fx = frame * fw;
-                            ctx.drawImage(this.fireAsset, fx, 0, fw, fh, rx - subSize * 0.5, ry - subSize, subSize * 2, subSize * 2);
-                        } else {
-                            // Blended procedural fire fallback
-                            const pulse = 0.6 + Math.sin(time * 30 + i) * 0.4;
-                            const grad = ctx.createRadialGradient(rx + subSize / 2, ry + subSize / 2, 0, rx + subSize / 2, ry + subSize / 2, subSize * 1.5);
-                            grad.addColorStop(0, `rgba(255, 200, 0, ${fire * pulse})`);
-                            grad.addColorStop(0.5, `rgba(255, 50, 0, ${fire * pulse * 0.5})`);
-                            grad.addColorStop(1, 'rgba(255, 0, 0, 0)');
-                            ctx.fillStyle = grad;
-                            ctx.fillRect(rx - subSize, ry - subSize, subSize * 3, subSize * 3);
-                        }
-
-                        if (Math.random() < 0.1 * fire) {
-                            ctx.fillStyle = '#fff';
-                            ctx.fillRect(rx + Math.random() * subSize, ry - Math.random() * 10, 1, 1);
+                            if (this.fireAsset && this.fireAsset.complete && this.fireAsset.naturalWidth > 0) {
+                                const frameCount = 8;
+                                const frame = Math.floor((time * 15 + i) % frameCount);
+                                const fw = this.fireAsset.width / frameCount;
+                                const fh = this.fireAsset.height;
+                                const fx = frame * fw;
+                                ctx.drawImage(this.fireAsset, fx, 0, fw, fh, rx - subSize * 0.5, ry - subSize, subSize * 2, subSize * 2);
+                            } else {
+                                // Procedural fallback
+                                const pulse = 0.6 + Math.sin(time * 30 + i) * 0.4;
+                                ctx.fillStyle = `rgba(255, 100, 0, ${fire * pulse * 0.6})`;
+                                ctx.fillRect(rx - subSize, ry - subSize, subSize * 3, subSize * 3);
+                            }
                         }
                     }
                 }

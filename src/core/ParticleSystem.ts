@@ -484,67 +484,49 @@ export class ParticleSystem {
         const activeTiles = (heatMap as any).activeTiles;
         const tileSize = world.getTileSize();
 
-        // Iterate through major tiles (activeTiles is a set of "tx,ty")
         activeTiles.forEach((key: string) => {
-            const fData = (heatMap as any).fireData.get(key);
-            const hData = (heatMap as any).heatData.get(key);
-            if (!fData && !hData) return;
+            const summary = heatMap.getTileSummary(key);
+            if (!summary) return;
 
             const [tx, ty] = key.split(',').map(Number);
             const centerX = tx * tileSize + tileSize / 2;
             const centerY = ty * tileSize + tileSize / 2;
 
             // 1. DENSE FIRE SMOKE (Major Tile Level)
-            if (fData) {
-                let burningCount = 0;
-                for (let i = 0; i < fData.length; i++) {
-                    if (fData[i] > 0.05) burningCount++; // Lower threshold to ensure last bit of fire smokes
-                }
+            if (summary.burningCount > 0) {
+                const fireIntensity = summary.burningCount / 100; // 10x10 subDiv
 
-                if (burningCount > 0) {
-                    const fireIntensity = burningCount / fData.length; // 0.0 to 1.0
+                if (Math.random() < fireIntensity * 0.9 + 0.3) {
+                    const count = 1 + Math.floor(fireIntensity * 4);
+                    for (let i = 0; i < count; i++) {
+                        const offset = (Math.random() - 0.5) * tileSize;
+                        const life = 3.0 + Math.random() * 2.0;
+                        const size = (tileSize * 2.5) + (fireIntensity * tileSize * 2.5);
 
-                    // Always emit smoke if anything is burning
-                    if (Math.random() < fireIntensity * 0.9 + 0.3) {
-                        const count = 1 + Math.floor(fireIntensity * 4);
-                        for (let i = 0; i < count; i++) {
-                            const offset = (Math.random() - 0.5) * tileSize;
-                            const life = 3.0 + Math.random() * 2.0;
-                            // Smoke size is much larger now
-                            const size = (tileSize * 2.5) + (fireIntensity * tileSize * 2.5);
-
-                            this.spawnSmoke(
-                                centerX + offset,
-                                centerY + offset,
-                                (Math.random() - 0.5) * 30,
-                                -30 - Math.random() * 50, // Stronger upward drift
-                                life,
-                                size,
-                                '#000'
-                            );
-                        }
+                        this.spawnSmoke(
+                            centerX + offset,
+                            centerY + offset,
+                            (Math.random() - 0.5) * 30,
+                            -30 - Math.random() * 50,
+                            life,
+                            size,
+                            '#000'
+                        );
                     }
                 }
             }
 
             // 2. RESIDUE HEAT SMOKE (Smaller/Lighter)
-            if (hData) {
-                let hotCount = 0;
-                for (let i = 0; i < hData.length; i++) {
-                    if (hData[i] > 0.4) hotCount++;
-                }
-
-                if (hotCount > 5 && Math.random() < (hotCount / hData.length) * 0.4) {
-                    this.spawnSmoke(
-                        centerX + (Math.random() - 0.5) * tileSize,
-                        centerY + (Math.random() - 0.5) * tileSize,
-                        (Math.random() - 0.5) * 15,
-                        -15 - Math.random() * 20,
-                        2.0,
-                        tileSize * 1.2,
-                        '#666'
-                    );
-                }
+            if (summary.maxHeat > 0.4 && Math.random() < summary.avgHeat * 0.4) {
+                this.spawnSmoke(
+                    centerX + (Math.random() - 0.5) * tileSize,
+                    centerY + (Math.random() - 0.5) * tileSize,
+                    (Math.random() - 0.5) * 15,
+                    -15 - Math.random() * 20,
+                    2.0,
+                    tileSize * 1.2,
+                    '#666'
+                );
             }
         });
     }
