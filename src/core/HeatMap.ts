@@ -214,7 +214,7 @@ export class HeatMap {
                     } else if (molten > 0.1) {
                         cluster.r += 255; cluster.g += 170; cluster.b += 0; // Molten gold/orange
                     } else {
-                        const hc = this.getHeatColorComponents(heat);
+                        const hc = HeatMap.getHeatColorComponents(heat);
                         cluster.r += hc.r; cluster.g += hc.g; cluster.b += hc.b;
                     }
                 }
@@ -229,7 +229,12 @@ export class HeatMap {
         }));
     }
 
-    private getHeatColorComponents(intensity: number): { r: number, g: number, b: number } {
+    public getHeatColor(intensity: number): string {
+        const { r, g, b } = HeatMap.getHeatColorComponents(intensity);
+        return `rgba(${r}, ${g}, ${b}, ${0.4 + intensity * 0.6})`;
+    }
+
+    public static getHeatColorComponents(intensity: number): { r: number, g: number, b: number } {
         if (intensity < 0.4) {
             const r = Math.floor(100 + 155 * (intensity / 0.4));
             return { r, g: 0, b: 0 };
@@ -824,9 +829,10 @@ export class HeatMap {
                 const imgData = sCtx.createImageData(this.subDiv, this.subDiv);
                 for (let i = 0; i < heatData.length; i++) {
                     const h = heatData[i];
-                    if (h > 0.4 && hData && hData[i] > 0) {
+                    // Render ground heat glow only if wall is destroyed or not present
+                    if (h > 0.4 && (!hData || hData[i] <= 0)) {
                         hasSignificantHeat = true;
-                        const color = this.getHeatColorComponents(h);
+                        const color = HeatMap.getHeatColorComponents(h);
                         const alpha = Math.floor((h < 0.8 ? (0.4 + h * 0.6) : 1.0) * 255);
                         const idx = i * 4;
                         imgData.data[idx] = color.r;
@@ -926,19 +932,6 @@ export class HeatMap {
                 }
             }
         });
-    }
-
-    private getHeatColor(intensity: number): string {
-        if (intensity < 0.4) {
-            const r = Math.floor(100 + 155 * (intensity / 0.4));
-            return `rgba(${r}, 0, 0, ${0.4 + intensity * 0.6})`;
-        } else if (intensity < 0.8) {
-            const g = Math.floor(255 * ((intensity - 0.4) / 0.4));
-            return `rgba(255, ${g}, 0, 0.9)`;
-        } else {
-            const b = Math.floor(255 * ((intensity - 0.8) / 0.2));
-            return `rgba(255, 255, ${b}, 1.0)`;
-        }
     }
 
     public getAverageIntensity(tx: number, ty: number): number {

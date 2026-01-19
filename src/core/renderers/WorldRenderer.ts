@@ -1,5 +1,5 @@
 import { World } from '../World';
-import { MaterialType } from '../HeatMap';
+import { HeatMap, MaterialType } from '../HeatMap';
 import { WeatherManager } from '../WeatherManager';
 import { ConfigManager } from '../../config/MasterConfig';
 import { ProjectionUtils } from '../../utils/ProjectionUtils';
@@ -117,6 +117,8 @@ export class WorldRenderer {
 
         const heatMap = this.world.getHeatMap();
         const hpData = heatMap?.getTileHP(tx, ty);
+        const heatData = heatMap?.getTileHeat(tx, ty);
+        const sData = heatMap?.getTileScorch(tx, ty);
         const isDamaged = heatMap?.hasTileData(tx, ty) && hpData;
         const subDiv = 10;
 
@@ -148,6 +150,25 @@ export class WorldRenderer {
                     }
                 }
                 ctx.fill('evenodd');
+
+                // Overlays
+                for (let sx = 0; sx < subDiv; sx++) {
+                    const idx = sx;
+                    if (hpData[idx] <= 0) continue;
+                    const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
+                    const p0 = this.lerpQuad(v0, v1, v2, v3, fsx0, 0); const p1 = this.lerpQuad(v0, v1, v2, v3, fsx1, 0);
+
+                    if (sData && sData[idx]) {
+                        ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
+                        ctx.beginPath(); ctx.moveTo(x0 + fsx0 * ts, y0); ctx.lineTo(x0 + fsx1 * ts, y0); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p0.x, p0.y); ctx.fill();
+                    }
+                    if (heatData && heatData[idx] > 0.05) {
+                        const heat = heatData[idx];
+                        const { r, g, b } = HeatMap.getHeatColorComponents(heat);
+                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
+                        ctx.beginPath(); ctx.moveTo(x0 + fsx0 * ts, y0); ctx.lineTo(x0 + fsx1 * ts, y0); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p0.x, p0.y); ctx.fill();
+                    }
+                }
             }
             // Bottom Side
             if (!hasBottom && v3.y < y1) {
@@ -161,6 +182,25 @@ export class WorldRenderer {
                     }
                 }
                 ctx.fill('evenodd');
+
+                // Overlays
+                for (let sx = 0; sx < subDiv; sx++) {
+                    const idx = 90 + sx;
+                    if (hpData[idx] <= 0) continue;
+                    const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
+                    const p3 = this.lerpQuad(v0, v1, v2, v3, fsx0, 1); const p2 = this.lerpQuad(v0, v1, v2, v3, fsx1, 1);
+
+                    if (sData && sData[idx]) {
+                        ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
+                        ctx.beginPath(); ctx.moveTo(x0 + fsx0 * ts, y1); ctx.lineTo(x0 + fsx1 * ts, y1); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
+                    }
+                    if (heatData && heatData[idx] > 0.05) {
+                        const heat = heatData[idx];
+                        const { r, g, b } = HeatMap.getHeatColorComponents(heat);
+                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
+                        ctx.beginPath(); ctx.moveTo(x0 + fsx0 * ts, y1); ctx.lineTo(x0 + fsx1 * ts, y1); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
+                    }
+                }
             }
             // Left Side
             if (!hasLeft && v0.x > x0) {
@@ -174,6 +214,25 @@ export class WorldRenderer {
                     }
                 }
                 ctx.fill('evenodd');
+
+                // Overlays
+                for (let sy = 0; sy < subDiv; sy++) {
+                    const idx = sy * subDiv;
+                    if (hpData[idx] <= 0) continue;
+                    const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
+                    const p0 = this.lerpQuad(v0, v1, v2, v3, 0, fsy0); const p3 = this.lerpQuad(v0, v1, v2, v3, 0, fsy1);
+
+                    if (sData && sData[idx]) {
+                        ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
+                        ctx.beginPath(); ctx.moveTo(x0, y0 + fsy0 * ts); ctx.lineTo(x0, y0 + fsy1 * ts); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p0.x, p0.y); ctx.fill();
+                    }
+                    if (heatData && heatData[idx] > 0.05) {
+                        const heat = heatData[idx];
+                        const { r, g, b } = HeatMap.getHeatColorComponents(heat);
+                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
+                        ctx.beginPath(); ctx.moveTo(x0, y0 + fsy0 * ts); ctx.lineTo(x0, y0 + fsy1 * ts); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p0.x, p0.y); ctx.fill();
+                    }
+                }
             }
             // Right Side
             if (!hasRight && v1.x < x1) {
@@ -187,6 +246,25 @@ export class WorldRenderer {
                     }
                 }
                 ctx.fill('evenodd');
+
+                // Overlays
+                for (let sy = 0; sy < subDiv; sy++) {
+                    const idx = sy * subDiv + 9;
+                    if (hpData[idx] <= 0) continue;
+                    const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
+                    const p1 = this.lerpQuad(v0, v1, v2, v3, 1, fsy0); const p2 = this.lerpQuad(v0, v1, v2, v3, 1, fsy1);
+
+                    if (sData && sData[idx]) {
+                        ctx.fillStyle = material === MaterialType.WOOD ? 'rgba(28, 28, 28, 0.8)' : 'rgba(0,0,0,0.5)';
+                        ctx.beginPath(); ctx.moveTo(x1, y0 + fsy0 * ts); ctx.lineTo(x1, y0 + fsy1 * ts); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p1.x, p1.y); ctx.fill();
+                    }
+                    if (heatData && heatData[idx] > 0.05) {
+                        const heat = heatData[idx];
+                        const { r, g, b } = HeatMap.getHeatColorComponents(heat);
+                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
+                        ctx.beginPath(); ctx.moveTo(x1, y0 + fsy0 * ts); ctx.lineTo(x1, y0 + fsy1 * ts); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p1.x, p1.y); ctx.fill();
+                    }
+                }
             }
         }
     }
@@ -373,8 +451,8 @@ export class WorldRenderer {
 
                 if (heatData && heatData[idx] > 0.05) {
                     const heat = heatData[idx];
-                    const r = Math.floor(100 + 155 * Math.min(1, heat / 0.6));
-                    ctx.fillStyle = `rgba(${r}, 0, 0, ${0.2 + heat * 0.4})`;
+                    const { r, g, b } = HeatMap.getHeatColorComponents(heat);
+                    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + heat * 0.4})`;
                     ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
                     ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.fill();
                 }
