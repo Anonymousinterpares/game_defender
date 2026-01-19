@@ -533,16 +533,38 @@ export class LightingRenderer {
         mctx.fillStyle = '#000000';
         let rebuildsThisFrame = 0;
 
-        // Process a bit of the queue first
+        const { sun, moon } = WorldClock.getInstance().getTimeState();
+
+        // Process prioritized rebuilds (damaged tiles or close to camera) first
+        this.rebuildQueue.sort((a, b) => {
+            const [coordsA, typeA] = a.split('_');
+            const [coordsB, typeB] = b.split('_');
+            const [gxA, gyA] = coordsA.split(',').map(Number);
+            const [gxB, gyB] = coordsB.split(',').map(Number);
+            
+            // Priority 1: Distance to camera
+            const camGX = Math.floor(this.parent.cameraX / this.chunkSize);
+            const camGY = Math.floor(this.parent.cameraY / this.chunkSize);
+            const distA = Math.abs(gxA - camGX) + Math.abs(gyA - camGY);
+            const distB = Math.abs(gxB - camGX) + Math.abs(gyB - camGY);
+            
+            if (distA !== distB) return distA - distB;
+            return 0;
+        });
+
         while (this.rebuildQueue.length > 0 && rebuildsThisFrame < this.MAX_REBUILDS_PER_FRAME) {
             const qKey = this.rebuildQueue.shift()!;
             const [qCoords, qType] = qKey.split('_');
             const [gx, gy] = qCoords.split(',').map(Number);
             const chunk = this.shadowChunks.get(qKey);
-            if (chunk && chunk.version !== bakeVersion) {
-                this.rebuildShadowChunk(chunk, gx, gy, source);
-                chunk.version = bakeVersion;
-                rebuildsThisFrame++;
+            if (chunk) {
+                // If it's a directional shadow chunk, we need the correct light source
+                const source = qType === 'sun' ? sun : moon;
+                if (source && source.active) {
+                    this.rebuildShadowChunk(chunk, gx, gy, source);
+                    chunk.version = bakeVersion;
+                    rebuildsThisFrame++;
+                }
             }
         }
 
@@ -668,51 +690,12 @@ export class LightingRenderer {
                     const s3 = { x: v3.x + dx, y: v3.y + dy };
 
                     if (!isDamaged) {
-                        // Healthy Wall: Individual quad fills to avoid winding conflicts
-                        // 1. Base footprint
-                        sctx.beginPath();
-                        sctx.moveTo(x - worldX, y - worldY);
-                        sctx.lineTo(x + tileSize - worldX, y - worldY);
-                        sctx.lineTo(x + tileSize - worldX, y + tileSize - worldY);
-                        sctx.lineTo(x - worldX, y + tileSize - worldY);
-                        sctx.closePath();
-                        sctx.fill();
-
-                        // 2. Bridged sides (connecting base to the top's shadow)
-                        sctx.beginPath();
-                        sctx.moveTo(x - worldX, y - worldY); sctx.lineTo(x + tileSize - worldX, y - worldY);
-                        sctx.lineTo(s1.x - worldX, s1.y - worldY); sctx.lineTo(s0.x - worldX, s0.y - worldY);
-                        sctx.closePath();
-                        sctx.fill();
-
-                        sctx.beginPath();
-                        sctx.moveTo(x + tileSize - worldX, y - worldY); sctx.lineTo(x + tileSize - worldX, y + tileSize - worldY);
-                        sctx.lineTo(s2.x - worldX, s2.y - worldY); sctx.lineTo(s1.x - worldX, s1.y - worldY);
-                        sctx.closePath();
-                        sctx.fill();
-
-                        sctx.beginPath();
-                        sctx.moveTo(x + tileSize - worldX, y + tileSize - worldY); sctx.lineTo(x - worldX, y + tileSize - worldY);
-                        sctx.lineTo(s3.x - worldX, s3.y - worldY); sctx.lineTo(s2.x - worldX, s2.y - worldY);
-                        sctx.closePath();
-                        sctx.fill();
-
-                        sctx.beginPath();
-                        sctx.moveTo(x - worldX, y + tileSize - worldY); sctx.lineTo(x - worldX, y - worldY);
-                        sctx.lineTo(s0.x - worldX, s0.y - worldY); sctx.lineTo(s3.x - worldX, s3.y - worldY);
-                        sctx.closePath();
-                        sctx.fill();
-
-                        // 3. The top face's shadow
-                        sctx.beginPath();
-                        sctx.moveTo(s0.x - worldX, s0.y - worldY); sctx.lineTo(s1.x - worldX, s1.y - worldY);
-                        sctx.lineTo(s2.x - worldX, s2.y - worldY); sctx.lineTo(s3.x - worldX, s3.y - worldY);
-                        sctx.closePath();
-                        sctx.fill();
+                        // Healthy Wall: High-performance individual quad fills
+                        this.drawSolidWallShadow(sctx, x - worldX, y - worldY, tileSize, s0, s1, s2, s3, worldX, worldY);
                     } else if (hpData) {
-                        // DAMAGED PATH: Sub-tile detail (Optimized with single fill)
+                        // DAMAGED PATH: Render each sub-tile volume individually
+                        // While slightly slower than a single path, it is 100% robust against winding artifacts
                         const subDiv = 10;
-                        sctx.beginPath();
                         for (let sy = 0; sy < subDiv; sy++) {
                             const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
                             for (let sx = 0; sx < subDiv; sx++) {
@@ -728,38 +711,89 @@ export class LightingRenderer {
                                     const by0 = y + fsy0 * tileSize; const by1 = y + fsy1 * tileSize;
 
                                     // Base footprint sub-quad
+                                    sctx.beginPath();
                                     sctx.moveTo(bx0 - worldX, by0 - worldY); 
                                     sctx.lineTo(bx1 - worldX, by0 - worldY);
                                     sctx.lineTo(bx1 - worldX, by1 - worldY); 
                                     sctx.lineTo(bx0 - worldX, by1 - worldY);
-                                    sctx.closePath();
+                                    sctx.fill();
 
-                                    // Bridged sides sub-quads (Simplified)
+                                    // Bridged sides
+                                    sctx.beginPath();
                                     sctx.moveTo(bx0 - worldX, by0 - worldY); sctx.lineTo(bx1 - worldX, by0 - worldY);
                                     sctx.lineTo(ps1.x - worldX, ps1.y - worldY); sctx.lineTo(ps0.x - worldX, ps0.y - worldY);
-                                    sctx.closePath();
+                                    sctx.fill();
+
+                                    sctx.beginPath();
                                     sctx.moveTo(bx1 - worldX, by0 - worldY); sctx.lineTo(bx1 - worldX, by1 - worldY);
                                     sctx.lineTo(ps2.x - worldX, ps2.y - worldY); sctx.lineTo(ps1.x - worldX, ps1.y - worldY);
-                                    sctx.closePath();
+                                    sctx.fill();
+
+                                    sctx.beginPath();
                                     sctx.moveTo(bx1 - worldX, by1 - worldY); sctx.lineTo(bx0 - worldX, by1 - worldY);
                                     sctx.lineTo(ps3.x - worldX, ps3.y - worldY); sctx.lineTo(ps2.x - worldX, ps2.y - worldY);
-                                    sctx.closePath();
+                                    sctx.fill();
+
+                                    sctx.beginPath();
                                     sctx.moveTo(bx0 - worldX, by1 - worldY); sctx.lineTo(bx0 - worldX, by0 - worldY);
                                     sctx.lineTo(ps0.x - worldX, ps0.y - worldY); sctx.lineTo(ps3.x - worldX, ps3.y - worldY);
-                                    sctx.closePath();
+                                    sctx.fill();
 
                                     // Top face sub-quad
+                                    sctx.beginPath();
                                     sctx.moveTo(ps0.x - worldX, ps0.y - worldY); sctx.lineTo(ps1.x - worldX, ps1.y - worldY);
                                     sctx.lineTo(ps2.x - worldX, ps2.y - worldY); sctx.lineTo(ps3.x - worldX, ps3.y - worldY);
-                                    sctx.closePath();
+                                    sctx.fill();
                                 }
                             }
                         }
-                        sctx.fill('evenodd');
                     }
                 }
             }
         }
+    }
+
+    private drawSolidWallShadow(sctx: CanvasRenderingContext2D, lx: number, ly: number, ts: number, s0: Point, s1: Point, s2: Point, s3: Point, worldX: number, worldY: number): void {
+        // 1. Base footprint
+        sctx.beginPath();
+        sctx.moveTo(lx, ly);
+        sctx.lineTo(lx + ts, ly);
+        sctx.lineTo(lx + ts, ly + ts);
+        sctx.lineTo(lx, ly + ts);
+        sctx.closePath();
+        sctx.fill();
+
+        // 2. Bridged sides
+        sctx.beginPath();
+        sctx.moveTo(lx, ly); sctx.lineTo(lx + ts, ly);
+        sctx.lineTo(s1.x - worldX, s1.y - worldY); sctx.lineTo(s0.x - worldX, s0.y - worldY);
+        sctx.closePath();
+        sctx.fill();
+
+        sctx.beginPath();
+        sctx.moveTo(lx + ts, ly); sctx.lineTo(lx + ts, ly + ts);
+        sctx.lineTo(s2.x - worldX, s2.y - worldY); sctx.lineTo(s1.x - worldX, s1.y - worldY);
+        sctx.closePath();
+        sctx.fill();
+
+        sctx.beginPath();
+        sctx.moveTo(lx + ts, ly + ts); sctx.lineTo(lx, ly + ts);
+        sctx.lineTo(s3.x - worldX, s3.y - worldY); sctx.lineTo(s2.x - worldX, s2.y - worldY);
+        sctx.closePath();
+        sctx.fill();
+
+        sctx.beginPath();
+        sctx.moveTo(lx, ly + ts); sctx.lineTo(lx, ly);
+        sctx.lineTo(s0.x - worldX, s0.y - worldY); sctx.lineTo(s3.x - worldX, s3.y - worldY);
+        sctx.closePath();
+        sctx.fill();
+
+        // 3. The top face's shadow
+        sctx.beginPath();
+        sctx.moveTo(s0.x - worldX, s0.y - worldY); sctx.lineTo(s1.x - worldX, s1.y - worldY);
+        sctx.lineTo(s2.x - worldX, s2.y - worldY); sctx.lineTo(s3.x - worldX, s3.y - worldY);
+        sctx.closePath();
+        sctx.fill();
     }
 
     private renderEntityShadow(ctx: CanvasRenderingContext2D, e: Entity, dir: { x: number, y: number }, len: number): void {

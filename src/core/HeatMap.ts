@@ -994,9 +994,16 @@ export class HeatMap {
 
     public hasTileData(tx: number, ty: number): boolean {
         const key = `${tx},${ty}`;
-        // Only consider it 'damaged' if it has scorch marks or heat - 
-        // this ensures Section 3 of rebuildMesh picks it up.
-        return this.hpData.has(key) && (this.scorchData.has(key) || this.heatData.has(key) || this.fireData.has(key));
+        const hData = this.hpData.get(key);
+        if (!hData) return false;
+
+        // If any sub-tile is destroyed, we definitely have 'structural' damage
+        for (let i = 0; i < hData.length; i++) {
+            if (hData[i] <= 0) return true;
+        }
+
+        // Otherwise, check for 'surface' effects (scorch, heat, fire)
+        return (this.scorchData.has(key) || this.heatData.has(key) || this.fireData.has(key));
     }
 
     public getTileHP(tx: number, ty: number): Float32Array | null {
