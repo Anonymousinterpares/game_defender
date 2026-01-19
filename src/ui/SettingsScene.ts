@@ -117,7 +117,10 @@ export class SettingsScene implements Scene {
 
         // Sidebar Tabs
         const schema = ConfigManager.getInstance().getSchema();
-        const categories = [...Object.keys(schema), 'Keybindings'];
+        const categories = Object.keys(schema);
+        if (!categories.includes('Keybindings')) {
+            categories.push('Keybindings');
+        }
 
         categories.forEach(cat => {
             const btn = document.createElement('button');

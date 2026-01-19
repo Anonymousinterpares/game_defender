@@ -42,8 +42,9 @@ export class LightingRenderer {
 
     private shadowChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, version: string }> = new Map();
     private rebuildQueue: string[] = [];
-    private MAX_REBUILDS_PER_FRAME: number = 2;
-    private silhouetteChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, version: number }> = new Map();
+    private MAX_REBUILDS_PER_FRAME: number = 12; // Increased for faster catch-up
+    private silCanvas: HTMLCanvasElement;
+    private silCtx: CanvasRenderingContext2D;
     private chunkSize: number = 512;
     private lightPolygonCache: Map<string, Point[]> = new Map();
     private meshVersion: number = 0;
@@ -74,6 +75,8 @@ export class LightingRenderer {
         this.maskCtx = this.maskCanvas.getContext('2d', { willReadFrequently: true })!;
         this.sourceCanvas = document.createElement('canvas');
         this.sourceCtx = this.sourceCanvas.getContext('2d', { willReadFrequently: true })!;
+        this.silCanvas = document.createElement('canvas');
+        this.silCtx = this.silCanvas.getContext('2d')!;
         this.tempCanvas = document.createElement('canvas');
         this.tempCtx = this.tempCanvas.getContext('2d')!;
 
@@ -220,11 +223,20 @@ export class LightingRenderer {
             this.lightCanvas.width = w; this.lightCanvas.height = h;
             this.maskCanvas.width = w; this.maskCanvas.height = h;
             this.sourceCanvas.width = w; this.sourceCanvas.height = h;
+            this.silCanvas.width = w; this.silCanvas.height = h;
             this.tempCanvas.width = fullW; this.tempCanvas.height = fullH;
             this.fogCanvas.width = fullW; this.fogCanvas.height = fullH;
         }
 
         const lctx = this.lightCtx;
+
+        // 0. PRE-RENDER SILHOUETTES (Once per frame, at lighting resolution)
+        this.silCtx.clearRect(0, 0, w, h);
+        this.silCtx.save();
+        this.silCtx.scale(this.resolutionScale, this.resolutionScale);
+        this.silCtx.translate(-this.parent.cameraX, -this.parent.cameraY);
+        this.parent.worldRenderer.renderAsSilhouette(this.silCtx, this.parent.cameraX, this.parent.cameraY, '#000000');
+        this.silCtx.restore();
 
         // Scale for internal lighting coordinates
         lctx.save();
@@ -247,26 +259,9 @@ export class LightingRenderer {
         lctx.globalCompositeOperation = 'screen';
         const silColor = isDaylight ? 'rgb(70, 65, 60)' : 'rgb(30, 35, 50)';
         
-        // REVEAL WALLS using cached silhouette chunks (Optimized pass)
+        // REVEAL WALLS using the live silhouette buffer
         this.sourceCtx.clearRect(0, 0, w, h);
-        this.sourceCtx.save();
-        this.sourceCtx.scale(this.resolutionScale, this.resolutionScale);
-        this.sourceCtx.translate(-this.parent.cameraX, -this.parent.cameraY);
-        
-        const startGX = Math.floor(this.parent.cameraX / this.chunkSize);
-        const endGX = Math.floor((this.parent.cameraX + (w / this.resolutionScale)) / this.chunkSize);
-        const startGY = Math.floor(this.parent.cameraY / this.chunkSize);
-        const endGY = Math.floor((this.parent.cameraY + (h / this.resolutionScale)) / this.chunkSize);
-
-        for (let gy = startGY; gy <= endGY; gy++) {
-            for (let gx = startGX; gx <= endGX; gx++) {
-                const sil = this.silhouetteChunks.get(`${gx},${gy}`);
-                if (sil) {
-                    this.sourceCtx.drawImage(sil.canvas, gx * this.chunkSize, gy * this.chunkSize);
-                }
-            }
-        }
-        this.sourceCtx.restore();
+        this.sourceCtx.drawImage(this.silCanvas, 0, 0, w, h);
 
         // Color the collective silhouette mask
         this.sourceCtx.save();
@@ -524,6 +519,7 @@ export class LightingRenderer {
         sctx.fillRect(this.parent.cameraX, this.parent.cameraY, w / this.resolutionScale, h / this.resolutionScale);
 
         const angle = Math.atan2(source.direction.y, source.direction.x);
+        // Shadows are now camera-invariant (flat on ground), so we remove camera quantization from the version
         const bakeVersion = `${worldVersion}_${Math.round(angle * 100)}_${type}`;
         const startGX = Math.floor(this.parent.cameraX / this.chunkSize);
         const endGX = Math.floor((this.parent.cameraX + (w / this.resolutionScale)) / this.chunkSize);
@@ -596,38 +592,20 @@ export class LightingRenderer {
         entities.push(...this.parent.enemies);
         entities.forEach(e => { if (e.active) this.renderEntityShadow(mctx, e, source.direction, source.shadowLen); });
 
-        mctx.globalCompositeOperation = 'destination-out';
-        
-        // Use cached silhouette chunks to avoid redrawing full world 3x per frame
-        for (let gy = startGY; gy <= endGY; gy++) {
-            for (let gx = startGX; gx <= endGX; gx++) {
-                const key = `${gx},${gy}`;
-                let sil = this.silhouetteChunks.get(key);
-                if (!sil) {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = this.chunkSize; canvas.height = this.chunkSize;
-                    sil = { canvas, ctx: canvas.getContext('2d')!, version: -1 };
-                    this.silhouetteChunks.set(key, sil);
-                }
-                if (sil.version !== worldVersion) {
-                    sil.ctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
-                    sil.ctx.save();
-                    sil.ctx.translate(-gx * this.chunkSize, -gy * this.chunkSize);
-                    this.parent.worldRenderer.renderAsSilhouette(sil.ctx, gx * this.chunkSize, gy * this.chunkSize);
-                    sil.ctx.restore();
-                    sil.version = worldVersion;
-                }
-                // Apply a tiny offset to the silhouette mask to preserve shadow roots
-                const maskOffsetX = -source.direction.x * 2;
-                const maskOffsetY = -source.direction.y * 2;
-                mctx.drawImage(sil.canvas, gx * this.chunkSize + maskOffsetX, gy * this.chunkSize + maskOffsetY);
-            }
-        }
-
         const alphaShadow = this.parent.simulation.physicsSystem.alpha;
         this.parent.simulation.renderSystem.renderSilhouettes(this.parent.simulation.entityManager, mctx, alphaShadow, '#ffffff', this.parent.cameraX, this.parent.cameraY);
 
+        mctx.restore(); // Back to screen-space (0..w, 0..h)
+
+        // PUNCH HOLES for walls using the pre-rendered screen-space silhouette buffer
+        mctx.save();
+        mctx.globalCompositeOperation = 'destination-out';
+        const screenOffset = 2 * this.resolutionScale;
+        const maskOffsetX = -source.direction.x * screenOffset;
+        const maskOffsetY = -source.direction.y * screenOffset;
+        mctx.drawImage(this.silCanvas, maskOffsetX, maskOffsetY);
         mctx.restore();
+
         sctx.restore();
         sctx.save();
         sctx.globalCompositeOperation = 'destination-out';
@@ -677,24 +655,18 @@ export class LightingRenderer {
                     const hpData = heatMap ? heatMap.getTileHP(tx, ty) : null;
                     const isDamaged = heatMap?.hasTileData(tx, ty);
 
-                    // Projection of the wall TOP
-                    const v0 = ProjectionUtils.projectPoint(x, y, wallHeight, cameraCenterX, cameraCenterY);
-                    const v1 = ProjectionUtils.projectPoint(x + tileSize, y, wallHeight, cameraCenterX, cameraCenterY);
-                    const v2 = ProjectionUtils.projectPoint(x + tileSize, y + tileSize, wallHeight, cameraCenterX, cameraCenterY);
-                    const v3 = ProjectionUtils.projectPoint(x, y + tileSize, wallHeight, cameraCenterX, cameraCenterY);
-
-                    // Projection of the shadow cast BY the wall top
-                    const s0 = { x: v0.x + dx, y: v0.y + dy };
-                    const s1 = { x: v1.x + dx, y: v1.y + dy };
-                    const s2 = { x: v2.x + dx, y: v2.y + dy };
-                    const s3 = { x: v3.x + dx, y: v3.y + dy };
+                    // Camera-invariant ground shadow points (static relative to tile base)
+                    // We project from the base ground points as if the light is casting a flat shadow
+                    const s0 = { x: x + dx, y: y + dy };
+                    const s1 = { x: (x + tileSize) + dx, y: y + dy };
+                    const s2 = { x: (x + tileSize) + dx, y: (y + tileSize) + dy };
+                    const s3 = { x: x + dx, y: (y + tileSize) + dy };
 
                     if (!isDamaged) {
-                        // Healthy Wall: High-performance individual quad fills
+                        // Healthy Wall: Cast flat shadow footprint on the ground
                         this.drawSolidWallShadow(sctx, x - worldX, y - worldY, tileSize, s0, s1, s2, s3, worldX, worldY);
                     } else if (hpData) {
                         // DAMAGED PATH: Render each sub-tile volume individually
-                        // While slightly slower than a single path, it is 100% robust against winding artifacts
                         const subDiv = 10;
                         for (let sy = 0; sy < subDiv; sy++) {
                             const fsy0 = sy / subDiv; const fsy1 = (sy + 1) / subDiv;
@@ -702,10 +674,12 @@ export class LightingRenderer {
                                 const idx = sy * subDiv + sx;
                                 if (hpData[idx] > 0) {
                                     const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
-                                    const ps0 = this.lerpQuad(s0, s1, s2, s3, fsx0, fsy0);
-                                    const ps1 = this.lerpQuad(s0, s1, s2, s3, fsx1, fsy0);
-                                    const ps2 = this.lerpQuad(s0, s1, s2, s3, fsx1, fsy1);
-                                    const ps3 = this.lerpQuad(s0, s1, s2, s3, fsx0, fsy1);
+                                    
+                                    // Project sub-tile top shadow point from its ground base
+                                    const ps0 = { x: x + fsx0 * tileSize + dx, y: y + fsy0 * tileSize + dy };
+                                    const ps1 = { x: x + fsx1 * tileSize + dx, y: y + fsy0 * tileSize + dy };
+                                    const ps2 = { x: x + fsx1 * tileSize + dx, y: y + fsy1 * tileSize + dy };
+                                    const ps3 = { x: x + fsx0 * tileSize + dx, y: y + fsy1 * tileSize + dy };
 
                                     const bx0 = x + fsx0 * tileSize; const bx1 = x + fsx1 * tileSize;
                                     const by0 = y + fsy0 * tileSize; const by1 = y + fsy1 * tileSize;
@@ -718,7 +692,7 @@ export class LightingRenderer {
                                     sctx.lineTo(bx0 - worldX, by1 - worldY);
                                     sctx.fill();
 
-                                    // Bridged sides
+                                    // Bridged sides (Static Footprint to Static Shadow)
                                     sctx.beginPath();
                                     sctx.moveTo(bx0 - worldX, by0 - worldY); sctx.lineTo(bx1 - worldX, by0 - worldY);
                                     sctx.lineTo(ps1.x - worldX, ps1.y - worldY); sctx.lineTo(ps0.x - worldX, ps0.y - worldY);
@@ -760,39 +734,33 @@ export class LightingRenderer {
         sctx.lineTo(lx + ts, ly);
         sctx.lineTo(lx + ts, ly + ts);
         sctx.lineTo(lx, ly + ts);
-        sctx.closePath();
         sctx.fill();
 
-        // 2. Bridged sides
+        // 2. Bridged sides (Static Footprint to Static Shadow)
         sctx.beginPath();
         sctx.moveTo(lx, ly); sctx.lineTo(lx + ts, ly);
         sctx.lineTo(s1.x - worldX, s1.y - worldY); sctx.lineTo(s0.x - worldX, s0.y - worldY);
-        sctx.closePath();
         sctx.fill();
 
         sctx.beginPath();
         sctx.moveTo(lx + ts, ly); sctx.lineTo(lx + ts, ly + ts);
         sctx.lineTo(s2.x - worldX, s2.y - worldY); sctx.lineTo(s1.x - worldX, s1.y - worldY);
-        sctx.closePath();
         sctx.fill();
 
         sctx.beginPath();
         sctx.moveTo(lx + ts, ly + ts); sctx.lineTo(lx, ly + ts);
         sctx.lineTo(s3.x - worldX, s3.y - worldY); sctx.lineTo(s2.x - worldX, s2.y - worldY);
-        sctx.closePath();
         sctx.fill();
 
         sctx.beginPath();
         sctx.moveTo(lx, ly + ts); sctx.lineTo(lx, ly);
         sctx.lineTo(s0.x - worldX, s0.y - worldY); sctx.lineTo(s3.x - worldX, s3.y - worldY);
-        sctx.closePath();
         sctx.fill();
 
-        // 3. The top face's shadow
+        // 3. Ground shadow face
         sctx.beginPath();
         sctx.moveTo(s0.x - worldX, s0.y - worldY); sctx.lineTo(s1.x - worldX, s1.y - worldY);
         sctx.lineTo(s2.x - worldX, s2.y - worldY); sctx.lineTo(s3.x - worldX, s3.y - worldY);
-        sctx.closePath();
         sctx.fill();
     }
 
@@ -908,7 +876,6 @@ export class LightingRenderer {
 
     public clearCache(): void {
         this.shadowChunks.clear();
-        this.silhouetteChunks.clear();
         this.lightPolygonCache.clear();
     }
 }

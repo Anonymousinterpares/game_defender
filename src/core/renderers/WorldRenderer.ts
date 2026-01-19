@@ -283,9 +283,7 @@ export class WorldRenderer {
         this.renderWallTop(ctx, tx, ty, v0, v1, v2, v3, material, topColorBase);
     }
 
-    public renderAsSilhouette(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, color?: string): void {
-        // Ground is never silhouette, only walls.
-        this.renderSides(ctx, cameraX, cameraY);
+    public renderAsSilhouette(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, color: string = '#000000'): void {
         const viewWidth = window.innerWidth;
         const viewHeight = window.innerHeight;
         const centerX = cameraX + viewWidth / 2;
@@ -302,7 +300,32 @@ export class WorldRenderer {
                 if (tx < 0 || tx >= this.world.getWidth()) continue;
                 const material = this.world.getTile(tx, ty);
                 if (material === MaterialType.NONE) continue;
-                this.renderWallTopOnly(ctx, tx, ty, material, centerX, centerY);
+                
+                const worldX = tx * this.tileSize;
+                const worldY = ty * this.tileSize;
+                const ts = this.tileSize;
+
+                const v0 = ProjectionUtils.projectPoint(worldX, worldY, this.wallHeight, centerX, centerY);
+                const v1 = ProjectionUtils.projectPoint(worldX + ts, worldY, this.wallHeight, centerX, centerY);
+                const v2 = ProjectionUtils.projectPoint(worldX + ts, worldY + ts, this.wallHeight, centerX, centerY);
+                const v3 = ProjectionUtils.projectPoint(worldX, worldY + ts, this.wallHeight, centerX, centerY);
+
+                // Draw the side volume and top as a solid color for the mask
+                ctx.fillStyle = color;
+                
+                // Sides
+                const x0 = worldX; const y0 = worldY;
+                const x1 = worldX + ts; const y1 = worldY + ts;
+                if (v0.y > y0) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.lineTo(v1.x, v1.y); ctx.lineTo(v0.x, v0.y); ctx.fill(); }
+                if (v3.y < y1) { ctx.beginPath(); ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y); ctx.fill(); }
+                if (v0.x > x0) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); ctx.lineTo(v3.x, v3.y); ctx.lineTo(v0.x, v0.y); ctx.fill(); }
+                if (v1.x < x1) { ctx.beginPath(); ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v1.x, v1.y); ctx.fill(); }
+
+                // Top
+                ctx.beginPath();
+                ctx.moveTo(v0.x, v0.y); ctx.lineTo(v1.x, v1.y);
+                ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y);
+                ctx.fill();
             }
         }
     }
