@@ -45,7 +45,8 @@ export class HeatMap {
     private spreadRate: number = 0.1;
 
     private lastSimTime: number = 0;
-    private simInterval: number = 3;
+
+    private simInterval: number = 1; // Uniform update every frame
     private frameCount: number = 0;
     private fireAsset: HTMLImageElement | null = null;
     private worldRef: any = null;
@@ -55,8 +56,16 @@ export class HeatMap {
     private scratchCanvas: HTMLCanvasElement | null = null;
     private scratchCtx: CanvasRenderingContext2D | null = null;
 
+    // Zero-allocation scratch buffers
+    private scratchHeat: Float32Array;
+    private scratchFire: Float32Array;
+    private scratchMolten: Float32Array;
+
     constructor(private tileSize: number) {
         this.lastSimTime = performance.now();
+        this.scratchHeat = new Float32Array(100); // 10x10
+        this.scratchFire = new Float32Array(100);
+        this.scratchMolten = new Float32Array(100);
     }
 
     public getTileSize(): number {
@@ -171,19 +180,21 @@ export class HeatMap {
         this.activeTiles.forEach(key => {
             const fData = this.fireData.get(key);
             const hData = this.heatData.get(key);
-            if (!fData && !hData) return;
+            const mlData = this.moltenData.get(key);
+            if (!fData && !hData && !mlData) return;
 
             const [tx, ty] = key.split(',').map(Number);
             const worldX = tx * this.tileSize;
             const worldY = ty * this.tileSize;
 
-            const dataLen = fData ? fData.length : (hData ? hData.length : 0);
+            const dataLen = this.subDiv * this.subDiv;
             for (let i = 0; i < dataLen; i++) {
                 const fire = fData ? fData[i] : 0;
                 const heat = hData ? hData[i] : 0;
+                const molten = mlData ? mlData[i] : 0;
 
                 // Lower threshold to 0.3 for red glow on heated walls
-                if (fire > 0.1 || heat > 0.3) {
+                if (fire > 0.1 || heat > 0.3 || molten > 0.1) {
                     const subX = i % this.subDiv;
                     const subY = Math.floor(i / this.subDiv);
                     const px = worldX + (subX + 0.5) * (this.tileSize / this.subDiv);
@@ -202,8 +213,6 @@ export class HeatMap {
                     cluster.x += px;
                     cluster.y += py;
 
-                    const mData = this.moltenData.get(key);
-                    const molten = mData ? mData[i] : 0;
                     const inst = Math.max(fire, (heat - 0.2) * 1.5, molten);
                     cluster.intensity += inst;
                     cluster.count++;
@@ -331,7 +340,9 @@ export class HeatMap {
             fData = new Float32Array(this.subDiv * this.subDiv);
             this.fireData.set(key, fData);
         }
-        if (fData[idx] === 0) fData[idx] = 0.1;
+        if (fData[idx] === 0) {
+            fData[idx] = 0.1;
+        }
         this.activeTiles.add(key);
     }
 
@@ -469,9 +480,8 @@ export class HeatMap {
 
     public update(dt: number): void {
         this.frameCount++;
-        if (this.frameCount % this.simInterval !== 0) return;
-
-        const effectiveDT = dt * this.simInterval;
+        
+        const effectiveDT = dt; // Continuous update
         const toRemove: string[] = [];
         const soundMgr = SoundManager.getInstance();
 
@@ -486,7 +496,6 @@ export class HeatMap {
             }
 
             const data = this.heatData.get(key);
-
             if (data) {
                 WeatherManager.getInstance().removeSnowFromHeat(tx, ty, data, this.tileSize);
             }
@@ -501,9 +510,10 @@ export class HeatMap {
             let hasActivity = false;
             let burningSubTiles = 0;
 
-            const nextData = data ? new Float32Array(data) : new Float32Array(this.subDiv * this.subDiv);
-            const nextFire = fData ? new Float32Array(fData) : null;
-            const nextMolten = mlData ? new Float32Array(mlData) : (this.hasMetal(mData) ? new Float32Array(this.subDiv * this.subDiv) : null);
+            // Zero-allocation scratch preparation
+            if (data) this.scratchHeat.set(data); else this.scratchHeat.fill(0);
+            if (fData) this.scratchFire.set(fData); else this.scratchFire.fill(0);
+            if (mlData) this.scratchMolten.set(mlData); else this.scratchMolten.fill(0);
 
             for (let y = 0; y < this.subDiv; y++) {
                 for (let x = 0; x < this.subDiv; x++) {
@@ -512,7 +522,7 @@ export class HeatMap {
                     const material = mData ? mData[idx] : MaterialType.NONE;
 
                     // --- HEAT LOGIC ---
-                    const val = nextData[idx];
+                    const val = this.scratchHeat[idx];
                     if (val > 0) {
                         let sum = val;
                         let count = 1;
@@ -523,35 +533,26 @@ export class HeatMap {
                             let nSx = x + nx;
                             let nSy = y + ny;
 
-                            // Local neighbor
                             if (nSx >= 0 && nSx < this.subDiv && nSy >= 0 && nSy < this.subDiv) {
                                 sum += data![nSy * this.subDiv + nSx];
                                 count++;
                                 continue;
                             }
 
-                            // Boundary Logic
                             const offsetTx = (nSx < 0 ? -1 : (nSx >= this.subDiv ? 1 : 0));
                             const offsetTy = (nSy < 0 ? -1 : (nSy >= this.subDiv ? 1 : 0));
-
                             const nTx = tx + offsetTx;
                             const nTy = ty + offsetTy;
 
-                            // Skip world boundaries
                             if (nTx <= 0 || nTx >= this.widthTiles - 1 || nTy <= 0 || nTy >= this.heightTiles - 1) continue;
 
                             const nKey = `${nTx},${nTy}`;
                             let nd = this.heatData.get(nKey);
 
-                            // Wake up logic: if we are hot, ensure neighbor exists and is active
-                            if (isHot) {
-                                if (!nd) {
-                                    nd = new Float32Array(this.subDiv * this.subDiv);
-                                    this.heatData.set(nKey, nd);
-                                }
-                                if (!this.activeTiles.has(nKey)) {
-                                    this.activeTiles.add(nKey);
-                                }
+                            if (isHot && !nd && !this.activeTiles.has(nKey)) {
+                                nd = new Float32Array(this.subDiv * this.subDiv);
+                                this.heatData.set(nKey, nd);
+                                this.activeTiles.add(nKey);
                             }
 
                             if (nd) {
@@ -562,12 +563,11 @@ export class HeatMap {
                             }
                         }
                         const avg = sum / count;
-                        nextData[idx] = val + (avg - val) * this.spreadRate;
-                        nextData[idx] = Math.max(0, nextData[idx] - this.decayRate * effectiveDT);
-                        if (nextData[idx] > 0.01) hasActivity = true;
+                        this.scratchHeat[idx] = val + (avg - val) * this.spreadRate;
+                        this.scratchHeat[idx] = Math.max(0, this.scratchHeat[idx] - this.decayRate * effectiveDT);
+                        if (this.scratchHeat[idx] > 0.01) hasActivity = true;
 
-                        // Vaporization logic
-                        if (nextData[idx] > 0.95 && !isDestroyed) {
+                        if (this.scratchHeat[idx] > 0.95 && !isDestroyed) {
                             wData[idx] += effectiveDT;
                             const mat = material as MaterialType;
                             if (wData[idx] >= MATERIAL_PROPS[mat].vaporizeTime) {
@@ -577,23 +577,20 @@ export class HeatMap {
                                     this.worldRef.notifyTileChange(tx, ty);
                                     this.worldRef.checkTileDestruction(tx, ty);
                                 }
-                                // If metal vaporizes, it IMMEDIATELY turns into a full molten puddle
-                                if (mat === MaterialType.METAL && nextMolten) {
-                                    nextMolten[idx] = 1.0;
+                                if (mat === MaterialType.METAL) {
+                                    this.scratchMolten[idx] = 1.0;
                                     hasActivity = true;
                                 }
-                                nextData[idx] = 0.5; // Residue heat
+                                this.scratchHeat[idx] = 0.5;
                             }
                         } else {
                             wData[idx] = Math.max(0, wData[idx] - effectiveDT);
                         }
                     }
 
-                    // --- METAL MELTING (Wall as Source) ---
-                    if (material === MaterialType.METAL && nextData[idx] > 0.5 && !isDestroyed) {
-                        // Hot wall leaks molten metal into empty/destroyed neighbors
-                        // Doubled leak rate (0.8 vs 0.4) to increase area
-                        const leakAmount = (nextData[idx] - 0.4) * 0.8 * effectiveDT;
+                    // --- METAL MELTING ---
+                    if (material === MaterialType.METAL && this.scratchHeat[idx] > 0.5 && !isDestroyed) {
+                        const leakAmount = (this.scratchHeat[idx] - 0.4) * 0.8 * effectiveDT;
                         const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]];
 
                         for (const [nx, ny] of neighbors) {
@@ -612,7 +609,6 @@ export class HeatMap {
                             const nhData = this.hpData.get(nKey);
                             const nIdx = ny_sub * this.subDiv + nx_sub;
 
-                            // ONLY leak into empty/destroyed space
                             if (!nhData || nhData[nIdx] <= 0) {
                                 let nmData = this.moltenData.get(nKey);
                                 if (!nmData) {
@@ -621,21 +617,17 @@ export class HeatMap {
                                     this.activeTiles.add(nKey);
                                 }
                                 nmData[nIdx] = Math.min(2.0, nmData[nIdx] + leakAmount);
+                                hasActivity = true;
                             }
                         }
                     }
 
-                    // --- MOLTEN LOGIC (Cooling, Spreading & Baking) ---
-                    // Only sub-tiles with NO HP (empty/destroyed) can hold/process puddles
-                    if (nextMolten && nextMolten[idx] > 0 && isDestroyed) {
+                    // --- MOLTEN LOGIC ---
+                    if (this.scratchMolten[idx] > 0 && isDestroyed) {
                         hasActivity = true;
-
-                        const pressure = nextMolten[idx] + (nextData[idx] * 0.5);
-                        if (pressure > 0.15) { // Lowered threshold for easier flow
-                            // Diagonal neighbors added for corner rounding
+                        const pressure = this.scratchMolten[idx] + (this.scratchHeat[idx] * 0.5);
+                        if (pressure > 0.15) {
                             const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]];
-                            if (Math.random() < 0.5) neighbors.reverse();
-
                             for (const [nx, ny] of neighbors) {
                                 let nx_sub = x + nx;
                                 let ny_sub = y + ny;
@@ -652,7 +644,6 @@ export class HeatMap {
                                 const nIdx = ny_sub * this.subDiv + nx_sub;
                                 const nhData = this.hpData.get(nKey);
 
-                                // Spill only into other empty spaces
                                 if (!nhData || nhData[nIdx] <= 0) {
                                     let n_nmData = this.moltenData.get(nKey);
                                     if (!n_nmData) {
@@ -660,123 +651,96 @@ export class HeatMap {
                                         this.moltenData.set(nKey, n_nmData);
                                         this.activeTiles.add(nKey);
                                     }
-
-                                    // Flow rate doubled again (2.0 vs 1.0) to increase spread
-                                    const flowRate = 2.0 * (1 + nextData[idx]);
+                                    const flowRate = 2.0 * (1 + this.scratchHeat[idx]);
                                     const spreadAmount = (pressure - 0.05) * flowRate * effectiveDT;
-
                                     if (spreadAmount > 0.001) {
                                         n_nmData[nIdx] = Math.min(2.0, n_nmData[nIdx] + spreadAmount);
-                                        nextMolten[idx] -= spreadAmount * 0.9;
+                                        this.scratchMolten[idx] -= spreadAmount * 0.9;
                                     }
                                 }
                             }
                         }
 
-                        // Bake into ground if cooled
-                        if (nextData[idx] < 0.2) {
+                        if (this.scratchHeat[idx] < 0.2) {
                             const worldX = tx * this.tileSize + (x + 0.5) * (this.tileSize / this.subDiv);
                             const worldY = ty * this.tileSize + (y + 0.5) * (this.tileSize / this.subDiv);
-                            // Decal size proportional to volume
-                            FloorDecalManager.getInstance().addCooledMetalMark(worldX, worldY, (this.tileSize / this.subDiv) * (0.5 + nextMolten[idx] * 2.0));
-                            nextMolten[idx] = 0;
+                            FloorDecalManager.getInstance().addCooledMetalMark(worldX, worldY, (this.tileSize / this.subDiv) * (0.5 + this.scratchMolten[idx] * 2.0));
+                            this.scratchMolten[idx] = 0;
                         }
                     }
 
-                    // --- FIRE LOGIC (WOOD ONLY) ---
-                    if (nextFire && material === MaterialType.WOOD) {
-                        if (nextFire[idx] > 0) {
-                            hasActivity = true;
-                            burningSubTiles++;
-                            nextFire[idx] += effectiveDT * 0.5; // Fire grows
-                            nextData[idx] = Math.min(1.0, nextData[idx] + nextFire[idx] * 0.2); // Fire heats up tile
+                    // --- FIRE LOGIC ---
+                    if (this.scratchFire[idx] > 0 && material === MaterialType.WOOD) {
+                        hasActivity = true;
+                        burningSubTiles++;
+                        this.scratchFire[idx] += effectiveDT * 0.5;
+                        this.scratchHeat[idx] = Math.min(1.0, this.scratchHeat[idx] + this.scratchFire[idx] * 0.2);
 
-                            // Damage block
-                            if (hData) hData[idx] -= effectiveDT * 10; // 1 second to destroy
+                        if (hData) hData[idx] -= effectiveDT * 10;
 
-                            // Spread fire every 100ms per layer (approx)
-                            if (nextFire[idx] > 0.3) {
-                                const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-                                for (const [nx, ny] of neighbors) {
-                                    let nSx = x + nx;
-                                    let nSy = y + ny;
-
-                                    if (nSx >= 0 && nSx < this.subDiv && nSy >= 0 && nSy < this.subDiv) {
-                                        // Local neighbor
-                                        const nIdx = nSy * this.subDiv + nSx;
-                                        if (nextFire[nIdx] === 0 && hData && hData[nIdx] > 0) {
-                                            nextFire[nIdx] = 0.05;
-                                        }
-                                        continue;
+                        if (this.scratchFire[idx] > 0.3) {
+                            const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+                            for (const [nx, ny] of neighbors) {
+                                let nSx = x + nx;
+                                let nSy = y + ny;
+                                if (nSx >= 0 && nSx < this.subDiv && nSy >= 0 && nSy < this.subDiv) {
+                                    const nIdx = nSy * this.subDiv + nSx;
+                                    if (this.scratchFire[nIdx] === 0 && hData && hData[nIdx] > 0) {
+                                        this.scratchFire[nIdx] = 0.05;
                                     }
-
-                                    // Inter-tile propagation
-                                    const offsetTx = (nSx < 0 ? -1 : (nSx >= this.subDiv ? 1 : 0));
-                                    const offsetTy = (nSy < 0 ? -1 : (nSy >= this.subDiv ? 1 : 0));
-
-                                    const nTx = tx + offsetTx;
-                                    const nTy = ty + offsetTy;
-
-                                    // Skip world boundaries
+                                } else {
+                                    const nTx = tx + (nSx < 0 ? -1 : (nSx >= this.subDiv ? 1 : 0));
+                                    const nTy = ty + (nSy < 0 ? -1 : (nSy >= this.subDiv ? 1 : 0));
                                     if (nTx <= 0 || nTx >= this.widthTiles - 1 || nTy <= 0 || nTy >= this.heightTiles - 1) continue;
-
                                     const nKey = `${nTx},${nTy}`;
-                                    // Need to check material of neighbor
-                                    // Since we don't have write access to neighbor's nextFire loop easily here without locking
-                                    // We will just Ignite the neighbor tile if it exists. 
-                                    // The ignite() method handles activation.
-
-                                    // Calculate neighbor sub-index
                                     const wrappedSx = (nSx + this.subDiv) % this.subDiv;
                                     const wrappedSy = (nSy + this.subDiv) % this.subDiv;
                                     const nIdx = wrappedSy * this.subDiv + wrappedSx;
-
-                                    // To properly ignite, we need access to neighbor data.
-                                    // But we are activeTile iteration. We can just force ignite.
-                                    // However, we should check if it CAN burn to avoid waking tiles unnecessarily.
                                     const nmData = this.materialData.get(nKey);
                                     if (nmData && MATERIAL_PROPS[nmData[nIdx] as MaterialType].flammable) {
-                                        // Ignite neighbor!
                                         this.ignite(nTx, nTy, nIdx);
                                     }
                                 }
                             }
+                        }
 
-                            if (hData && hData[idx] <= 0) {
-                                if (this.worldRef) {
-                                    this.worldRef.markMeshDirty();
-                                    this.worldRef.notifyTileChange(tx, ty);
-                                    this.worldRef.checkTileDestruction(tx, ty);
-                                }
-                                nextFire[idx] = 0;
-                                nextData[idx] = 0;
+                        if (hData && hData[idx] <= 0) {
+                            if (this.worldRef) {
+                                this.worldRef.markMeshDirty();
+                                this.worldRef.notifyTileChange(tx, ty);
+                                this.worldRef.checkTileDestruction(tx, ty);
                             }
+                            this.scratchFire[idx] = 0;
+                            this.scratchHeat[idx] = 0.2;
                         }
                     }
                 }
             }
 
-            // Trigger fire sound for this tile if it's burning
             if (burningSubTiles > 0) {
                 const worldX = tx * this.tileSize + this.tileSize / 2;
                 const worldY = ty * this.tileSize + this.tileSize / 2;
                 soundMgr.updateAreaSound('fire', worldX, worldY, burningSubTiles);
             }
 
-            if (data) data.set(nextData);
-            if (fData && nextFire) fData.set(nextFire);
-            if (nextMolten) {
-                // Only save if there's actual molten metal
-                let hasMolten = false;
-                for (let i = 0; i < nextMolten.length; i++) if (nextMolten[i] > 0) { hasMolten = true; break; }
-                if (hasMolten) this.moltenData.set(key, nextMolten);
-                else this.moltenData.delete(key);
-            }
+            // Save scratch buffers back to logical state
+            if (data) data.set(this.scratchHeat);
+            if (fData) fData.set(this.scratchFire);
+            if (mlData) mlData.set(this.scratchMolten);
+
             if (!hasActivity) {
-                toRemove.push(key);
-                const mm = (window as any).MultiplayerManager?.getInstance();
-                if (!mm || mm.isHost) {
-                    this.recentlyDeactivated.add(key);
+                // Check if logic data has actually settled before deactivating
+                let hasSettled = true;
+                if (data) { for (let i = 0; i < data.length; i++) if (data[i] > 0.01) { hasSettled = false; break; } }
+                if (hasSettled && fData) { for (let i = 0; i < fData.length; i++) if (fData[i] > 0.01) { hasSettled = false; break; } }
+                if (hasSettled && mlData) { for (let i = 0; i < mlData.length; i++) if (mlData[i] > 0.01) { hasSettled = false; break; } }
+
+                if (hasSettled) {
+                    toRemove.push(key);
+                    const mm = (window as any).MultiplayerManager?.getInstance();
+                    if (!mm || mm.isHost) {
+                        this.recentlyDeactivated.add(key);
+                    }
                 }
             }
         });
@@ -1065,17 +1029,26 @@ export class HeatMap {
 
             if (d.h !== undefined) {
                 let h = this.heatData.get(key);
-                if (!h) { h = new Float32Array(this.subDiv * this.subDiv); this.heatData.set(key, h); }
+                if (!h) { 
+                    h = new Float32Array(this.subDiv * this.subDiv); 
+                    this.heatData.set(key, h); 
+                }
                 this.decompressFloatArray(d.h, h);
             }
             if (d.f !== undefined) {
                 let f = this.fireData.get(key);
-                if (!f) { f = new Float32Array(this.subDiv * this.subDiv); this.fireData.set(key, f); }
+                if (!f) { 
+                    f = new Float32Array(this.subDiv * this.subDiv); 
+                    this.fireData.set(key, f); 
+                }
                 this.decompressFloatArray(d.f, f);
             }
             if (d.m !== undefined) {
                 let m = this.moltenData.get(key);
-                if (!m) { m = new Float32Array(this.subDiv * this.subDiv); this.moltenData.set(key, m); }
+                if (!m) { 
+                    m = new Float32Array(this.subDiv * this.subDiv); 
+                    this.moltenData.set(key, m); 
+                }
                 this.decompressFloatArray(d.m, m);
             }
             if (d.s) {

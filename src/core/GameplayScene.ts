@@ -227,8 +227,6 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     }
 
     private updateLightClusters(): void {
-        const freq = ConfigManager.getInstance().get<number>('Lighting', 'updateFrequency') || 3;
-        if (this.lightUpdateCounter % freq !== 0) return;
         if (this.heatMap) {
             const clusters = this.heatMap.getFireClusters(128);
             LightManager.getInstance().updateFireLights(clusters);
