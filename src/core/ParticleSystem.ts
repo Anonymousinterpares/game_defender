@@ -52,6 +52,9 @@ export class ParticleSystem {
 
     private spriteCache: Map<string, HTMLCanvasElement> = new Map();
 
+    private smokeCanvas: HTMLCanvasElement | null = null;
+    private smokeCtx: CanvasRenderingContext2D | null = null;
+
     private worker: Worker;
     private isWorkerBusy: boolean = false;
 
@@ -636,24 +639,37 @@ export class ParticleSystem {
         const h = ctx.canvas.height;
         const margin = 100;
 
+        const config = ConfigManager.getInstance();
+        const resScale = config.get<number>('Visuals', 'smokeResolutionScale') || 0.5;
+        const maxSmoke = config.get<number>('Visuals', 'smokeMaxParticles') || 5000;
+
+        // Initialize or resize smoke buffer if needed
+        if (!this.smokeCanvas || this.smokeCanvas.width !== Math.ceil(w * resScale) || this.smokeCanvas.height !== Math.ceil(h * resScale)) {
+            this.smokeCanvas = document.createElement('canvas');
+            this.smokeCanvas.width = Math.ceil(w * resScale);
+            this.smokeCanvas.height = Math.ceil(h * resScale);
+            this.smokeCtx = this.smokeCanvas.getContext('2d', { alpha: true })!;
+        }
+
+        const sCtx = this.smokeCtx!;
+        sCtx.clearRect(0, 0, this.smokeCanvas.width, this.smokeCanvas.height);
+        sCtx.save();
+        sCtx.scale(resScale, resScale);
+        sCtx.translate(-camX, -camY);
+
         let currentAlpha = 1.0;
         let currentGCO = 'source-over';
         ctx.globalAlpha = 1.0;
         ctx.globalCompositeOperation = 'source-over';
 
-        // Reset Buckets
-        // We use a flattened array for buckets to avoid GC: buckets[colorIdx * 6 + alphaIdx]
-        // 6 Alpha buckets: 0.2, 0.4, 0.6, 0.8, 1.0, >1.0
-        // We need a way to store indices. A jagged array is easiest but allocates.
-        // To be zero-alloc, we can use a linked-list in typed arrays or just accept the tiny overhead of pushing numbers 
-        // since we are reducing iterations from 125,000 to 5,000.
-        // Let's use a map of Arrays for now, but clear them instead of re-creating.
         if (!this.buckets) {
             this.buckets = new Map();
         }
 
         // Clear existing buckets
         this.buckets.forEach(bucket => bucket.count = 0);
+
+        let smokeCount = 0;
 
         for (let j = 0; j < this.activeCount; j++) {
             const i = this.activeIndices[j];
@@ -690,29 +706,28 @@ export class ParticleSystem {
                         ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
                     }
                 } else if (pType === ParticleType.SMOKE) {
+                    // BUDGETING: Skip smoke if over limit
+                    smokeCount++;
+                    if (smokeCount > maxSmoke) continue;
+
                     const colorStr = this.colorPalette[colorIdx];
                     const isBlack = colorStr === '#000' || colorStr === '#111';
 
                     const targetAlpha = Math.max(0, lifeRatio * (isBlack ? 0.4 : 0.25));
-                    if (Math.abs(currentAlpha - targetAlpha) > 0.01) {
-                        ctx.globalAlpha = currentAlpha = targetAlpha;
-                    }
-                    if (currentGCO !== 'source-over') {
-                        ctx.globalCompositeOperation = currentGCO = 'source-over';
-                    }
-
+                    
+                    // Draw to LOW-RES buffer
+                    sCtx.globalAlpha = targetAlpha;
                     const sprite = this.spriteCache.get(isBlack ? 'smoke_black' : 'smoke_soft');
                     if (sprite) {
                         const r = this.radius[i];
-                        ctx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
+                        sCtx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
 
-                        // Triple-layer for extreme density if it's very fresh black smoke
                         if (isBlack && lifeRatio > 0.7) {
-                            ctx.drawImage(sprite, ix - r * 0.6, iy - r * 0.6, r * 1.2, r * 1.2);
+                            sCtx.drawImage(sprite, ix - r * 0.6, iy - r * 0.6, r * 1.2, r * 1.2);
                         }
                     }
                 } else {
-                    // Standard solid particles - BUCKET THEM
+                    // Standard solid particles - BUCKET THEM for high-res pass
                     const pAlpha = Math.max(0, lifeRatio);
                     const alphaIdx = Math.min(5, Math.ceil(pAlpha * 5)); // 1..5
                     const bucketKey = (colorIdx << 3) | alphaIdx; // Simple hash
@@ -785,7 +800,17 @@ export class ParticleSystem {
             }
         }
 
-        // Render Buckets
+        // COMPOSITE SMOKE BUFFER BACK
+        sCtx.restore();
+        ctx.save();
+        ctx.globalAlpha = 1.0;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.imageSmoothingEnabled = true;
+        // Draw the offscreen canvas at full size
+        ctx.drawImage(this.smokeCanvas, camX, camY, w, h);
+        ctx.restore();
+
+        // Render Buckets (High-res particles)
         if (currentGCO !== 'source-over') {
             ctx.globalCompositeOperation = 'source-over';
         }

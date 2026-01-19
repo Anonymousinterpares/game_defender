@@ -14,6 +14,7 @@ export class RenderSystem implements System {
     public readonly id = 'render';
 
     private fireAsset: HTMLImageElement | null = null;
+    private glowCache: Map<string, HTMLCanvasElement> = new Map();
 
     constructor() { }
 
@@ -219,6 +220,29 @@ export class RenderSystem implements System {
         }
     }
 
+    private getGlowSprite(color: string, radius: number): HTMLCanvasElement {
+        const key = `${color}_${radius}`;
+        if (this.glowCache.has(key)) return this.glowCache.get(key)!;
+
+        const size = radius * 4;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d')!;
+
+        const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+        // Ensure color has alpha for the gradient
+        const baseColor = color.startsWith('rgba') ? color.replace(/[\d.]+\)$/, '0)') : color;
+        grad.addColorStop(0, color);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, size, size);
+
+        this.glowCache.set(key, canvas);
+        return canvas;
+    }
+
     private drawEnemy(
         ctx: CanvasRenderingContext2D,
         x: number,
@@ -236,15 +260,19 @@ export class RenderSystem implements System {
 
         ctx.save();
 
-        // Setup common styles
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = glowColor;
+        // Use pre-rendered glow instead of shadowBlur
+        const glow = this.getGlowSprite(glowColor, radius * 1.5);
+        ctx.globalCompositeOperation = 'screen';
+        ctx.drawImage(glow, x - radius * 3, y - radius * 3, radius * 6, radius * 6);
+        ctx.globalCompositeOperation = 'source-over';
+
         ctx.lineWidth = 2;
         ctx.strokeStyle = '#222';
 
         // 1. Draw Shape Body
         ctx.beginPath();
         if (shape === 'square') {
+            ctx.save();
             ctx.translate(x, y);
             ctx.rotate(rotation);
             ctx.rect(-radius, -radius, radius * 2, radius * 2);
@@ -253,7 +281,11 @@ export class RenderSystem implements System {
             grad.addColorStop(0, '#555');
             grad.addColorStop(1, color);
             ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
         } else if (shape === 'triangle') {
+            ctx.save();
             ctx.translate(x, y);
             ctx.rotate(rotation);
             ctx.moveTo(radius, 0);
@@ -265,7 +297,11 @@ export class RenderSystem implements System {
             grad.addColorStop(0, '#333');
             grad.addColorStop(1, color);
             ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
         } else if (shape === 'rocket') {
+            ctx.save();
             ctx.translate(x, y);
             ctx.rotate(rotation);
             ctx.moveTo(radius, 0);
@@ -274,52 +310,57 @@ export class RenderSystem implements System {
             ctx.lineTo(-radius, radius * 0.8);
             ctx.closePath();
             ctx.fillStyle = color;
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
         } else {
             // Circle (Default / Iron Style)
+            ctx.beginPath();
             ctx.arc(x, y, radius, 0, Math.PI * 2);
             const grad = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, radius);
             grad.addColorStop(0, '#757575');
             grad.addColorStop(0.6, '#434b4d');
             grad.addColorStop(1, '#2a2a2a');
             ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.stroke();
         }
-
-        ctx.fill();
-        ctx.stroke();
 
         // 2. Damage Flash Overlay
         if (damageFlash > 0) {
             ctx.save();
+            // Re-path for source-atop clipping if needed, but for simplicity:
             ctx.globalCompositeOperation = 'source-atop';
             ctx.fillStyle = `rgba(255, 0, 0, ${0.5 * (damageFlash / 0.2)})`;
-            ctx.fill(); // Re-fills the current path
+            // For circles it's easy, for others we need the path.
+            // Simplification: just fill a large rect, source-atop handles the mask.
+            ctx.fillRect(x - radius * 2, y - radius * 2, radius * 4, radius * 4);
             ctx.restore();
         }
 
         // 3. Eye / Core Detail
-        ctx.shadowBlur = 0;
-
         if (shape === 'circle') {
             // Glowing Ember Eye for Circle
             const eyeX = x + Math.cos(rotation) * 6;
             const eyeY = y + Math.sin(rotation) * 6;
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = '#ff4500';
+            const eyeGlow = this.getGlowSprite('#ff4500', 4);
+            ctx.globalCompositeOperation = 'screen';
+            ctx.drawImage(eyeGlow, eyeX - 8, eyeY - 8, 16, 16);
+            ctx.globalCompositeOperation = 'source-over';
             ctx.fillStyle = '#ff4500';
             ctx.beginPath();
             ctx.arc(eyeX, eyeY, 4, 0, Math.PI * 2);
             ctx.fill();
         } else {
             // Mechanical Center for others
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
             ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
             ctx.beginPath();
-            if (shape === 'square' || shape === 'triangle' || shape === 'rocket') {
-                // Determine center in local space (0,0)
-                ctx.arc(0, 0, radius * 0.3, 0, Math.PI * 2);
-            } else {
-                ctx.arc(x, y, radius * 0.3, 0, Math.PI * 2);
-            }
+            ctx.arc(0, 0, radius * 0.3, 0, Math.PI * 2);
             ctx.fill();
+            ctx.restore();
         }
 
         ctx.restore();
@@ -332,11 +373,17 @@ export class RenderSystem implements System {
 
         if (type === ProjectileType.MINE) {
             const pulse = isArmed ? Math.sin(Date.now() * 0.01) * 2 : 0;
+            const glowColor = isArmed ? '#ff3333' : '#ff0000';
+            const glow = this.getGlowSprite(glowColor, radius);
+            ctx.globalCompositeOperation = 'screen';
+            ctx.drawImage(glow, -radius * 2, -radius * 2, radius * 4, radius * 4);
+            ctx.globalCompositeOperation = 'source-over';
+
             ctx.fillStyle = '#333';
             ctx.beginPath();
             ctx.arc(0, 0, radius + 2, 0, Math.PI * 2);
             ctx.fill();
-            ctx.fillStyle = isArmed ? '#ff3333' : '#ff0000';
+            ctx.fillStyle = glowColor;
             ctx.beginPath();
             ctx.arc(0, 0, radius + pulse, 0, Math.PI * 2);
             ctx.fill();
@@ -351,7 +398,7 @@ export class RenderSystem implements System {
                 ctx.fillRect(px, py, w, h);
             };
 
-            // Simplified pixel art from Projectile.ts
+            // Simplified pixel art
             drawPixel(30, 4, 4, 4, "#cc2200"); // Nose
             drawPixel(22, 12, 20, 8, "#cc2200");
             drawPixel(14, 20, 36, 60, "#e8e8e8"); // Body
@@ -381,11 +428,12 @@ export class RenderSystem implements System {
         ctx.translate(x, y + yOffset);
 
         if (type === DropType.COIN) {
-            // Draw Gear (Coin)
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = '#ffd700';
-            ctx.fillStyle = '#cfaa6e'; // Brass gold
+            const glow = this.getGlowSprite('#ffd700', radius);
+            ctx.globalCompositeOperation = 'screen';
+            ctx.drawImage(glow, -radius * 2, -radius * 2, radius * 4, radius * 4);
+            ctx.globalCompositeOperation = 'source-over';
 
+            ctx.fillStyle = '#cfaa6e'; // Brass gold
             ctx.rotate(bobTime); // Spin
 
             // Gear shape
@@ -408,11 +456,13 @@ export class RenderSystem implements System {
             ctx.arc(0, 0, radius * 0.25, 0, Math.PI * 2);
             ctx.fill();
         } else {
-            // Booster (Glowing Crystal / Box)
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = '#3498db';
-            ctx.fillStyle = '#3498db';
+            // Booster
+            const glow = this.getGlowSprite('#3498db', radius);
+            ctx.globalCompositeOperation = 'screen';
+            ctx.drawImage(glow, -radius * 2, -radius * 2, radius * 4, radius * 4);
+            ctx.globalCompositeOperation = 'source-over';
 
+            ctx.fillStyle = '#3498db';
             ctx.beginPath();
             ctx.arc(0, 0, radius, 0, Math.PI * 2);
             ctx.fill();

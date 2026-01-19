@@ -116,6 +116,8 @@ export const MasterConfig: GameConfigSchema = {
   },
   Visuals: {
     enableSmoke: { value: true, type: 'boolean', description: 'Enable Smoke Effects (Wind Responsive)' },
+    smokeResolutionScale: { value: 0.5, type: 'number', min: 0.1, max: 1.0, step: 0.05, description: 'Smoke Resolution Scale (Performance)' },
+    smokeMaxParticles: { value: 5000, type: 'number', min: 100, max: 10000, step: 100, description: 'Max Smoke Particles' },
     fogOfWar: { value: false, type: 'boolean', description: 'Enable Fog of War' },
     segmentVisibilityRadius: { value: 5.0, type: 'number', min: 1, max: 20, step: 0.5, description: 'Visibility around segments' },
     coneAngle: { value: 60, type: 'number', min: 10, max: 180, step: 5, description: 'Vision Cone Angle (Degrees)' },
