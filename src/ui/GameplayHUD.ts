@@ -6,6 +6,7 @@ import { TurretUpgrade, ShieldUpgrade } from '../entities/upgrades/Upgrade';
 import { EventBus, GameEvent } from '../core/EventBus';
 import { SoundManager } from '../core/SoundManager';
 import { VERSION } from '../version';
+import { GPUDriver } from '../core/renderers/GPUDriver';
 
 export interface HUDParent {
     sceneManager: SceneManager;
@@ -265,6 +266,15 @@ export class GameplayHUD {
         let currentY = 20;
 
         if (showDebugInfo) {
+            const showGPU = ConfigManager.getInstance().get<boolean>('Debug', 'showGPUStatus');
+            if (showGPU) {
+                const isGPU = GPUDriver.getInstance().isReady();
+                ctx.fillStyle = isGPU ? '#0ff' : '#f0f';
+                ctx.font = 'bold 12px "Share Tech Mono"';
+                ctx.fillText(`MODE: ${isGPU ? 'GPU (ACCELERATED)' : 'CPU (FALLBACK)'}`, 10, currentY);
+                currentY += 15;
+            }
+
             ctx.fillStyle = '#fff';
             ctx.font = 'bold 12px "Share Tech Mono"';
             ctx.fillText(`VER: ${VERSION}`, 10, currentY);

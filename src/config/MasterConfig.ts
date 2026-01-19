@@ -99,6 +99,7 @@ export const MasterConfig: GameConfigSchema = {
     physics_logs: { value: false, type: 'boolean', description: 'Show detailed physics calculations' },
     devModeAlwaysOn: { value: true, type: 'boolean', description: 'Dev commands always active' },
     showLatency: { value: true, type: 'boolean', description: 'Show Network Latency' },
+    showGPUStatus: { value: true, type: 'boolean', description: 'Show GPU/CPU Rendering Status' },
     showVersionAndPos: { value: true, type: 'boolean', description: 'Show Version and Position in HUD' },
     enableEnemySpawning: { value: false, type: 'boolean', description: 'Enable Enemy Spawning' }
   },
