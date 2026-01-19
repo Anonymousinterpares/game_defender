@@ -4,6 +4,8 @@ import { WeatherManager } from '../WeatherManager';
 import { ConfigManager } from '../../config/MasterConfig';
 import { ProjectionUtils } from '../../utils/ProjectionUtils';
 import { WorldClock } from '../WorldClock';
+import { GPUDriver } from './GPUDriver';
+import { StaticGeometryBuffer } from './StaticGeometryBuffer';
 
 export class WorldRenderer {
     private world: World;
@@ -30,11 +32,18 @@ export class WorldRenderer {
     private meltedBatchWidth: number = 0;
     private meltedBatchHeight: number = 0;
 
+    // GPU Support
+    private staticBuffer: StaticGeometryBuffer | null = null;
+    private gpuRebuildTimer: any = null;
+
     constructor(world: World) {
         this.world = world;
         this.tileSize = world.getTileSize();
 
-        this.world.onTileChange((tx, ty) => this.invalidateGroundCache(tx, ty));
+        this.world.onTileChange((tx, ty) => {
+            this.invalidateGroundCache(tx, ty);
+            this.requestGPURebuild();
+        });
 
         this.scratchCanvas = document.createElement('canvas');
         this.scratchCanvas.width = this.chunkSize;
@@ -44,7 +53,24 @@ export class WorldRenderer {
         // Initialize batch canvas
         this.meltedBatchCanvas = document.createElement('canvas');
         this.meltedBatchCtx = this.meltedBatchCanvas.getContext('2d')!;
+
+        // Init GPU if available
+        if (GPUDriver.getInstance().isReady()) {
+            this.staticBuffer = new StaticGeometryBuffer();
+            this.requestGPURebuild(0); // Immediate first build
+        }
     }
+
+    private requestGPURebuild(delay: number = 100) {
+        if (!this.staticBuffer) return;
+        if (this.gpuRebuildTimer) clearTimeout(this.gpuRebuildTimer);
+        this.gpuRebuildTimer = setTimeout(() => {
+            const h = ConfigManager.getInstance().get<number>('World', 'wallHeight');
+            this.staticBuffer?.rebuild(this.world, h);
+            this.gpuRebuildTimer = null;
+        }, delay);
+    }
+
 
     public invalidateGroundCache(tx: number, ty: number): void {
         const gx = Math.floor((tx * this.tileSize) / this.chunkSize);
@@ -125,6 +151,30 @@ export class WorldRenderer {
         const centerX = cameraX + viewWidth / 2;
         const centerY = cameraY + viewHeight / 2;
 
+        const useGPU = this.staticBuffer && GPUDriver.getInstance().isReady();
+
+        if (useGPU) {
+            const driver = GPUDriver.getInstance();
+            driver.resize(viewWidth, viewHeight);
+            driver.clear();
+
+            const { sun, moon } = WorldClock.getInstance().getTimeState();
+            const activeLight = sun.active ? sun : (moon.active ? moon : null);
+
+            this.staticBuffer!.draw(
+                cameraX, cameraY, 
+                viewWidth, viewHeight, 
+                0.0015, // Perspective strength
+                activeLight ? activeLight.direction : {x: 0, y: -1},
+                activeLight ? activeLight.intensity : 0.5
+            );
+
+            // DRAW GPU LAYER onto 2D Context
+            // Since ctx is already translated by (-cameraX, -cameraY), 
+            // drawing the full-screen GPU canvas at (cameraX, cameraY) puts it at (0,0) screen space.
+            ctx.drawImage(driver.getCanvas(), cameraX, cameraY);
+        }
+
         const startTx = Math.floor(cameraX / this.tileSize);
         const endTx = Math.ceil((cameraX + viewWidth) / this.tileSize);
         const startTy = Math.floor(cameraY / this.tileSize);
@@ -136,7 +186,15 @@ export class WorldRenderer {
                 if (tx < 0 || tx >= this.world.getWidth()) continue;
                 const material = this.world.getTile(tx, ty);
                 if (material === MaterialType.NONE) continue;
-                this.renderWallSidesOnly(ctx, tx, ty, material, centerX, centerY);
+                
+                const heatMap = this.world.getHeatMap();
+                const isDamaged = heatMap?.hasTileData(tx, ty);
+
+                // If GPU is active, CPU only renders DAMAGED tiles.
+                // If GPU is NOT active, CPU renders ALL tiles (Full fallback).
+                if (!useGPU || isDamaged) {
+                    this.renderWallSidesOnly(ctx, tx, ty, material, centerX, centerY);
+                }
             }
         }
     }

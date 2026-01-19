@@ -3,6 +3,7 @@ import { ConfigManager } from '../config/MasterConfig';
 import { SceneManager } from './SceneManager';
 import { InputManager } from './InputManager';
 import { DevConsole } from './DevConsole';
+import { GPUDriver } from './renderers/GPUDriver';
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -43,13 +44,9 @@ export class Game {
   }
 
   private resize(): void {
-    // Fill the screen, or respect config? 
-    // For now, full screen canvas, but game logical view might be different.
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
-    
-    // Update config if needed or notify scenes
-    // ConfigManager.getInstance().set('World', 'screenWidth', this.canvas.width);
+    GPUDriver.getInstance().resize(this.canvas.width, this.canvas.height);
   }
 
   private loop(timestamp: number): void {
@@ -80,6 +77,7 @@ export class Game {
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
+    GPUDriver.getInstance().clear();
     this.sceneManager.render();
 
     // Render FPS if enabled
