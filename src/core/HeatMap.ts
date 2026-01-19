@@ -710,36 +710,46 @@ export class HeatMap {
                         }
                     }
 
-                    // --- FIRE LOGIC ---
+                    // --- FIRE LOGIC (Throttled to 15Hz for performance and speed control) ---
                     if (this.scratchFire[idx] > 0 && material === MaterialType.WOOD) {
                         hasActivity = true;
                         burningSubTiles++;
-                        this.scratchFire[idx] += effectiveDT * 0.5;
-                        this.scratchHeat[idx] = Math.min(1.0, this.scratchHeat[idx] + this.scratchFire[idx] * 0.2);
 
-                        if (hData) hData[idx] -= effectiveDT * 10;
+                        if (this.frameCount % 4 === 0) {
+                            const speedMult = ConfigManager.getInstance().get<number>('Fire', 'fireSpreadSpeed') || 0.4;
+                            const fireInc = effectiveDT * 0.5 * speedMult;
+                            this.scratchFire[idx] += fireInc;
+                            this.scratchHeat[idx] = Math.min(1.0, this.scratchHeat[idx] + this.scratchFire[idx] * 0.2);
 
-                        if (this.scratchFire[idx] > 0.3) {
-                            const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-                            for (const [nx, ny] of neighbors) {
-                                let nSx = x + nx;
-                                let nSy = y + ny;
-                                if (nSx >= 0 && nSx < this.subDiv && nSy >= 0 && nSy < this.subDiv) {
-                                    const nIdx = nSy * this.subDiv + nSx;
-                                    if (this.scratchFire[nIdx] === 0 && hData && hData[nIdx] > 0) {
-                                        this.scratchFire[nIdx] = 0.05;
-                                    }
-                                } else {
-                                    const nTx = tx + (nSx < 0 ? -1 : (nSx >= this.subDiv ? 1 : 0));
-                                    const nTy = ty + (nSy < 0 ? -1 : (nSy >= this.subDiv ? 1 : 0));
-                                    if (nTx <= 0 || nTx >= this.widthTiles - 1 || nTy <= 0 || nTy >= this.heightTiles - 1) continue;
-                                    const nKey = `${nTx},${nTy}`;
-                                    const wrappedSx = (nSx + this.subDiv) % this.subDiv;
-                                    const wrappedSy = (nSy + this.subDiv) % this.subDiv;
-                                    const nIdx = wrappedSy * this.subDiv + wrappedSx;
-                                    const nmData = this.materialData.get(nKey);
-                                    if (nmData && MATERIAL_PROPS[nmData[nIdx] as MaterialType].flammable) {
-                                        this.ignite(nTx, nTy, nIdx);
+                            // Slower wood destruction
+                            if (hData) hData[idx] -= effectiveDT * 2.5 * speedMult;
+
+                            if (this.scratchFire[idx] > 0.3) {
+                                const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+                                for (const [nx, ny] of neighbors) {
+                                    let nSx = x + nx;
+                                    let nSy = y + ny;
+                                    if (nSx >= 0 && nSx < this.subDiv && nSy >= 0 && nSy < this.subDiv) {
+                                        const nIdx = nSy * this.subDiv + nSx;
+                                        if (this.scratchFire[nIdx] === 0 && hData && hData[nIdx] > 0) {
+                                            if (Math.random() < 0.2 * speedMult) {
+                                                this.scratchFire[nIdx] = 0.05;
+                                            }
+                                        }
+                                    } else {
+                                        const nTx = tx + (nSx < 0 ? -1 : (nSx >= this.subDiv ? 1 : 0));
+                                        const nTy = ty + (nSy < 0 ? -1 : (nSy >= this.subDiv ? 1 : 0));
+                                        if (nTx <= 0 || nTx >= this.widthTiles - 1 || nTy <= 0 || nTy >= this.heightTiles - 1) continue;
+                                        const nKey = `${nTx},${nTy}`;
+                                        const wrappedSx = (nSx + this.subDiv) % this.subDiv;
+                                        const wrappedSy = (nSy + this.subDiv) % this.subDiv;
+                                        const nIdx = wrappedSy * this.subDiv + wrappedSx;
+                                        const nmData = this.materialData.get(nKey);
+                                        if (nmData && MATERIAL_PROPS[nmData[nIdx] as MaterialType].flammable) {
+                                            if (Math.random() < 0.05 * speedMult) {
+                                                this.ignite(nTx, nTy, nIdx);
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -897,32 +907,50 @@ export class HeatMap {
                 }
             }
 
-            // 3. Render Fire
+            // 3. Render Fire (Quadrant-Based Batching)
             if (fireData) {
-                const subSize = this.tileSize / this.subDiv;
                 const summary = this.tileSummaries.get(key);
-                // Only iterate if we know there is fire
                 if (summary && summary.burningCount > 0) {
-                    for (let i = 0; i < fireData.length; i++) {
-                        const fire = fireData[i];
-                        if (fire > 0 && hData && hData[i] > 0) {
-                            const sx = i % this.subDiv;
-                            const sy = Math.floor(i / this.subDiv);
-                            const rx = worldX + sx * subSize;
-                            const ry = worldY + sy * subSize;
+                    const qSize = this.subDiv / 2; // 5x5 quadrants
+                    const quadWorldSize = this.tileSize / 2;
 
-                            if (this.fireAsset && this.fireAsset.complete && this.fireAsset.naturalWidth > 0) {
-                                const frameCount = 8;
-                                const frame = Math.floor((time * 15 + i) % frameCount);
-                                const fw = this.fireAsset.width / frameCount;
-                                const fh = this.fireAsset.height;
-                                const fx = frame * fw;
-                                ctx.drawImage(this.fireAsset, fx, 0, fw, fh, rx - subSize * 0.5, ry - subSize, subSize * 2, subSize * 2);
-                            } else {
-                                // Procedural fallback
-                                const pulse = 0.6 + Math.sin(time * 30 + i) * 0.4;
-                                ctx.fillStyle = `rgba(255, 100, 0, ${fire * pulse * 0.6})`;
-                                ctx.fillRect(rx - subSize, ry - subSize, subSize * 3, subSize * 3);
+                    for (let qy = 0; qy < 2; qy++) {
+                        for (let qx = 0; qx < 2; qx++) {
+                            // Check if quadrant has fire
+                            let quadIntensity = 0;
+                            let burningInQuad = 0;
+                            
+                            for (let sy = qy * qSize; sy < (qy + 1) * qSize; sy++) {
+                                for (let sx = qx * qSize; sx < (qx + 1) * qSize; sx++) {
+                                    const fIdx = sy * this.subDiv + sx;
+                                    if (fireData[fIdx] > 0.05 && hData && hData[fIdx] > 0) {
+                                        quadIntensity += fireData[fIdx];
+                                        burningInQuad++;
+                                    }
+                                }
+                            }
+
+                            if (burningInQuad > 0) {
+                                const avgIntensity = quadIntensity / burningInQuad;
+                                const rx = worldX + qx * quadWorldSize + quadWorldSize / 2;
+                                const ry = worldY + qy * quadWorldSize + quadWorldSize / 2;
+
+                                if (this.fireAsset && this.fireAsset.complete && this.fireAsset.naturalWidth > 0) {
+                                    const frameCount = 8;
+                                    const idHash = (tx * 7 + ty * 13 + qx * 3 + qy * 17);
+                                    const frame = Math.floor((time * 15 + idHash) % frameCount);
+                                    const fw = this.fireAsset.width / frameCount;
+                                    const fh = this.fireAsset.height;
+                                    const fx = frame * fw;
+                                    
+                                    // Scale sprite based on quadrant intensity
+                                    const displaySize = quadWorldSize * (1.2 + avgIntensity * 0.8);
+                                    ctx.drawImage(this.fireAsset, fx, 0, fw, fh, rx - displaySize / 2, ry - displaySize * 0.8, displaySize, displaySize);
+                                } else {
+                                    const pulse = 0.6 + Math.sin(time * 30 + qx + qy) * 0.4;
+                                    ctx.fillStyle = `rgba(255, 100, 0, ${avgIntensity * pulse * 0.6})`;
+                                    ctx.fillRect(rx - quadWorldSize / 2, ry - quadWorldSize / 2, quadWorldSize, quadWorldSize);
+                                }
                             }
                         }
                     }

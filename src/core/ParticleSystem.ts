@@ -282,8 +282,19 @@ export class ParticleSystem {
         // 5. BLACK Smoke Sprite (Pre-rendered for visibility)
         this.spriteCache.set('smoke_black', createCachedCanvas(64, ctx => {
             const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-            grad.addColorStop(0, 'rgba(0, 0, 0, 0.9)');
-            grad.addColorStop(0.4, 'rgba(20, 20, 20, 0.5)');
+            grad.addColorStop(0, 'rgba(0, 0, 0, 0.8)');
+            grad.addColorStop(0.4, 'rgba(20, 20, 20, 0.4)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+        }));
+
+        // 6. HEAVY BLACK Smoke (Denser for fire)
+        this.spriteCache.set('smoke_heavy_black', createCachedCanvas(64, ctx => {
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0, 'rgba(0, 0, 0, 0.95)');
+            grad.addColorStop(0.3, 'rgba(5, 5, 5, 0.8)');
+            grad.addColorStop(0.6, 'rgba(15, 15, 15, 0.4)');
             grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
             ctx.fillStyle = grad;
             ctx.fillRect(0, 0, 64, 64);
@@ -713,18 +724,14 @@ export class ParticleSystem {
                     const colorStr = this.colorPalette[colorIdx];
                     const isBlack = colorStr === '#000' || colorStr === '#111';
 
-                    const targetAlpha = Math.max(0, lifeRatio * (isBlack ? 0.4 : 0.25));
+                    const targetAlpha = Math.max(0, lifeRatio * (isBlack ? 0.45 : 0.25));
                     
                     // Draw to LOW-RES buffer
                     sCtx.globalAlpha = targetAlpha;
-                    const sprite = this.spriteCache.get(isBlack ? 'smoke_black' : 'smoke_soft');
+                    const sprite = this.spriteCache.get(isBlack ? (lifeRatio > 0.6 ? 'smoke_heavy_black' : 'smoke_black') : 'smoke_soft');
                     if (sprite) {
                         const r = this.radius[i];
                         sCtx.drawImage(sprite, ix - r, iy - r, r * 2, r * 2);
-
-                        if (isBlack && lifeRatio > 0.7) {
-                            sCtx.drawImage(sprite, ix - r * 0.6, iy - r * 0.6, r * 1.2, r * 1.2);
-                        }
                     }
                 } else {
                     // Standard solid particles - BUCKET THEM for high-res pass

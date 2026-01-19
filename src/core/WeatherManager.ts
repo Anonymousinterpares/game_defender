@@ -366,7 +366,7 @@ export class WeatherManager {
 
     /**
      * Remove snow from heated tiles (called by update with HeatMap data)
-     * Includes 2-layer spread to neighbors and ground melting
+     * Simplified for performance: melts local sub-tiles based on their heat.
      */
     public removeSnowFromHeat(tx: number, ty: number, heatData: Float32Array, tileSize: number = 32, maxHeat: number = 1.0): void {
         if (this.snowAccumulation < 0.01) return;
@@ -381,73 +381,13 @@ export class WeatherManager {
             this.snowRemovalData.set(key, data);
         }
 
-        const heatThreshold = 0.3; // Same as WorldRenderer check
+        const heatThreshold = 0.3;
 
         for (let i = 0; i < heatData.length; i++) {
             if (heatData[i] > heatThreshold) {
-                // Remove snow from hot sub-tile
-                data[i] = Math.max(0, data[i] - 0.05); // Gradual melting
-
-                // Spread to 2 layers of neighbors (8-directional + secondary ring)
-                const sx = i % this.subDiv;
-                const sy = Math.floor(i / this.subDiv);
-
-                // Layer 1: Immediate neighbors (8-directional)
-                for (let ny = -1; ny <= 1; ny++) {
-                    for (let nx = -1; nx <= 1; nx++) {
-                        if (nx === 0 && ny === 0) continue;
-                        this.meltNeighborSnow(tx, ty, sx + nx, sy + ny, 0.03, tileSize);
-                    }
-                }
-
-                // Layer 2: Secondary ring
-                for (let ny = -2; ny <= 2; ny++) {
-                    for (let nx = -2; nx <= 2; nx++) {
-                        const dist = Math.sqrt(nx * nx + ny * ny);
-                        if (dist > 1.5 && dist <= 2.5) {
-                            this.meltNeighborSnow(tx, ty, sx + nx, sy + ny, 0.01, tileSize);
-                        }
-                    }
-                }
-
-                // Ground melting (similar to molten metal)
-                this.meltGroundSnowBelowHeat(tx, ty, sx, sy, tileSize);
+                // Remove snow from hot sub-tile - faster melt than spread
+                data[i] = Math.max(0, data[i] - 0.1); 
             }
-        }
-    }
-
-    private meltNeighborSnow(baseTx: number, baseTy: number, sx: number, sy: number, amount: number, tileSize: number): void {
-        let targetTx = baseTx;
-        let targetTy = baseTy;
-        let targetSx = sx;
-        let targetSy = sy;
-
-        // Handle cross-tile boundaries
-        if (sx < 0) { targetTx--; targetSx = sx + this.subDiv; }
-        else if (sx >= this.subDiv) { targetTx++; targetSx = sx - this.subDiv; }
-
-        if (sy < 0) { targetTy--; targetSy = sy + this.subDiv; }
-        else if (sy >= this.subDiv) { targetTy++; targetSy = sy - this.subDiv; }
-
-        const key = `${targetTx},${targetTy}`;
-        let data = this.snowRemovalData.get(key);
-
-        if (!data) {
-            data = new Float32Array(this.subDiv * this.subDiv);
-            data.fill(1.0);
-            this.snowRemovalData.set(key, data);
-        }
-
-        const idx = targetSy * this.subDiv + targetSx;
-        data[idx] = Math.max(0, data[idx] - amount);
-    }
-
-    private meltGroundSnowBelowHeat(tx: number, ty: number, sx: number, sy: number, tileSize: number): void {
-        // Melt ground snow in 8-directional neighbors (simulating heat radiation to ground)
-        const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]];
-
-        for (const [nx, ny] of neighbors) {
-            this.meltNeighborSnow(tx, ty, sx + nx, sy + ny, 0.02, tileSize);
         }
     }
 }

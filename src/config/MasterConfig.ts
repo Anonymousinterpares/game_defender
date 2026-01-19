@@ -150,6 +150,7 @@ export const MasterConfig: GameConfigSchema = {
   Fire: {
     dps: { value: 10, type: 'number', description: 'Damage per second when burning' },
     spreadChance: { value: 0.1, type: 'number', description: 'Chance to spread fire to sub-tile/neighbor' },
+    fireSpreadSpeed: { value: 0.4, type: 'number', min: 0.01, max: 1.0, step: 0.01, description: 'Overall Fire Spread Speed Multiplier' },
     catchChance: { value: 0.5, type: 'number', description: 'Chance to catch fire when touching burning object (per sec)' },
     baseExtinguishChance: { value: 0.5, type: 'number', description: 'Initial chance to stop burning (per sec)' },
     isFireSpritesheet: { value: true, type: 'boolean', description: 'Use sprite-based fire animations' },
