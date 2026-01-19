@@ -70,11 +70,11 @@ export class LightingRenderer {
     constructor(private parent: LightingParent) {
         this.resolutionScale = ConfigManager.getInstance().get<number>('Benchmark', 'resolutionScale') || 0.5;
         this.lightCanvas = document.createElement('canvas');
-        this.lightCtx = this.lightCanvas.getContext('2d', { willReadFrequently: true })!;
+        this.lightCtx = this.lightCanvas.getContext('2d')!;
         this.maskCanvas = document.createElement('canvas');
-        this.maskCtx = this.maskCanvas.getContext('2d', { willReadFrequently: true })!;
+        this.maskCtx = this.maskCanvas.getContext('2d')!;
         this.sourceCanvas = document.createElement('canvas');
-        this.sourceCtx = this.sourceCanvas.getContext('2d', { willReadFrequently: true })!;
+        this.sourceCtx = this.sourceCanvas.getContext('2d')!;
         this.silCanvas = document.createElement('canvas');
         this.silCtx = this.silCanvas.getContext('2d')!;
         this.tempCanvas = document.createElement('canvas');

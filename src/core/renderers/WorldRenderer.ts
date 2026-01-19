@@ -43,7 +43,7 @@ export class WorldRenderer {
 
         // Initialize batch canvas
         this.meltedBatchCanvas = document.createElement('canvas');
-        this.meltedBatchCtx = this.meltedBatchCanvas.getContext('2d', { willReadFrequently: true })!;
+        this.meltedBatchCtx = this.meltedBatchCanvas.getContext('2d')!;
     }
 
     public invalidateGroundCache(tx: number, ty: number): void {
