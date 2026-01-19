@@ -3,6 +3,7 @@ import { HeatMap, MaterialType } from '../HeatMap';
 import { WeatherManager } from '../WeatherManager';
 import { ConfigManager } from '../../config/MasterConfig';
 import { ProjectionUtils } from '../../utils/ProjectionUtils';
+import { WorldClock } from '../WorldClock';
 
 export class WorldRenderer {
     private world: World;
@@ -140,6 +141,20 @@ export class WorldRenderer {
         }
     }
 
+    private adjustColor(hex: string, multiplier: number): string {
+        // Handle shorthand hex or black
+        if (hex.length === 4) {
+            const r = parseInt(hex[1] + hex[1], 16);
+            const g = parseInt(hex[2] + hex[2], 16);
+            const b = parseInt(hex[3] + hex[3], 16);
+            return `rgb(${Math.min(255, Math.floor(r * multiplier))}, ${Math.min(255, Math.floor(g * multiplier))}, ${Math.min(255, Math.floor(b * multiplier))})`;
+        }
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgb(${Math.min(255, Math.floor(r * multiplier))}, ${Math.min(255, Math.floor(g * multiplier))}, ${Math.min(255, Math.floor(b * multiplier))})`;
+    }
+
     private renderWallSidesOnly(ctx: CanvasRenderingContext2D, tx: number, ty: number, material: MaterialType, centerX: number, centerY: number): void {
         const worldX = tx * this.tileSize;
         const worldY = ty * this.tileSize;
@@ -153,16 +168,35 @@ export class WorldRenderer {
         const v2 = ProjectionUtils.projectPoint(x1, y1, this.wallHeight, centerX, centerY);
         const v3 = ProjectionUtils.projectPoint(x0, y1, this.wallHeight, centerX, centerY);
 
-        let sideColor = '#1a1a1a';
+        let sideColorBase = '#1a1a1a';
         switch (material) {
-            case MaterialType.WOOD: sideColor = '#3e2723'; break;
-            case MaterialType.BRICK: sideColor = '#800000'; break;
-            case MaterialType.STONE: sideColor = '#424242'; break;
-            case MaterialType.METAL: sideColor = '#263238'; break;
-            case MaterialType.INDESTRUCTIBLE: sideColor = '#000000'; break;
+            case MaterialType.WOOD: sideColorBase = '#3e2723'; break;
+            case MaterialType.BRICK: sideColorBase = '#800000'; break;
+            case MaterialType.STONE: sideColorBase = '#424242'; break;
+            case MaterialType.METAL: sideColorBase = '#263238'; break;
+            case MaterialType.INDESTRUCTIBLE: sideColorBase = '#080808'; break;
         }
 
-        ctx.fillStyle = sideColor;
+        // --- SHADING LOGIC ---
+        const { sun, moon } = WorldClock.getInstance().getTimeState();
+        const activeLight = sun.active ? sun : (moon.active ? moon : null);
+        
+        const getShadedColor = (nx: number, ny: number) => {
+            if (!activeLight) return sideColorBase;
+            // Dot product (Light Dir vs Face Normal)
+            // Normal points OUT from wall. Light dir points FROM source.
+            // If dot is negative, light is hitting the face.
+            const dot = activeLight.direction.x * nx + activeLight.direction.y * ny;
+            const shading = Math.max(0, -dot) * activeLight.intensity;
+            // Base ambient (0.5) to light (1.3)
+            return this.adjustColor(sideColorBase, 0.5 + shading * 0.8);
+        };
+
+        const topCol = getShadedColor(0, -1);
+        const bottomCol = getShadedColor(0, 1);
+        const leftCol = getShadedColor(-1, 0);
+        const rightCol = getShadedColor(1, 0);
+
         const hasTop = ty > 0 && this.world.getTile(tx, ty - 1) !== MaterialType.NONE;
         const hasBottom = ty < this.world.getHeight() - 1 && this.world.getTile(tx, ty + 1) !== MaterialType.NONE;
         const hasLeft = tx > 0 && this.world.getTile(tx - 1, ty) !== MaterialType.NONE;
@@ -178,15 +212,19 @@ export class WorldRenderer {
         if (!isDamaged) {
             // Fast path for healthy tiles
             if (!hasTop && v0.y > y0) {
+                ctx.fillStyle = topCol;
                 ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.lineTo(v1.x, v1.y); ctx.lineTo(v0.x, v0.y); ctx.fill();
             }
             if (!hasBottom && v3.y < y1) {
+                ctx.fillStyle = bottomCol;
                 ctx.beginPath(); ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y); ctx.fill();
             }
             if (!hasLeft && v0.x > x0) {
+                ctx.fillStyle = leftCol;
                 ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); ctx.lineTo(v3.x, v3.y); ctx.lineTo(v0.x, v0.y); ctx.fill();
             }
             if (!hasRight && v1.x < x1) {
+                ctx.fillStyle = rightCol;
                 ctx.beginPath(); ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v1.x, v1.y); ctx.fill();
             }
         } else {
@@ -209,30 +247,35 @@ export class WorldRenderer {
                 const fsy0 = f.sy / subDiv; const fsy1 = (f.sy + 1) / subDiv;
                 
                 let p0_side, p1_side, b0_side, b1_side;
+                let faceCol = sideColorBase;
 
                 if (f.face === 0) { // Top
                     p0_side = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
                     p1_side = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
                     b0_side = { x: x0 + fsx0 * ts, y: y0 + fsy0 * ts };
                     b1_side = { x: x0 + fsx1 * ts, y: y0 + fsy0 * ts };
+                    faceCol = topCol;
                 } else if (f.face === 1) { // Bottom
                     p0_side = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
                     p1_side = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
                     b0_side = { x: x0 + fsx0 * ts, y: y0 + fsy1 * ts };
                     b1_side = { x: x0 + fsx1 * ts, y: y0 + fsy1 * ts };
+                    faceCol = bottomCol;
                 } else if (f.face === 2) { // Left
                     p0_side = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy0);
                     p1_side = this.lerpQuad(v0, v1, v2, v3, fsx0, fsy1);
                     b0_side = { x: x0 + fsx0 * ts, y: y0 + fsy0 * ts };
                     b1_side = { x: x0 + fsx0 * ts, y: y0 + fsy1 * ts };
+                    faceCol = leftCol;
                 } else { // Right
                     p0_side = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy0);
                     p1_side = this.lerpQuad(v0, v1, v2, v3, fsx1, fsy1);
                     b0_side = { x: x0 + fsx1 * ts, y: y0 + fsy0 * ts };
                     b1_side = { x: x0 + fsx1 * ts, y: y0 + fsy1 * ts };
+                    faceCol = rightCol;
                 }
 
-                ctx.fillStyle = sideColor;
+                ctx.fillStyle = faceCol;
                 ctx.beginPath();
                 ctx.moveTo(b0_side.x, b0_side.y); ctx.lineTo(b1_side.x, b1_side.y);
                 ctx.lineTo(p1_side.x, p1_side.y); ctx.lineTo(p0_side.x, p0_side.y);
@@ -400,8 +443,22 @@ export class WorldRenderer {
 
         const isDamaged = heatMap?.hasTileData(tx, ty) && hpData;
 
+        // --- TOP SHADING ---
+        const { sun, moon } = WorldClock.getInstance().getTimeState();
+        const activeLight = sun.active ? sun : (moon.active ? moon : null);
+        
+        let shadedTopColor = topColorBase;
+        if (activeLight) {
+            // Roof faces UP (Z-axis). It gets more light when sun is at zenith (noon).
+            // We simulate this with intensity and a small boost.
+            const mult = 0.6 + activeLight.intensity * 0.7;
+            shadedTopColor = this.adjustColor(topColorBase, mult);
+        } else {
+            shadedTopColor = this.adjustColor(topColorBase, 0.5); // Ambient night
+        }
+
         if (!isDamaged) {
-            ctx.fillStyle = topColorBase;
+            ctx.fillStyle = shadedTopColor;
             ctx.beginPath();
             ctx.moveTo(v0.x, v0.y); ctx.lineTo(v1.x, v1.y);
             ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y);
@@ -417,7 +474,7 @@ export class WorldRenderer {
         const data = this.getDamagedTileData(tx, ty, hpData!);
 
         // SEAMLESS TOP FACE: Draw solid wall minus holes using Even-Odd rule
-        ctx.fillStyle = topColorBase;
+        ctx.fillStyle = shadedTopColor;
         ctx.beginPath();
         // 1. Outer boundary
         ctx.moveTo(v0.x, v0.y); ctx.lineTo(v1.x, v1.y);
