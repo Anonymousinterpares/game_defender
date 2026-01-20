@@ -2,6 +2,8 @@ import { GPUContext } from "./GPUContext";
 import { World } from "../World";
 import { ConfigManager } from "../../config/MasterConfig";
 import { WorldShader } from "./WorldShader";
+import { GPUParticleSystem } from "./particles/GPUParticleSystem";
+
 
 export class GPURenderer {
     private context: GPUContext;
@@ -9,9 +11,15 @@ export class GPURenderer {
     private active: boolean = false;
     private worldShader: WorldShader | null = null;
     private quadBuffer: WebGLBuffer | null = null;
+    private particleSystem: GPUParticleSystem | null = null;
+
+    public getParticleSystem(): GPUParticleSystem | null {
+        return this.particleSystem;
+    }
 
     constructor() {
         this.context = new GPUContext();
+        this.particleSystem = new GPUParticleSystem();
     }
 
     private initResources(): void {
@@ -53,6 +61,13 @@ export class GPURenderer {
         }
     }
 
+    public update(dt: number): void {
+        if (this.active && this.particleSystem) {
+            // Basic inputs for now
+            this.particleSystem.update(dt, performance.now() * 0.001, 0, 0);
+        }
+    }
+
     public render(cameraX: number, cameraY: number, width: number, height: number): void {
         if (!this.active || !this.worldShader) return;
 
@@ -74,6 +89,11 @@ export class GPURenderer {
         shader.setUniform1f("u_tileSize", this.world?.getTileSize() || 32);
 
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Draw Particles
+        if (this.particleSystem) {
+            this.particleSystem.render(cameraX, cameraY, width, height);
+        }
     }
 
     /**

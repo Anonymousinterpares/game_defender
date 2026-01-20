@@ -106,6 +106,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         this.gpuRenderer.setWorld(this.simulation.world);
         this.gpuRenderer.updateConfig();
 
+        ParticleSystem.getInstance().setGPUSystem(this.gpuRenderer.getParticleSystem());
         ParticleSystem.getInstance().clear();
 
         this.radar = new Radar();

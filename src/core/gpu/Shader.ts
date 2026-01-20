@@ -1,7 +1,7 @@
 export class Shader {
     private program: WebGLProgram;
 
-    constructor(private gl: WebGL2RenderingContext, vertSource: string, fragSource: string) {
+    constructor(private gl: WebGL2RenderingContext, vertSource: string, fragSource: string, varyings?: string[]) {
         const vert = this.compile(gl.VERTEX_SHADER, vertSource);
         const frag = this.compile(gl.FRAGMENT_SHADER, fragSource);
 
@@ -10,6 +10,11 @@ export class Shader {
 
         gl.attachShader(program, vert);
         gl.attachShader(program, frag);
+
+        if (varyings && varyings.length > 0) {
+            gl.transformFeedbackVaryings(program, varyings, gl.INTERLEAVED_ATTRIBS);
+        }
+
         gl.linkProgram(program);
 
         if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {

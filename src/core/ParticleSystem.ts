@@ -6,6 +6,7 @@ import { ParticleData, ParticleTarget } from './particles/ParticleData';
 import { ParticleEmitter } from './particles/ParticleEmitter';
 import { ParticleSimulation, WorldCollision } from './particles/ParticleSimulation';
 import { CPUParticleRenderer } from './particles/CPUParticleRenderer';
+import { GPUParticleSystem } from './gpu/particles/GPUParticleSystem';
 import { WeatherManager } from './WeatherManager';
 
 export type { ParticleTarget };
@@ -16,6 +17,11 @@ export class ParticleSystem {
     private data: ParticleData;
     private emitter: ParticleEmitter;
     private renderer: CPUParticleRenderer;
+    private gpuSystem: GPUParticleSystem | null = null;
+
+    public setGPUSystem(sys: GPUParticleSystem | null) {
+        this.gpuSystem = sys;
+    }
 
     private worker: Worker;
     private isWorkerBusy: boolean = false;
@@ -67,8 +73,8 @@ export class ParticleSystem {
                 const angle = Math.random() * Math.PI * 2;
                 const speed = 100 + Math.random() * 300;
                 const life = 0.3 + Math.random() * 0.4;
-                const idx = this.spawnParticle(x, y, '#fffbe6', Math.cos(angle) * speed, Math.sin(angle) * speed, life);
-                this.setFlame(idx, true);
+                // FLAG_IS_FLAME = 2 (1 << 1)
+                this.spawnParticle(x, y, '#fffbe6', Math.cos(angle) * speed, Math.sin(angle) * speed, life, 2);
             }
 
             const smokeCount = 15 + Math.floor(Math.random() * 10);
@@ -162,14 +168,26 @@ export class ParticleSystem {
     }
 
     // Proxy methods to Emitter
-    public spawnParticle(x: number, y: number, color: string, vx: number, vy: number, life: number = 0.5): number {
+    public spawnParticle(x: number, y: number, color: string, vx: number, vy: number, life: number = 0.5, flags: number = 0): number {
+        if (this.gpuSystem && ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled')) {
+            // 0 for TYPE_STANDARD
+            const combinedFlags = FLAG_ACTIVE | flags;
+            this.gpuSystem.uploadParticle(x, y, vx, vy, life, 0, combinedFlags);
+            return -1;
+        }
         return this.emitter.spawnParticle(x, y, color, vx, vy, life);
     }
     public spawnSmoke(x: number, y: number, vx: number, vy: number, life: number, size: number, color: string): number {
+        if (this.gpuSystem && ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled')) {
+            // 1 for TYPE_SMOKE
+            this.gpuSystem.uploadParticle(x, y, vx, vy, life, 4, FLAG_ACTIVE); // 4 is SMOKE in Enum??
+            // Check ParticleConstants: SMOKE = 4.
+            return -1;
+        }
         return this.emitter.spawnSmoke(x, y, vx, vy, life, size, color);
     }
     public spawnShockwave(x: number, y: number, radius: number): number {
-        return this.emitter.spawnShockwave(x, y, radius);
+        return this.emitter.spawnShockwave(x, y, radius); // Keep CPU for now or port? Porting is easy.
     }
     public spawnFlash(x: number, y: number, radius: number): number {
         return this.emitter.spawnFlash(x, y, radius);
