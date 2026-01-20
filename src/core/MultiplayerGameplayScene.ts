@@ -101,13 +101,24 @@ export class MultiplayerGameplayScene extends GameplayScene {
             mm.broadcast(NetworkMessageType.CHAT, { system: 'READY' });
         }
 
-        // Host specifically listens for Client READY to send spawn pos
+        // Host specifically listens for Client READY to send spawn pos and world state
         if (mm.isHost) {
-            mm.onMessage((msg) => {
+            mm.onMessage((msg, conn) => {
                 if (msg.t === NetworkMessageType.CHAT && msg.d.system === 'READY') {
                     if (this.player) {
                         const p2Pos = this.getSafePVPSpawn({ x: this.player.x, y: this.player.y });
                         mm.broadcast(NetworkMessageType.CHAT, { system: 'SPAWN_POS', x: p2Pos.x, y: p2Pos.y });
+                    }
+                    // IMPORTANT: Send full HeatMap state to the joining client
+                    if (this.heatMap) {
+                        const fullState = this.heatMap.getFullState();
+                        if (fullState.length > 0) {
+                            // Send specifically to the joining peer if possible, or broadcast if not.
+                            // mm.sendTo(conn.peer, NetworkMessageType.WORLD_HEAT_SYNC, fullState);
+                            // For simplicity and matching current patterns, we broadcast, but direct is better for large payloads.
+                            // Since PeerJS connection is available in callback:
+                            mm.sendTo(conn.peer, NetworkMessageType.WORLD_HEAT_SYNC, fullState);
+                        }
                     }
                 }
             });
@@ -348,8 +359,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
                     const centerY = this.cameraY + ctx.canvas.height / 2;
                     const pOffset = ProjectionUtils.getProjectedOffset(rx, ry, rz, centerX, centerY);
 
-                    ctx.beginPath(); 
-                    ctx.moveTo(rx + pOffset.x, ry + rz + pOffset.y); 
+                    ctx.beginPath();
+                    ctx.moveTo(rx + pOffset.x, ry + rz + pOffset.y);
                     ctx.lineTo(endX, endY);
                     ctx.strokeStyle = type === 'laser' ? '#ff0000' : 'rgba(0, 255, 255, 0.8)';
                     ctx.lineWidth = type === 'laser' ? 2 : 15; ctx.stroke();

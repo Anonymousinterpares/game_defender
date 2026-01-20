@@ -11,12 +11,6 @@ export class GPUDriver {
         this.canvas = document.createElement('canvas');
         this.canvas.style.display = 'none';
 
-        const useGPU = ConfigManager.getInstance().get<boolean>('Visuals', 'useGPUAcceleration');
-        if (!useGPU) {
-            console.log('GPU Acceleration disabled in MasterConfig.');
-            return;
-        }
-
         try {
             const gl = this.canvas.getContext('webgl2', {
                 alpha: true,
@@ -28,7 +22,7 @@ export class GPUDriver {
             });
 
             if (!gl) {
-                console.warn('WebGL2 not supported on this browser/hardware. Falling back to CPU.');
+                console.warn('GPUDriver: WebGL2 not supported on this browser/hardware.');
                 return;
             }
 
@@ -54,8 +48,15 @@ export class GPUDriver {
         return GPUDriver.instance;
     }
 
-    public isReady(): boolean {
+    /** Returns true if the hardware/browser supports WebGL2 */
+    public isSupported(): boolean {
         return this.isAvailable && this.gl !== null;
+    }
+
+    /** Returns true if GPGPU is supported and preferred by config */
+    public isReady(): boolean {
+        if (!this.isSupported()) return false;
+        return ConfigManager.getInstance().get<boolean>('Visuals', 'useGPUAcceleration');
     }
 
     public getGL(): WebGL2RenderingContext {

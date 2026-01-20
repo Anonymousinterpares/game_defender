@@ -14,6 +14,11 @@ export class HeatMapGPGPU {
     private fboB: WebGLFramebuffer;
     private isATarget: boolean = true;
 
+    private fluidTextureA: WebGLTexture;
+    private fluidTextureB: WebGLTexture;
+    private fluidFboA: WebGLFramebuffer;
+    private fluidFboB: WebGLFramebuffer;
+
     private simProgram: WebGLProgram;
     private renderProgram: WebGLProgram;
     private vao: WebGLVertexArrayObject;
@@ -31,6 +36,11 @@ export class HeatMapGPGPU {
         this.textureB = this.driver.createTexture(this.width, this.height);
         this.fboA = this.driver.createFramebuffer(this.textureA);
         this.fboB = this.driver.createFramebuffer(this.textureB);
+
+        this.fluidTextureA = this.driver.createTexture(this.width, this.height);
+        this.fluidTextureB = this.driver.createTexture(this.width, this.height);
+        this.fluidFboA = this.driver.createFramebuffer(this.fluidTextureA);
+        this.fluidFboB = this.driver.createFramebuffer(this.fluidTextureB);
 
         // Clear initial textures
         this.clear();
@@ -57,6 +67,7 @@ export class HeatMapGPGPU {
     public clear(): void {
         const gl = this.driver.getGL();
 
+        // Structural + Heat
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboA);
         gl.clearColor(0, 0, 0, 1.0); // 1.0 is full HP
         gl.clear(gl.COLOR_BUFFER_BIT);
@@ -65,23 +76,57 @@ export class HeatMapGPGPU {
         gl.clearColor(0, 0, 0, 1.0);
         gl.clear(gl.COLOR_BUFFER_BIT);
 
+        // Fluids (Smoke)
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.fluidFboA);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.fluidFboB);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
     public update(dt: number, decayRate: number, spreadRate: number, fireSpeed: number): void {
         const gl = this.driver.getGL();
 
-        // Ensure parity if sync happened
-        // this.syncAllToCurrentFBO(); // Maybe later if needed
-
-        const targetFbo = this.isATarget ? this.fboA : this.fboB;
-        const sourceTex = this.isATarget ? this.textureB : this.textureA;
-
-        this.driver.useProgram('HeatMapSim');
         gl.bindVertexArray(this.vao);
 
-        // Uniforms
-        const uPrevHeat = gl.getUniformLocation(this.simProgram, 'u_prevHeat');
+        // Pass 1: Structural Simulation (Heat, Fire, Molten, HP)
+        let targetFbo = this.isATarget ? this.fboA : this.fboB;
+        let sourceTex = this.isATarget ? this.textureB : this.textureA;
+        let sourceFluidTex = this.isATarget ? this.fluidTextureB : this.fluidTextureA;
+
+        this.driver.useProgram('HeatMapSim');
+        this.setSimUniforms(gl, dt, decayRate, spreadRate, fireSpeed, sourceTex, sourceFluidTex, 0);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
+        gl.viewport(0, 0, this.width, this.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Pass 2: Fluid Simulation (Smoke/Steam)
+        targetFbo = this.isATarget ? this.fluidFboA : this.fluidFboB;
+        sourceTex = this.isATarget ? this.textureB : this.textureA; // We use the ALREADY UPDATED structural texture might be better? No, stick to ping-pong consistency.
+        sourceFluidTex = this.isATarget ? this.fluidTextureB : this.fluidTextureA;
+
+        this.setSimUniforms(gl, dt, decayRate, spreadRate, fireSpeed, sourceTex, sourceFluidTex, 1);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
+        gl.viewport(0, 0, this.width, this.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Swap ping-pong state
+        this.isATarget = !this.isATarget;
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.bindVertexArray(null);
+    }
+
+    private setSimUniforms(gl: WebGL2RenderingContext, dt: number, decayRate: number, spreadRate: number, fireSpeed: number, structTex: WebGLTexture, fluidTex: WebGLTexture, pass: number): void {
+        const uPrevStruct = gl.getUniformLocation(this.simProgram, 'u_prevStruct');
+        const uPrevFluid = gl.getUniformLocation(this.simProgram, 'u_prevFluid');
+        const uPass = gl.getUniformLocation(this.simProgram, 'u_pass');
         const uDt = gl.getUniformLocation(this.simProgram, 'u_dt');
         const uDecayRate = gl.getUniformLocation(this.simProgram, 'u_decayRate');
         const uSpreadRate = gl.getUniformLocation(this.simProgram, 'u_spreadRate');
@@ -89,6 +134,7 @@ export class HeatMapGPGPU {
         const uTexelSize = gl.getUniformLocation(this.simProgram, 'u_texelSize');
         const uSeed = gl.getUniformLocation(this.simProgram, 'u_seed');
 
+        gl.uniform1i(uPass, pass);
         gl.uniform1f(uDt, dt);
         gl.uniform1f(uDecayRate, decayRate);
         gl.uniform1f(uSpreadRate, spreadRate);
@@ -97,19 +143,12 @@ export class HeatMapGPGPU {
         gl.uniform1f(uSeed, Math.random());
 
         gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, sourceTex);
-        gl.uniform1i(uPrevHeat, 0);
+        gl.bindTexture(gl.TEXTURE_2D, structTex);
+        gl.uniform1i(uPrevStruct, 0);
 
-        // Render to target FBO
-        gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
-        gl.viewport(0, 0, this.width, this.height);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-        // Swap
-        this.isATarget = !this.isATarget;
-
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.bindVertexArray(null);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, fluidTex);
+        gl.uniform1i(uPrevFluid, 1);
     }
 
     public getSimulationTexture(): WebGLTexture {
@@ -119,11 +158,13 @@ export class HeatMapGPGPU {
     public draw(cameraX: number, cameraY: number, viewW: number, viewH: number, worldW: number, worldH: number): void {
         const gl = this.driver.getGL();
         const simTex = this.getSimulationTexture();
+        const fluidTex = this.getFluidTexture();
 
         this.driver.useProgram('HeatMapRender');
         gl.bindVertexArray(this.vao);
 
         const uSimTex = gl.getUniformLocation(this.renderProgram, 'u_simTexture');
+        const uFluidTex = gl.getUniformLocation(this.renderProgram, 'u_fluidTexture');
         const uCamera = gl.getUniformLocation(this.renderProgram, 'u_camera');
         const uViewDim = gl.getUniformLocation(this.renderProgram, 'u_viewDim');
         const uWorldDim = gl.getUniformLocation(this.renderProgram, 'u_worldDim');
@@ -136,15 +177,21 @@ export class HeatMapGPGPU {
         gl.bindTexture(gl.TEXTURE_2D, simTex);
         gl.uniform1i(uSimTex, 0);
 
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, fluidTex);
+        gl.uniform1i(uFluidTex, 1);
+
         // Render to screen (default framebuffer)
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, viewW, viewH);
 
-        // We use additive blending or similar for heat glow?
-        // Let's use standard blending as set in GPUDriver
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         gl.bindVertexArray(null);
+    }
+
+    public getFluidTexture(): WebGLTexture {
+        return this.isATarget ? this.fluidTextureB : this.fluidTextureA;
     }
 
     /**
@@ -237,6 +284,10 @@ export class HeatMapGPGPU {
         gl.deleteTexture(this.textureB);
         gl.deleteFramebuffer(this.fboA);
         gl.deleteFramebuffer(this.fboB);
+        gl.deleteTexture(this.fluidTextureA);
+        gl.deleteTexture(this.fluidTextureB);
+        gl.deleteFramebuffer(this.fluidFboA);
+        gl.deleteFramebuffer(this.fluidFboB);
         gl.deleteVertexArray(this.vao);
     }
 }

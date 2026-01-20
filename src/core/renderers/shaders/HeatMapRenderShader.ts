@@ -22,12 +22,26 @@ export const HEATMAP_RENDER_FS = `#version 300 es
 precision highp float;
 
 uniform sampler2D u_simTexture;
+uniform sampler2D u_fluidTexture;
 uniform vec2 u_camera;
 uniform vec2 u_viewDim;
 uniform vec2 u_worldDim;
 
 in vec2 v_uv;
 out vec4 outColor;
+
+// Noise for smoke fluffiness
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f*f*(3.0-2.0*f);
+    return mix(mix(hash(i + vec2(0.0,0.0)), hash(i + vec2(1.0,0.0)), u.x),
+               mix(hash(i + vec2(0.0,1.0)), hash(i + vec2(1.0,1.0)), u.x), u.y);
+}
 
 vec3 getHeatColor(float intensity) {
     if (intensity < 0.4) {
@@ -40,9 +54,6 @@ vec3 getHeatColor(float intensity) {
 }
 
 void main() {
-    // Correct UV calculation based on camera and world dimensions
-    // Top of screen (v_uv.y=1.0) maps to camera.y
-    // Bottom of screen (v_uv.y=0.0) maps to camera.y + viewDim.y
     vec2 worldPos = u_camera + vec2(v_uv.x, 1.0 - v_uv.y) * u_viewDim;
     vec2 simUV = worldPos / u_worldDim;
     
@@ -51,38 +62,51 @@ void main() {
     }
 
     vec4 simData = texture(u_simTexture, simUV);
+    vec4 fluidData = texture(u_fluidTexture, simUV);
+    
     float heat = simData.r;
     float fire = simData.g;
     float molten = simData.b;
-    float packed = simData.a;
+    float hp = fract(simData.a);
+    float smoke = fluidData.r;
 
-    int matType = int(floor(packed));
-    float hp = fract(packed);
+    vec4 finalColor = vec4(0.0);
 
-    // 1. Render Fire Effects (Top Priority)
-    if (fire > 0.1) {
-        // Red-Orange glow for fire
-        vec3 fireColor = vec3(1.0, 0.4 + fire * 0.6, 0.0);
-        outColor = vec4(fireColor, 0.6 + fire * 0.4);
-        return;
-    }
-
-    // 2. Render Molten Metal
-    if (molten > 0.05) {
-        // Gold/Orange core with glow
-        vec3 moltenColor = vec3(1.0, 0.6 + molten * 0.2, 0.0);
-        outColor = vec4(moltenColor, 0.5 + molten * 0.5);
-        return;
-    }
-
-    // 3. Render Heat Glow (Only if no wall or wall is low HP)
+    // 1. Heat Glow (Bottom Layer)
     if (heat > 0.01 && hp < 0.8) {
-        vec3 color = getHeatColor(heat);
-        float alpha = heat < 0.8 ? (0.4 + heat * 0.6) : 1.0;
-        outColor = vec4(color, alpha);
-        return;
+        vec3 hColor = getHeatColor(heat);
+        float alpha = (heat < 0.8 ? (0.4 + heat * 0.6) : 1.0) * 0.7;
+        finalColor = vec4(hColor, alpha);
     }
 
-    discard;
+    // 2. Molten Metal
+    if (molten > 0.05) {
+        vec3 mColor = vec3(1.0, 0.7 + molten * 0.3, 0.0);
+        float mAlpha = clamp(molten * 0.8, 0.0, 0.95);
+        finalColor = mix(finalColor, vec4(mColor, mAlpha), mAlpha);
+    }
+
+    // 3. Fire
+    if (fire > 0.05) {
+        vec3 fColor = vec3(1.0, 0.4 + fire * 0.6, 0.0);
+        float fAlpha = clamp(fire * 0.9, 0.0, 0.9);
+        // Additive-like blend for fire
+        finalColor.rgb += fColor * fAlpha;
+        finalColor.a = max(finalColor.a, fAlpha);
+    }
+
+    // 4. Volumetric Smoke (Top Layer)
+    if (smoke > 0.05) {
+        float n = noise(worldPos * 0.05); // Noise for fluffiness
+        float sAlpha = smoke * 0.6 * (0.4 + 0.6 * n);
+        vec3 sColor = vec3(0.2, 0.2, 0.2) + n * 0.1; // Dark gray with variation
+        
+        // Blend smoke on top
+        finalColor.rgb = mix(finalColor.rgb, sColor, sAlpha);
+        finalColor.a = max(finalColor.a, sAlpha);
+    }
+
+    if (finalColor.a < 0.01) discard;
+    outColor = finalColor;
 }
 `;

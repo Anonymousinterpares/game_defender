@@ -558,18 +558,28 @@ export class HeatMap {
     }
 
     public update(dt: number): void {
-        if (this.gpgpu) {
-            const fireSpeed = ConfigManager.getInstance().get<number>('Fire', 'fireSpreadSpeed') || 0.4;
-            this.gpgpu.update(dt, this.decayRate, this.spreadRate, fireSpeed);
+        const config = ConfigManager.getInstance();
+        const preferredGPU = config.get<boolean>('Visuals', 'useGPUAcceleration');
+        const drv = GPUDriver.getInstance();
 
-            // OPTIMIZATION: Throttled read-back (approx 2 times per second)
-            // This is the single biggest bottleneck. We only need it for wall destruction physics.
-            if (this.frameCount % 20 === 0) {
-                this.readBackModifiedTiles();
+        if (preferredGPU && drv.isSupported()) {
+            // Lazy-init GPGPU if needed
+            if (!this.gpgpu && this.widthTiles > 0) {
+                this.gpgpu = new HeatMapGPGPU(this.widthTiles, this.heightTiles, this.subDiv);
+                console.log('HeatMap: GPGPU Initialized (Lazy).');
             }
 
-            this.frameCount++;
-            return; // EXIT EARLY - GPGPU handles simulation
+            if (this.gpgpu) {
+                const fireSpeed = config.get<number>('Fire', 'fireSpreadSpeed') || 0.4;
+                this.gpgpu.update(dt, this.decayRate, this.spreadRate, fireSpeed);
+
+                if (this.frameCount % 20 === 0) {
+                    this.readBackModifiedTiles();
+                }
+
+                this.frameCount++;
+                return; // EXIT EARLY - GPGPU handles simulation
+            }
         }
 
         const effectiveDT = dt; // Continuous update
@@ -891,9 +901,11 @@ export class HeatMap {
     }
 
     public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
-        if (this.gpgpu) {
-            const drv = GPUDriver.getInstance();
-            // Match GPU canvas to current viewport
+        const config = ConfigManager.getInstance();
+        const useGPU = config.get<boolean>('Visuals', 'useGPUAcceleration');
+        const drv = GPUDriver.getInstance();
+
+        if (useGPU && drv.isSupported() && this.gpgpu) {
             drv.resize(ctx.canvas.width, ctx.canvas.height);
 
             this.gpgpu.draw(
@@ -902,15 +914,12 @@ export class HeatMap {
                 this.widthTiles * this.tileSize, this.heightTiles * this.tileSize
             );
 
-            // BLIT: Draw the hidden WebGL canvas into the main 2D context
-            // Since ctx is translated to (-cameraX, -cameraY), drawing at (cameraX, cameraY)
-            // places the GPU-baked visuals correctly on top of the world.
             ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform to draw full-screen overlay
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.drawImage(drv.getCanvas(), 0, 0);
             ctx.restore();
 
-            return; // EXIT EARLY - GPGPU handles rendering
+            return;
         }
 
         const viewW = ctx.canvas.width;
@@ -1142,7 +1151,6 @@ export class HeatMap {
     public getDeltaState(): any[] {
         const delta: any[] = [];
 
-        // Add active tiles
         this.activeTiles.forEach(key => {
             const h = this.heatData.get(key);
             const f = this.fireData.get(key);
@@ -1159,31 +1167,79 @@ export class HeatMap {
             }
         });
 
-        // Add recently deactivated tiles
         this.recentlyDeactivated.forEach(key => {
-            delta.push({ k: key, c: 1 }); // c:1 means Clear/Deactivated
+            delta.push({ k: key, c: 1 }); // Clear/Deactivated
         });
         this.recentlyDeactivated.clear();
 
         return delta;
     }
 
+    /**
+     * Returns a full snapshot of all non-empty tiles.
+     * Used for joining players to sync the entire world state at once.
+     */
+    public getFullState(): any[] {
+        const full: any[] = [];
+
+        // We iterate over ALL tiles where we have data
+        // For structural data, we need to send HP as well for joining players
+        this.hpData.forEach((hp, key) => {
+            const mat = this.materialData.get(key);
+            const heat = this.heatData.get(key);
+            const fire = this.fireData.get(key);
+            const molten = this.moltenData.get(key);
+            const scorch = this.scorchData.get(key);
+
+            // Only send if there is significant change from default
+            let isModified = false;
+            for (let i = 0; i < hp.length; i++) {
+                if (hp[i] < (MATERIAL_PROPS[mat![i] as MaterialType]?.hp || 0) - 0.1) { isModified = true; break; }
+                if (heat && heat[i] > 0.05) { isModified = true; break; }
+                if (fire && fire[i] > 0.05) { isModified = true; break; }
+                if (molten && molten[i] > 0.05) { isModified = true; break; }
+                if (scorch && scorch[i] > 0) { isModified = true; break; }
+            }
+
+            if (isModified) {
+                const obj: any = { k: key };
+                obj.hp = this.compressFloatArray(hp);
+                if (heat) obj.h = this.compressFloatArray(heat);
+                if (fire) obj.f = this.compressFloatArray(fire);
+                if (molten) obj.m = this.compressFloatArray(molten);
+                if (scorch) obj.s = Array.from(scorch);
+                full.push(obj);
+            }
+        });
+
+        return full;
+    }
+
     public applyDeltaState(delta: any[]): void {
-        // If Host sends a "reset" or we want to track inactive tiles:
-        // For now, Host sends a list of keys that are active.
-        // We might want to remove local tiles that the host didn't send if they are "old".
+        if (!delta || !Array.isArray(delta)) return;
 
         delta.forEach(d => {
             const key = d.k;
+            if (!key) return;
             const [tx, ty] = key.split(',').map(Number);
 
-            // Special "Clear" command from Host
             if (d.c === 1) {
                 this.forceClear(key);
                 return;
             }
 
             this.activeTiles.add(key);
+
+            if (d.hp !== undefined) {
+                let hp = this.hpData.get(key);
+                if (!hp) {
+                    // If we don't have HP data yet, we might need material data too.
+                    // But assume Host sends enough to reconstruct or tile exists.
+                    hp = new Float32Array(this.subDiv * this.subDiv);
+                    this.hpData.set(key, hp);
+                }
+                this.decompressFloatArray(d.hp, hp);
+            }
 
             if (d.h !== undefined) {
                 let h = this.heatData.get(key);
@@ -1245,6 +1301,11 @@ export class HeatMap {
                 this.gpgpu.updateTileRGBA(tx, ty, rgba);
             }
         });
+
+        // If many tiles changed, mark world mesh as dirty once
+        if (delta.length > 5 && this.worldRef) {
+            this.worldRef.markMeshDirty();
+        }
     }
 
     private forceClear(key: string): void {

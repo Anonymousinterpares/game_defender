@@ -268,10 +268,19 @@ export class GameplayHUD {
         if (showDebugInfo) {
             const showGPU = ConfigManager.getInstance().get<boolean>('Debug', 'showGPUStatus');
             if (showGPU) {
-                const isGPU = GPUDriver.getInstance().isReady();
-                ctx.fillStyle = isGPU ? '#0ff' : '#f0f';
+                const drv = GPUDriver.getInstance();
+                const preferredGPU = ConfigManager.getInstance().get<boolean>('Visuals', 'useGPUAcceleration');
+                const isSupported = drv.isSupported();
+                const isActive = preferredGPU && isSupported;
+
+                ctx.fillStyle = isActive ? '#0ff' : (preferredGPU ? '#f00' : '#f0f');
                 ctx.font = 'bold 12px "Share Tech Mono"';
-                ctx.fillText(`MODE: ${isGPU ? 'GPU (ACCELERATED)' : 'CPU (FALLBACK)'}`, 10, currentY);
+
+                let modeText = 'CPU (ACTIVE)';
+                if (isActive) modeText = 'GPU (ACCELERATED)';
+                else if (preferredGPU && !isSupported) modeText = 'GPU (HARDWARE UNSUPPORTED)';
+
+                ctx.fillText(`MODE: ${modeText}`, 10, currentY);
                 currentY += 15;
             }
 
