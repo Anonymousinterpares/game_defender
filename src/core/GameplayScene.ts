@@ -26,6 +26,7 @@ import { WorldRenderer } from './renderers/WorldRenderer';
 import { MaterialType } from './HeatMap';
 import { WeatherTimePlugin } from './plugins/WeatherTimePlugin';
 import { ChaosPlugin } from './plugins/ChaosPlugin';
+import { GPURenderer } from './gpu/GPURenderer';
 
 export class GameplayScene implements Scene, HUDParent, LightingParent {
     public simulation: Simulation;
@@ -35,6 +36,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     protected lightingRenderer: LightingRenderer;
     protected benchmark: BenchmarkSystem;
     protected inputManager: InputManager;
+    protected gpuRenderer: GPURenderer;
 
     public cameraX: number = 0;
     public cameraY: number = 0;
@@ -74,6 +76,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         this.hud = new GameplayHUD(this);
         this.lightingRenderer = new LightingRenderer(this);
         this.benchmark = new BenchmarkSystem(this);
+        this.gpuRenderer = new GPURenderer();
     }
 
     public subtractCoins(amount: number): boolean {
@@ -100,6 +103,8 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         this.simulation.pluginManager.install(new WeatherTimePlugin());
         this.simulation.player.inputManager = this.inputManager; // Link input
         this.worldRenderer = new WorldRenderer(this.simulation.world);
+        this.gpuRenderer.setWorld(this.simulation.world);
+        this.gpuRenderer.updateConfig();
 
         ParticleSystem.getInstance().clear();
 
@@ -120,6 +125,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         SoundManager.getInstance().stopLoopSpatial('shoot_ray');
         SoundManager.getInstance().stopLoopSpatial('hit_laser');
         SoundManager.getInstance().stopLoopSpatial('hit_ray');
+        this.gpuRenderer.dispose();
     }
 
     update(dt: number): void {
@@ -181,6 +187,8 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
             LightManager.getInstance().clearConstantLights();
             LightManager.getInstance().clearType('fire');
         }
+
+        this.gpuRenderer.updateConfig();
         PerfMonitor.getInstance().end('update_total');
     }
 
@@ -269,7 +277,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
                 if (tx < 0 || tx >= this.world.getWidth()) continue;
                 const material = this.world.getTile(tx, ty);
                 if (material === MaterialType.NONE) continue;
-                
+
                 renderables.push({
                     y: (ty + 1) * tileSize, // Base Y of the wall
                     render: (c: CanvasRenderingContext2D) => {
@@ -315,6 +323,11 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         PerfMonitor.getInstance().begin('render_lighting');
         this.lightingRenderer.render(ctx);
         PerfMonitor.getInstance().end('render_lighting');
+
+        PerfMonitor.getInstance().begin('render_gpu');
+        this.gpuRenderer.render(this.cameraX, this.cameraY, viewW, viewH);
+        this.gpuRenderer.compositeToContext(ctx);
+        PerfMonitor.getInstance().end('render_gpu');
 
         if (this.player) {
             const mm = (window as any).MultiplayerManagerInstance || null;

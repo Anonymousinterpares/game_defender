@@ -115,6 +115,8 @@ export const MasterConfig: GameConfigSchema = {
     npcHordeThrust: { value: 900, type: 'number', min: 100, max: 3000, step: 50, description: 'Thrust for Horde NPC' }
   },
   Visuals: {
+    gpuEnabled: { value: false, type: 'boolean', description: 'Enable GPU Acceleration (Phase 0)' },
+    gpuResolutionScale: { value: 1.0, type: 'number', min: 0.1, max: 2.0, step: 0.1, description: 'GPU Render Resolution Scale' },
     enableSmoke: { value: true, type: 'boolean', description: 'Enable Smoke Effects (Wind Responsive)' },
     smokeResolutionScale: { value: 0.5, type: 'number', min: 0.1, max: 1.0, step: 0.05, description: 'Smoke Resolution Scale (Performance)' },
     smokeMaxParticles: { value: 5000, type: 'number', min: 100, max: 10000, step: 100, description: 'Max Smoke Particles' },

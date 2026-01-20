@@ -137,6 +137,8 @@ export class BenchmarkScene extends GameplayScene {
         this.simulation.projectileSystem.update(dt, this.simulation.entityManager);
         (this.simulation as any).particleSystemECS.update(dt, this.simulation.entityManager);
         (this.simulation as any).projectiles = this.projectiles.filter(p => p.active);
+
+        this.gpuRenderer.updateConfig();
         PerfMonitor.getInstance().end('update_total');
     }
 
