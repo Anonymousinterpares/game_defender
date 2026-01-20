@@ -10,7 +10,7 @@ export class GPUDriver {
     private constructor() {
         this.canvas = document.createElement('canvas');
         this.canvas.style.display = 'none';
-        
+
         const useGPU = ConfigManager.getInstance().get<boolean>('Visuals', 'useGPUAcceleration');
         if (!useGPU) {
             console.log('GPU Acceleration disabled in MasterConfig.');
@@ -40,7 +40,7 @@ export class GPUDriver {
             gl.depthFunc(gl.LEQUAL);
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-            
+
             console.log('GPUDriver: WebGL2 Initialized.');
         } catch (e) {
             console.error('GPUDriver: Failed to initialize WebGL2', e);
@@ -123,5 +123,47 @@ export class GPUDriver {
         if (!program) throw new Error(`Program ${name} not found`);
         this.gl.useProgram(program);
         return program;
+    }
+
+    // --- GPGPU Helpers ---
+
+    public createTexture(width: number, height: number, internalFormat: number = WebGL2RenderingContext.RGBA32F): WebGLTexture {
+        const gl = this.getGL();
+        const texture = gl.createTexture()!;
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+
+        // RGBA32F requires EXT_color_buffer_float for rendering to it
+        if (internalFormat === gl.RGBA32F) {
+            const ext = gl.getExtension('EXT_color_buffer_float');
+            if (!ext) console.warn('GPUDriver: EXT_color_buffer_float not supported. GPGPU might fail.');
+        }
+
+        gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, gl.RGBA, gl.FLOAT, null);
+
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+        return texture;
+    }
+
+    public createFramebuffer(texture: WebGLTexture): WebGLFramebuffer {
+        const gl = this.getGL();
+        const fbo = gl.createFramebuffer()!;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (status !== gl.FRAMEBUFFER_COMPLETE) {
+            throw new Error(`GPUDriver: Framebuffer incomplete: ${status}`);
+        }
+
+        return fbo;
+    }
+
+    public readPixels(x: number, y: number, width: number, height: number, format: number, type: number, pixels: ArrayBufferView): void {
+        const gl = this.getGL();
+        gl.readPixels(x, y, width, height, format, type, pixels);
     }
 }

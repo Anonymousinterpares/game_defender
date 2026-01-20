@@ -3,6 +3,8 @@ import { SoundManager } from './SoundManager';
 import { ConfigManager } from '../config/MasterConfig';
 import { FloorDecalManager } from './FloorDecalManager';
 import { WeatherManager } from './WeatherManager';
+import { GPUDriver } from './renderers/GPUDriver';
+import { HeatMapGPGPU } from './renderers/HeatMapGPGPU';
 
 export enum MaterialType {
     NONE = 0,
@@ -66,6 +68,9 @@ export class HeatMap {
     private scratchImageData: ImageData | null = null;
     private scratchUint32: Uint32Array | null = null;
 
+    private gpgpu: HeatMapGPGPU | null = null;
+    private useGPU: boolean = false;
+
     // Zero-allocation scratch buffers
     private scratchHeat: Float32Array;
     private scratchFire: Float32Array;
@@ -80,10 +85,12 @@ export class HeatMap {
         this.scratchHeat = new Float32Array(100); // 10x10
         this.scratchFire = new Float32Array(100);
         this.scratchMolten = new Float32Array(100);
-        
+
         if (!HeatMap.lutsInitialized) {
             this.initLUTs();
         }
+
+        this.useGPU = ConfigManager.getInstance().get<boolean>('Visuals', 'useGPUAcceleration');
     }
 
     private initLUTs() {
@@ -93,7 +100,7 @@ export class HeatMap {
             const alpha = Math.floor((intensity < 0.8 ? (0.4 + intensity * 0.6) : 1.0) * 255);
             // ImageData is RGBA, so Uint32 in Little Endian is 0xAABBGGRR
             HeatMap.heatColorLUT[i] = (alpha << 24) | (components.b << 16) | (components.g << 8) | components.r;
-            
+
             // Molten: Gold/Orange
             const mAlpha = Math.floor(Math.min(1.0, intensity) * 255);
             HeatMap.moltenColorLUT[i] = (mAlpha << 24) | (0 << 16) | (200 << 8) | 255;
@@ -114,6 +121,11 @@ export class HeatMap {
         this.worldRef = world;
         this.widthTiles = world.getWidth();
         this.heightTiles = world.getHeight();
+
+        if (this.useGPU && GPUDriver.getInstance().isReady()) {
+            this.gpgpu = new HeatMapGPGPU(this.widthTiles, this.heightTiles, this.subDiv);
+            console.log('HeatMap: GPGPU Initialized.');
+        }
     }
 
     public isSubTileBurning(worldX: number, worldY: number): boolean {
@@ -250,7 +262,7 @@ export class HeatMap {
             if (summary.burningCount > 0) {
                 cluster.r += fireColor.r; cluster.g += fireColor.g; cluster.b += fireColor.b;
             } else if (summary.maxMolten > 0.1) {
-                cluster.r += 255; cluster.g += 170; cluster.b += 0; 
+                cluster.r += 255; cluster.g += 170; cluster.b += 0;
             } else {
                 const hc = HeatMap.getHeatColorComponents(summary.maxHeat);
                 cluster.r += hc.r; cluster.g += hc.g; cluster.b += hc.b;
@@ -339,6 +351,10 @@ export class HeatMap {
                     this.ignite(tx, ty, i);
                 }
             }
+        }
+
+        if (this.gpgpu) {
+            this.gpgpu.updateTileHeat(tx, ty, data);
         }
     }
 
@@ -506,8 +522,12 @@ export class HeatMap {
     }
 
     public update(dt: number): void {
+        if (this.gpgpu) {
+            this.gpgpu.update(dt, this.decayRate, this.spreadRate);
+        }
+
         this.frameCount++;
-        
+
         const effectiveDT = dt; // Continuous update
         const toRemove: string[] = [];
         const soundMgr = SoundManager.getInstance();
@@ -596,7 +616,7 @@ export class HeatMap {
                         const avg = sum / count;
                         this.scratchHeat[idx] = val + (avg - val) * this.spreadRate;
                         this.scratchHeat[idx] = Math.max(0, this.scratchHeat[idx] - this.decayRate * effectiveDT);
-                        
+
                         const finalHeat = this.scratchHeat[idx];
                         if (finalHeat > 0.01) {
                             hasActivity = true;
@@ -816,6 +836,15 @@ export class HeatMap {
     }
 
     public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
+        if (this.gpgpu) {
+            this.gpgpu.draw(
+                cameraX, cameraY,
+                ctx.canvas.width, ctx.canvas.height,
+                this.widthTiles * this.tileSize, this.heightTiles * this.tileSize
+            );
+            // No return here yet, we might still want to draw CPU fire/molten etc. if not ported
+        }
+
         const viewW = ctx.canvas.width;
         const viewH = ctx.canvas.height;
         const time = performance.now() * 0.001;
@@ -891,13 +920,13 @@ export class HeatMap {
                     sCtx.putImageData(sData, 0, 0);
                     ctx.save();
                     ctx.imageSmoothingEnabled = true;
-                    
+
                     // Optimization: Use additive blending for glow instead of shadowBlur
                     ctx.globalCompositeOperation = 'screen';
                     ctx.globalAlpha = 0.5;
                     // Layer 1: Outer Glow (Scaled up)
                     ctx.drawImage(sCanv, worldX - 4, worldY - 4, this.tileSize + 8, this.tileSize + 8);
-                    
+
                     // Layer 2: Core
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.globalAlpha = 0.95;
@@ -919,7 +948,7 @@ export class HeatMap {
                             // Check if quadrant has fire
                             let quadIntensity = 0;
                             let burningInQuad = 0;
-                            
+
                             for (let sy = qy * qSize; sy < (qy + 1) * qSize; sy++) {
                                 for (let sx = qx * qSize; sx < (qx + 1) * qSize; sx++) {
                                     const fIdx = sy * this.subDiv + sx;
@@ -942,7 +971,7 @@ export class HeatMap {
                                     const fw = this.fireAsset.width / frameCount;
                                     const fh = this.fireAsset.height;
                                     const fx = frame * fw;
-                                    
+
                                     // Scale sprite based on quadrant intensity
                                     const displaySize = quadWorldSize * (1.2 + avgIntensity * 0.8);
                                     ctx.drawImage(this.fireAsset, fx, 0, fw, fh, rx - displaySize / 2, ry - displaySize * 0.8, displaySize, displaySize);
@@ -1090,25 +1119,25 @@ export class HeatMap {
 
             if (d.h !== undefined) {
                 let h = this.heatData.get(key);
-                if (!h) { 
-                    h = new Float32Array(this.subDiv * this.subDiv); 
-                    this.heatData.set(key, h); 
+                if (!h) {
+                    h = new Float32Array(this.subDiv * this.subDiv);
+                    this.heatData.set(key, h);
                 }
                 this.decompressFloatArray(d.h, h);
             }
             if (d.f !== undefined) {
                 let f = this.fireData.get(key);
-                if (!f) { 
-                    f = new Float32Array(this.subDiv * this.subDiv); 
-                    this.fireData.set(key, f); 
+                if (!f) {
+                    f = new Float32Array(this.subDiv * this.subDiv);
+                    this.fireData.set(key, f);
                 }
                 this.decompressFloatArray(d.f, f);
             }
             if (d.m !== undefined) {
                 let m = this.moltenData.get(key);
-                if (!m) { 
-                    m = new Float32Array(this.subDiv * this.subDiv); 
-                    this.moltenData.set(key, m); 
+                if (!m) {
+                    m = new Float32Array(this.subDiv * this.subDiv);
+                    this.moltenData.set(key, m);
                 }
                 this.decompressFloatArray(d.m, m);
             }
