@@ -50,16 +50,37 @@ void main() {
 
     vec4 simData = texture(u_simTexture, simUV);
     float heat = simData.r;
-    float hp = simData.a;
+    float fire = simData.g;
+    float molten = simData.b;
+    float packed = simData.a;
 
-    // Only render heat if wall is destroyed (HP <= 0) - matching CPU logic
-    if (heat < 0.01 || hp > 0.1) {
-        discard;
+    int matType = int(floor(packed));
+    float hp = fract(packed);
+
+    // 1. Render Fire Effects (Top Priority)
+    if (fire > 0.1) {
+        // Red-Orange glow for fire
+        vec3 fireColor = vec3(1.0, 0.4 + fire * 0.6, 0.0);
+        outColor = vec4(fireColor, 0.6 + fire * 0.4);
+        return;
     }
 
-    vec3 color = getHeatColor(heat);
-    float alpha = heat < 0.8 ? (0.4 + heat * 0.6) : 1.0;
-    
-    outColor = vec4(color, alpha);
+    // 2. Render Molten Metal
+    if (molten > 0.05) {
+        // Gold/Orange core with glow
+        vec3 moltenColor = vec3(1.0, 0.6 + molten * 0.2, 0.0);
+        outColor = vec4(moltenColor, 0.5 + molten * 0.5);
+        return;
+    }
+
+    // 3. Render Heat Glow (Only if no wall or wall is low HP)
+    if (heat > 0.01 && hp < 0.8) {
+        vec3 color = getHeatColor(heat);
+        float alpha = heat < 0.8 ? (0.4 + heat * 0.6) : 1.0;
+        outColor = vec4(color, alpha);
+        return;
+    }
+
+    discard;
 }
 `;

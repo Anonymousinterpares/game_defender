@@ -68,7 +68,7 @@ export class HeatMapGPGPU {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    public update(dt: number, decayRate: number, spreadRate: number): void {
+    public update(dt: number, decayRate: number, spreadRate: number, fireSpeed: number): void {
         const gl = this.driver.getGL();
 
         // Ensure parity if sync happened
@@ -85,12 +85,16 @@ export class HeatMapGPGPU {
         const uDt = gl.getUniformLocation(this.simProgram, 'u_dt');
         const uDecayRate = gl.getUniformLocation(this.simProgram, 'u_decayRate');
         const uSpreadRate = gl.getUniformLocation(this.simProgram, 'u_spreadRate');
+        const uFireSpeed = gl.getUniformLocation(this.simProgram, 'u_fireSpeed');
         const uTexelSize = gl.getUniformLocation(this.simProgram, 'u_texelSize');
+        const uSeed = gl.getUniformLocation(this.simProgram, 'u_seed');
 
         gl.uniform1f(uDt, dt);
         gl.uniform1f(uDecayRate, decayRate);
         gl.uniform1f(uSpreadRate, spreadRate);
+        gl.uniform1f(uFireSpeed, fireSpeed);
         gl.uniform2f(uTexelSize, 1.0 / this.width, 1.0 / this.height);
+        gl.uniform1f(uSeed, Math.random());
 
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, sourceTex);
@@ -146,32 +150,14 @@ export class HeatMapGPGPU {
     /**
      * Updates a specific tile's data in both ping-pong textures to maintain consistency.
      */
-    public updateTileData(tx: number, ty: number, heat: Float32Array | null, hp: Float32Array | null): void {
+    public updateTileRGBA(tx: number, ty: number, rgba: Float32Array): void {
         const gl = this.driver.getGL();
         const x = tx * this.subDiv;
         const y = ty * this.subDiv;
 
-        // We need to update both textures because simulation reads from one and writes to another.
-        // If we only update one, the next frame will overwrite it with old data from the other.
         [this.textureA, this.textureB].forEach(tex => {
             gl.bindTexture(gl.TEXTURE_2D, tex);
-
-            if (heat) {
-                // R channel: Heat
-                gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, this.subDiv, this.subDiv, gl.RED, gl.FLOAT, heat);
-            }
-            if (hp) {
-                // A channel: HP (we need to be careful here, WebGL2 doesn't easily allow updating JUST the alpha channel)
-                // We might need to read the current pixel first, or just upload a full RGBA block.
-                // For simplicity now, let's just upload Heat to RED and Alpha to ALPHA if we can.
-                // Actually, texSubImage2D into RGBA32F expects a full RGBA buffer if we use gl.RGBA.
-                // Let's create a temporary RGBA buffer for this tile.
-                const rgba = new Float32Array(this.subDiv * this.subDiv * 4);
-                // This is slow if done many times, but okay for tile updates.
-
-                // If we want to be faster, we should use a shader to "stamp" data.
-                // For now, let's just do Heat.
-            }
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, this.subDiv, this.subDiv, gl.RGBA, gl.FLOAT, rgba);
         });
     }
 
@@ -182,13 +168,46 @@ export class HeatMapGPGPU {
 
         [this.textureA, this.textureB].forEach(tex => {
             gl.bindTexture(gl.TEXTURE_2D, tex);
-            // In RGBA32F, we use RED format to update just the first channel? 
+            // In RGBA32F, we use RED format to update just the first channel?
             // No, the internal format is RGBA32F. Uploading RED might not work as intended for all channels.
             // But WebGL2 allows gl.RED for gl.RGBA32F textures if used with texSubImage2D?
             // "If the internal format is a signed/unsigned integer or floating-point format, the format and typeMust be a compatible combination."
             // gl.RED + gl.FLOAT is compatible with gl.RGBA32F (updates R channel).
             gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, this.subDiv, this.subDiv, gl.RED, gl.FLOAT, heat);
         });
+    }
+
+    public updateTilePacked(tx: number, ty: number, material: Uint8Array, hp: Float32Array): void {
+        const gl = this.driver.getGL();
+        const x = tx * this.subDiv;
+        const y = ty * this.subDiv;
+
+        const packed = new Float32Array(this.subDiv * this.subDiv);
+        for (let i = 0; i < packed.length; i++) {
+            // Pack: floor(A) is material, fract(A) is hp fraction
+            // Actually, we use 1.0 as full HP. So Material + (HP/MaxHP).
+            // But we don't know MaxHP here. MaterialType + 0.99 for full HP.
+            // Let's just use MaterialType + clamp(HP/1000.0, 0.0, 0.99)
+            // Or better: normalized HP between 0 and 1.
+            // Let's assume input HP is already relative or we just use 0.99 for "alive".
+            packed[i] = material[i] + (hp[i] > 0 ? 0.99 : 0.0);
+        }
+
+        [this.textureA, this.textureB].forEach(tex => {
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            // ALPHA channel is packed data
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, this.subDiv, this.subDiv, gl.ALPHA, gl.FLOAT, packed);
+        });
+    }
+
+    public updateTileMolten(tx: number, ty: number, molten: Float32Array): void {
+        // Use updateTileRGBA instead
+    }
+
+    public updateTileHP(tx: number, ty: number, hp: Float32Array): void {
+        // Similar to others but updates Alpha.
+        // Again, no gl.ALPHA for direct alpha update easily.
+        // Use updateTilePacked instead.
     }
 
     public dispose(): void {

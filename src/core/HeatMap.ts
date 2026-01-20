@@ -197,6 +197,10 @@ export class HeatMap {
         const hp = MATERIAL_PROPS[material].hp;
         const hData = new Float32Array(this.subDiv * this.subDiv).fill(hp);
         this.hpData.set(key, hData);
+
+        if (this.gpgpu) {
+            this.gpgpu.updateTilePacked(tx, ty, mData, hData);
+        }
     }
 
     public isSubTileDestroyed(worldX: number, worldY: number): boolean {
@@ -354,6 +358,7 @@ export class HeatMap {
         }
 
         if (this.gpgpu) {
+            // Need to sync heat efficiently. Since we just updated heat, we can use updateTileHeat
             this.gpgpu.updateTileHeat(tx, ty, data);
         }
     }
@@ -387,6 +392,22 @@ export class HeatMap {
             fData[idx] = 0.1;
         }
         this.activeTiles.add(key);
+
+        if (this.gpgpu && fData) {
+            // Pack into a full RGBA block for the GPGPU update
+            const rgba = new Float32Array(this.subDiv * this.subDiv * 4);
+            const hData = this.heatData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+            const mData = this.materialData.get(key) || new Uint8Array(this.subDiv * this.subDiv);
+            const hpData = this.hpData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+
+            for (let i = 0; i < this.subDiv * this.subDiv; i++) {
+                rgba[i * 4 + 0] = hData[i];
+                rgba[i * 4 + 1] = fData[i];
+                rgba[i * 4 + 2] = 0; // Molten
+                rgba[i * 4 + 3] = mData[i] + (hpData[i] > 0 ? 0.99 : 0.0);
+            }
+            this.gpgpu.updateTileRGBA(tx, ty, rgba);
+        }
     }
 
     public forceIgniteArea(worldX: number, worldY: number, radius: number): void {
@@ -519,11 +540,26 @@ export class HeatMap {
                 this.applyScorch(tx, ty, i);
             }
         }
+
+        if (this.gpgpu) {
+            const rgba = new Float32Array(this.subDiv * this.subDiv * 4);
+            const heat = this.heatData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+            const fire = this.fireData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+            const molten = this.moltenData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+            for (let i = 0; i < this.subDiv * this.subDiv; i++) {
+                rgba[i * 4 + 0] = heat[i];
+                rgba[i * 4 + 1] = fire[i];
+                rgba[i * 4 + 2] = molten[i];
+                rgba[i * 4 + 3] = mData[i] + (hData[i] > 0 ? 0.99 : 0.0);
+            }
+            this.gpgpu.updateTileRGBA(tx, ty, rgba);
+        }
     }
 
     public update(dt: number): void {
         if (this.gpgpu) {
-            this.gpgpu.update(dt, this.decayRate, this.spreadRate);
+            const fireSpeed = ConfigManager.getInstance().get<number>('Fire', 'fireSpreadSpeed') || 0.4;
+            this.gpgpu.update(dt, this.decayRate, this.spreadRate, fireSpeed);
         }
 
         this.frameCount++;
@@ -1159,6 +1195,23 @@ export class HeatMap {
                     this.worldRef.notifyTileChange(tx, ty);
                 }
             }
+
+            if (this.gpgpu) {
+                const rgba = new Float32Array(this.subDiv * this.subDiv * 4);
+                const heat = this.heatData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+                const fire = this.fireData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+                const molten = this.moltenData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+                const materials = this.materialData.get(key) || new Uint8Array(this.subDiv * this.subDiv).fill(MaterialType.NONE);
+                const hps = this.hpData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+
+                for (let i = 0; i < this.subDiv * this.subDiv; i++) {
+                    rgba[i * 4 + 0] = heat[i];
+                    rgba[i * 4 + 1] = fire[i];
+                    rgba[i * 4 + 2] = molten[i];
+                    rgba[i * 4 + 3] = materials[i] + (hps[i] > 0 ? 0.99 : 0.0);
+                }
+                this.gpgpu.updateTileRGBA(tx, ty, rgba);
+            }
         });
     }
 
@@ -1166,9 +1219,28 @@ export class HeatMap {
         this.heatData.delete(key);
         this.fireData.delete(key);
         this.moltenData.delete(key);
-        this.activeTiles.delete(key);
+        const hpData = this.hpData.get(key);
+        if (hpData) hpData.fill(0); // Clear HP data if it exists
+        this.activeTiles.delete(key); // This should be delete, not add
+
         const [tx, ty] = key.split(',').map(Number);
         if (this.worldRef) this.worldRef.notifyTileChange(tx, ty);
+
+        if (this.gpgpu) {
+            const rgba = new Float32Array(this.subDiv * this.subDiv * 4);
+            const heat = this.heatData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+            const fire = this.fireData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+            const molten = this.moltenData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+            const mData = this.materialData.get(key) || new Uint8Array(this.subDiv * this.subDiv).fill(MaterialType.NONE); // Added to define mData
+            const hData = hpData || new Float32Array(this.subDiv * this.subDiv); // Use hpData, default to empty
+            for (let i = 0; i < this.subDiv * this.subDiv; i++) {
+                rgba[i * 4 + 0] = heat[i];
+                rgba[i * 4 + 1] = fire[i];
+                rgba[i * 4 + 2] = molten[i];
+                rgba[i * 4 + 3] = mData[i] + (hData[i] > 0 ? 0.99 : 0.0);
+            }
+            this.gpgpu.updateTileRGBA(tx, ty, rgba);
+        }
     }
 
     private compressFloatArray(arr: Float32Array): number[] {
