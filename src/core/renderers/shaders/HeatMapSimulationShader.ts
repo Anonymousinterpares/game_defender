@@ -44,14 +44,20 @@ void main() {
         float hp = fract(packed);
         bool isWall = matType > 0 && hp > 0.0;
 
-        // 1. Heat Diffusion
+        // 1. Heat Diffusion - EXACT CPU LOGIC (lines 681-683 of HeatMap.ts)
+        // CPU: sum neighbors, avg = sum/count, new = val + (avg - val) * spreadRate, then decay
         float neighborsHeat = (
             texture(u_prevStruct, v_uv + vec2(u_texelSize.x, 0.0)).r +
             texture(u_prevStruct, v_uv + vec2(-u_texelSize.x, 0.0)).r +
             texture(u_prevStruct, v_uv + vec2(0.0, u_texelSize.y)).r +
             texture(u_prevStruct, v_uv + vec2(0.0, -u_texelSize.y)).r
         );
-        float nextHeat = heat + (neighborsHeat / 4.0 - heat) * u_spreadRate;
+        float avg = (heat + neighborsHeat) / 5.0; // Include self in average like CPU (val in sum, count starts at 1)
+        
+        // CPU formula: val + (avg - val) * spreadRate
+        float nextHeat = heat + (avg - heat) * u_spreadRate;
+        
+        // CPU decay: max(0, heat - decayRate * dt)
         nextHeat = max(0.0, nextHeat - u_decayRate * u_dt);
 
         float nextFire = fire;
@@ -80,14 +86,26 @@ void main() {
             }
         }
 
-        // 3. Metal Logic (METAL)
-        if (matType == 4 && isWall && nextHeat > 0.5) {
-            nextHP = max(0.0, hp - u_dt * 0.2);
-            if (nextHP <= 0.0) { nextMolten = 1.0; nextHeat = 0.5; }
+        // 0. Material Destruction & Melting
+        if (nextHP > 0.0) {
+            if (nextHeat > 0.95) {
+                // High heat vaporizes or melts
+                nextHP -= u_dt * 0.5; // Vaporize rate
+                if (matType == 4) { // METAL melts
+                    nextMolten += (1.0 - nextHP) * 0.1;
+                }
+            }
         }
-
-        // 4. Molten Flow
-        if (molten > 0.0) {
+        
+        // Ensure molten metal stays bright at destruction site (prevents flickering)
+        if (nextHP <= 0.01 && matType == 4) {
+            nextMolten = max(nextMolten, 0.85); // Keep bright
+            // Also maintain some residual heat to prevent sudden cooling
+            nextHeat = max(nextHeat, 0.3);
+        }
+        
+        // 4. Molten Flow (only if NOT at destruction site to prevent premature drain)
+        if (molten > 0.0 && (nextHP > 0.01 || matType != 4)) {
             float pressure = molten + nextHeat * 0.5;
             if (pressure > 0.15) {
                 for(int i=0; i<4; i++) {
@@ -97,42 +115,62 @@ void main() {
                     );
                     vec4 nData = texture(u_prevStruct, nUv);
                     if (fract(nData.a) <= 0.01) { // Empty tile
-                        nextMolten = max(0.0, nextMolten - pressure * 0.5 * u_dt);
+                        nextMolten = max(0.0, nextMolten - pressure * 0.3 * u_dt); // Slower drain
                     }
                 }
             }
-            if (nextHeat < 0.2) nextMolten = max(0.0, nextMolten - u_dt * 0.5);
+            // Slower cooling decay - only when heat is very low
+            if (nextHeat < 0.1) nextMolten = max(0.0, nextMolten - u_dt * 0.2);
         }
 
         outColor = vec4(clamp(nextHeat, 0.0, 1.0), clamp(nextFire, 0.0, 1.0), clamp(nextMolten, 0.0, 2.0), float(matType) + nextHP);
     } else {
-        // --- PASS 1: FLUID (Smoke/Steam) ---
-        // R: Smoke Density, G: Steam/Mist, B: Unused, A: Unused
+        // --- PASS 1: FLUID (Smoke/Steam/Scorch) ---
+        // R: Smoke Density, G: Steam/Mist, B: Scorch, A: Unused
         float smoke = fluidData.r;
+        float steam = fluidData.g;
+        float scorch = fluidData.b;
+        
+        float heat = structData.r;
         float fire = structData.g;
 
-        // 1. Diffusion + Drift (Smoke rises "up", which is -Y in UV space usually, but world space depends on camera)
-        // Let's assume a global 'drift' up for smoke.
-        vec2 drift = vec2(0.0, u_texelSize.y * 0.5); // Drift "up" on screen
+        // 1. Scorch Accumulation (Permanent until cleared)
+        float nextScorch = max(scorch, heat * 0.8);
         
-        float neighborsSmoke = (
-            texture(u_prevFluid, v_uv + vec2(u_texelSize.x, 0.0) - drift).r +
-            texture(u_prevFluid, v_uv + vec2(-u_texelSize.x, 0.0) - drift).r +
-            texture(u_prevFluid, v_uv + vec2(0.0, u_texelSize.y) - drift).r +
-            texture(u_prevFluid, v_uv + vec2(0.0, -u_texelSize.y) - drift).r
-        );
+        // 2. Smoke/Steam: Simple diffusion with upward bias
+        // Sample from neighbors with slight upward bias (sample from below, contribute to above)
+        vec4 aboveFluid = texture(u_prevFluid, v_uv + vec2(0.0, -u_texelSize.y));  // Above in world
+        vec4 belowFluid = texture(u_prevFluid, v_uv + vec2(0.0, u_texelSize.y));   // Below in world
+        vec4 leftFluid = texture(u_prevFluid, v_uv + vec2(-u_texelSize.x, 0.0));
+        vec4 rightFluid = texture(u_prevFluid, v_uv + vec2(u_texelSize.x, 0.0));
         
-        float nextSmoke = smoke + (neighborsSmoke / 4.0 - smoke) * 0.1; // Slower spread for smoke
+        // Weighted average: receive more from below (rises), less from above
+        float nextSmoke = smoke * 0.9;  // Retain and fade
+        nextSmoke += belowFluid.r * 0.15;  // Receive from below (creates upward motion)
+        nextSmoke += (leftFluid.r + rightFluid.r) * 0.02;  // Slight horizontal spread
+        nextSmoke -= aboveFluid.r * 0.05;  // Give to above (limits accumulation)
         
-        // 2. Production (from Fire)
+        float nextSteam = steam * 0.85;
+        nextSteam += belowFluid.g * 0.2;
+        nextSteam -= aboveFluid.g * 0.05;
+        
+        // 3. Smoke Production (from Fire AND high heat smoldering)
         if (fire > 0.05) {
-            nextSmoke += fire * u_dt * 2.0;
+            nextSmoke += fire * u_dt * 1.5;
+        } else if (heat > 0.7) {
+            nextSmoke += (heat - 0.7) * u_dt * 0.5;
         }
 
-        // 3. Decay
-        nextSmoke = max(0.0, nextSmoke - 0.1 * u_dt);
+        // 4. Steam Production (when Heat is high - evaporation)
+        if (heat > 0.4) {
+             nextSteam += (heat - 0.4) * u_dt * 1.0;
+        }
+
+        // 5. Strong Decay to prevent infinite accumulation
+        nextSmoke = max(0.0, nextSmoke - 0.4 * u_dt);
+        nextSteam = max(0.0, nextSteam - 0.8 * u_dt);
         
-        outColor = vec4(clamp(nextSmoke, 0.0, 1.0), 0.0, 0.0, 1.0);
+        outColor = vec4(clamp(nextSmoke, 0.0, 1.0), clamp(nextSteam, 0.0, 1.0), clamp(nextScorch, 0.0, 1.0), 1.0);
     }
 }
 `;

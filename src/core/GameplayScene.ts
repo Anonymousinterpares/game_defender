@@ -269,7 +269,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
                 if (tx < 0 || tx >= this.world.getWidth()) continue;
                 const material = this.world.getTile(tx, ty);
                 if (material === MaterialType.NONE) continue;
-                
+
                 renderables.push({
                     y: (ty + 1) * tileSize, // Base Y of the wall
                     render: (c: CanvasRenderingContext2D) => {
@@ -315,6 +315,16 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         PerfMonitor.getInstance().begin('render_lighting');
         this.lightingRenderer.render(ctx);
         PerfMonitor.getInstance().end('render_lighting');
+
+        // EMISSIVE PASS: Render HeatMap again AFTER lighting with 'screen' blend
+        // This makes heat "burn through" shadows by adding brightness back
+        if (this.heatMap) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'screen'; // Additive-like: brightens without overblowing
+            ctx.translate(-this.cameraX, -this.cameraY);
+            this.heatMap.render(ctx, this.cameraX, this.cameraY);
+            ctx.restore();
+        }
 
         if (this.player) {
             const mm = (window as any).MultiplayerManagerInstance || null;

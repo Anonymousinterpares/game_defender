@@ -155,7 +155,7 @@ export class HeatMapGPGPU {
         return this.isATarget ? this.textureB : this.textureA;
     }
 
-    public draw(cameraX: number, cameraY: number, viewW: number, viewH: number, worldW: number, worldH: number): void {
+    public draw(cameraX: number, cameraY: number, viewW: number, viewH: number, worldW: number, worldH: number, time: number): void {
         const gl = this.driver.getGL();
         const simTex = this.getSimulationTexture();
         const fluidTex = this.getFluidTexture();
@@ -168,10 +168,12 @@ export class HeatMapGPGPU {
         const uCamera = gl.getUniformLocation(this.renderProgram, 'u_camera');
         const uViewDim = gl.getUniformLocation(this.renderProgram, 'u_viewDim');
         const uWorldDim = gl.getUniformLocation(this.renderProgram, 'u_worldDim');
+        const uTime = gl.getUniformLocation(this.renderProgram, 'u_time');
 
         gl.uniform2f(uCamera, cameraX, cameraY);
         gl.uniform2f(uViewDim, viewW, viewH);
         gl.uniform2f(uWorldDim, worldW, worldH);
+        gl.uniform1f(uTime, time);
 
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, simTex);

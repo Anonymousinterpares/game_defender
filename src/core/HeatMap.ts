@@ -911,11 +911,16 @@ export class HeatMap {
             this.gpgpu.draw(
                 cameraX, cameraY,
                 ctx.canvas.width, ctx.canvas.height,
-                this.widthTiles * this.tileSize, this.heightTiles * this.tileSize
+                this.widthTiles * this.tileSize, this.heightTiles * this.tileSize,
+                performance.now() * 0.001
             );
 
+            // Draw the GPGPU canvas
             ctx.save();
             ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+            // Phase 1: Burn-through logic
+            // We draw it normally, but we have moved the call to after lighting in GameplayScene.
             ctx.drawImage(drv.getCanvas(), 0, 0);
             ctx.restore();
 
