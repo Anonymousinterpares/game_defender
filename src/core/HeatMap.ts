@@ -560,6 +560,11 @@ export class HeatMap {
         if (this.gpgpu) {
             const fireSpeed = ConfigManager.getInstance().get<number>('Fire', 'fireSpreadSpeed') || 0.4;
             this.gpgpu.update(dt, this.decayRate, this.spreadRate, fireSpeed);
+
+            // Periodic read-back of modified tiles (throttle to 5fps for read-back)
+            if (this.frameCount % 12 === 0) {
+                this.readBackModifiedTiles();
+            }
         }
 
         this.frameCount++;
@@ -1263,6 +1268,63 @@ export class HeatMap {
             target[i] = source[i];
         }
     }
+
+    private readBackModifiedTiles(): void {
+        if (!this.gpgpu) return;
+
+        const scratchRGBA = new Float32Array(this.subDiv * this.subDiv * 4);
+
+        // We only need to read back tiles that are 'active' (simulated) 
+        // AND have wall content that could be destroyed.
+        for (const key of this.activeTiles) {
+            const [tx, ty] = key.split(',').map(Number);
+            const hp = this.hpData.get(key);
+            if (!hp) continue;
+
+            // Check if it's already mostly destroyed on CPU, no need to read
+            // Actually, we need to read to know IF it got destroyed on GPU.
+
+            this.gpgpu.readTileData(tx, ty, scratchRGBA);
+
+            let changed = false;
+            const hData = this.heatData.get(key);
+            const fData = this.fireData.get(key);
+            const mData = this.materialData.get(key);
+            const molten = this.moltenData.get(key) || new Float32Array(this.subDiv * this.subDiv);
+
+            if (!hData || !fData || !mData) continue;
+
+            for (let i = 0; i < this.subDiv * this.subDiv; i++) {
+                // R: Heat, G: Fire, B: Molten, A: Packed (Mat+HP)
+                const gHeat = scratchRGBA[i * 4 + 0];
+                const gFire = scratchRGBA[i * 4 + 1];
+                const gMolten = scratchRGBA[i * 4 + 2];
+                const gPacked = scratchRGBA[i * 4 + 3];
+
+                const gHP = fract(gPacked);
+
+                // Update CPU state if GPU changed significantly
+                if (Math.abs(hData[i] - gHeat) > 0.05) { hData[i] = gHeat; }
+                if (Math.abs(fData[i] - gFire) > 0.05) { fData[i] = gFire; }
+                if (Math.abs(molten[i] - gMolten) > 0.05) { molten[i] = gMolten; }
+
+                if (hp[i] > 0 && gHP <= 0.01) {
+                    hp[i] = 0;
+                    changed = true;
+                }
+            }
+
+            if (changed && this.worldRef) {
+                this.worldRef.markMeshDirty();
+                this.worldRef.notifyTileChange(tx, ty);
+                this.worldRef.checkTileDestruction(tx, ty);
+            }
+        }
+    }
+}
+
+function fract(x: number): number {
+    return x - Math.floor(x);
 }
 
 

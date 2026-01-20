@@ -210,6 +210,34 @@ export class HeatMapGPGPU {
         // Use updateTilePacked instead.
     }
 
+    /**
+     * Reads back data from the GPU simulation texture.
+     * This is relatively slow, so it should be used judiciously.
+     */
+    public readTileData(tx: number, ty: number, outRGBA: Float32Array): void {
+        const gl = this.driver.getGL();
+        const x = tx * this.subDiv;
+        const y = ty * this.subDiv;
+        const targetFbo = !this.isATarget ? this.fboA : this.fboB;
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
+        gl.readPixels(x, y, this.subDiv, this.subDiv, gl.RGBA, gl.FLOAT, outRGBA);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+
+    /**
+     * Reads back the entire simulation texture.
+     * Use for full world synchronization.
+     */
+    public readAllData(outRGBA: Float32Array): void {
+        const gl = this.driver.getGL();
+        const targetFbo = !this.isATarget ? this.fboA : this.fboB;
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
+        gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.FLOAT, outRGBA);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+
     public dispose(): void {
         const gl = this.driver.getGL();
         gl.deleteTexture(this.textureA);
