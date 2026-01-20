@@ -495,7 +495,7 @@ export class ParticleSystem {
     private emitHeatSmoke(world: World): void {
         const heatMap = world.getHeatMap();
         if (!heatMap) return;
-        const activeTiles = (heatMap as any).activeTiles;
+        const activeTiles = heatMap.activeTiles;
         const tileSize = world.getTileSize();
 
         activeTiles.forEach((key: string) => {
@@ -725,7 +725,7 @@ export class ParticleSystem {
                     const isBlack = colorStr === '#000' || colorStr === '#111';
 
                     const targetAlpha = Math.max(0, lifeRatio * (isBlack ? 0.45 : 0.25));
-                    
+
                     // Draw to LOW-RES buffer
                     sCtx.globalAlpha = targetAlpha;
                     const sprite = this.spriteCache.get(isBlack ? (lifeRatio > 0.6 ? 'smoke_heavy_black' : 'smoke_black') : 'smoke_soft');
