@@ -263,12 +263,20 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         const startTy = Math.floor(this.cameraY / tileSize);
         const endTy = Math.ceil((this.cameraY + viewH) / tileSize);
 
+        const useGPU = this.worldRenderer.isGPUActive();
+
         for (let ty = startTy; ty <= endTy; ty++) {
             if (ty < 0 || ty >= this.world.getHeight()) continue;
             for (let tx = startTx; tx <= endTx; tx++) {
                 if (tx < 0 || tx >= this.world.getWidth()) continue;
                 const material = this.world.getTile(tx, ty);
                 if (material === MaterialType.NONE) continue;
+
+                const isDamaged = this.world.getHeatMap()?.hasTileData(tx, ty);
+
+                // If GPU is active, only CPU handles DAMAGED tile tops.
+                // Healthy tiles are handled entirely by StaticGeometryBuffer.
+                if (useGPU && !isDamaged) continue;
 
                 renderables.push({
                     y: (ty + 1) * tileSize, // Base Y of the wall

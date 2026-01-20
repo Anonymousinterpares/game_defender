@@ -49,15 +49,23 @@ uniform float u_lightIntensity;
 out vec4 outColor;
 
 void main() {
-    // Normal is 2D (out from wall)
-    // Sun/Moon direction is also 2D
-    // Dot product for shading: normal points OUT, lightDir points FROM source
-    float dotProduct = dot(u_lightDir, v_normal);
-    float shading = max(0.0, -dotProduct) * u_lightIntensity;
+    float shading;
     
-    // Base ambient (0.5) to full (0.5 + 0.8 = 1.3)
-    float factor = 0.5 + shading * 0.8;
+    // Normal length of 0 signals a Roof (top face)
+    if (length(v_normal) < 0.1) {
+        // Roof Shading: Matches CPU WorldRenderer.renderWallTop
+        // Base ambient (0.6) + intensity-driven boost (0.7)
+        shading = 0.6 + u_lightIntensity * 0.7;
+    } else {
+        // Side Shading: Matches CPU WorldRenderer.renderWallSidesOnly
+        // Dot product for shading: normal points OUT, lightDir points FROM source
+        float dotProduct = dot(u_lightDir, v_normal);
+        float sideShading = max(0.0, -dotProduct) * u_lightIntensity;
+        
+        // Base ambient (0.5) to full (0.5 + 0.8 = 1.3)
+        shading = 0.5 + sideShading * 0.8;
+    }
     
-    outColor = vec4(v_color * factor, 1.0);
+    outColor = vec4(v_color * shading, 1.0);
 }
 `;

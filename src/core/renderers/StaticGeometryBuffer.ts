@@ -53,7 +53,7 @@ export class StaticGeometryBuffer {
             for (let tx = 0; tx < world.getWidth(); tx++) {
                 const material = world.getTile(tx, ty);
                 if (material === MaterialType.NONE) continue;
-                
+
                 // Skip if damaged (CPU handles those)
                 if (heatMap?.hasTileData(tx, ty)) continue;
 
@@ -73,26 +73,44 @@ export class StaticGeometryBuffer {
 
         const color = this.getMaterialColor(mat);
 
-        // Faces: Only add if neighbor is NONE
-        // Top Face (Normal 0, -1)
+        // 1. ROOF QUAD (Flat top face)
+        // All 4 vertices at zTop (h)
+        // Normal (0,0) signals "Roof" to the shader
+        this.addRoofQuad(v, x0, y0, x1, y1, h, color);
+
+        // 2. SIDE QUADS (Vertical faces)
+        // Only add if neighbor is NONE
+        // North Face (Normal 0, -1)
         if (ty === 0 || world.getTile(tx, ty - 1) === MaterialType.NONE) {
-            this.addQuad(v, x0, y0, x1, y0, 0, h, color, 0, -1);
+            this.addSideQuad(v, x0, y0, x1, y0, 0, h, color, 0, -1);
         }
-        // Bottom Face (Normal 0, 1)
+        // South Face (Normal 0, 1)
         if (ty === world.getHeight() - 1 || world.getTile(tx, ty + 1) === MaterialType.NONE) {
-            this.addQuad(v, x0, y1, x1, y1, 0, h, color, 0, 1);
+            this.addSideQuad(v, x0, y1, x1, y1, 0, h, color, 0, 1);
         }
-        // Left Face (Normal -1, 0)
+        // West Face (Normal -1, 0)
         if (tx === 0 || world.getTile(tx - 1, ty) === MaterialType.NONE) {
-            this.addQuad(v, x0, y0, x0, y1, 0, h, color, -1, 0);
+            this.addSideQuad(v, x0, y0, x0, y1, 0, h, color, -1, 0);
         }
-        // Right Face (Normal 1, 0)
+        // East Face (Normal 1, 0)
         if (tx === world.getWidth() - 1 || world.getTile(tx + 1, ty) === MaterialType.NONE) {
-            this.addQuad(v, x1, y0, x1, y1, 0, h, color, 1, 0);
+            this.addSideQuad(v, x1, y0, x1, y1, 0, h, color, 1, 0);
         }
     }
 
-    private addQuad(v: number[], x0: number, y0: number, x1: number, y1: number, zBase: number, zTop: number, color: number[], nx: number, ny: number) {
+    private addRoofQuad(v: number[], x0: number, y0: number, x1: number, y1: number, h: number, color: number[]) {
+        // All at height h, Normal (0,0)
+        const v1 = [x0, y0, h, ...color, 0, 0];
+        const v2 = [x1, y0, h, ...color, 0, 0];
+        const v3 = [x1, y1, h, ...color, 0, 0];
+        const v4 = [x0, y1, h, ...color, 0, 0];
+
+        // Two triangles
+        v.push(...v1, ...v2, ...v3);
+        v.push(...v1, ...v3, ...v4);
+    }
+
+    private addSideQuad(v: number[], x0: number, y0: number, x1: number, y1: number, zBase: number, zTop: number, color: number[], nx: number, ny: number) {
         // Two triangles (6 vertices)
         const v1 = [x0, y0, zBase, ...color, nx, ny];
         const v2 = [x1, y1, zBase, ...color, nx, ny];
@@ -116,7 +134,7 @@ export class StaticGeometryBuffer {
         }
     }
 
-    public draw(cameraX: number, cameraY: number, viewW: number, viewH: number, perspectiveStrength: number, lightDir: {x: number, y: number}, lightIntensity: number) {
+    public draw(cameraX: number, cameraY: number, viewW: number, viewH: number, perspectiveStrength: number, lightDir: { x: number, y: number }, lightIntensity: number) {
         if (this.vertexCount === 0) return;
 
         const gl = this.gl;

@@ -12,7 +12,7 @@ export class WorldRenderer {
     private tileSize: number;
     private groundChunks: Map<string, { canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, dirty: boolean }> = new Map();
     private damagedTileCache: Map<string, {
-        exposedFaces: {sx: number, sy: number, face: number}[],
+        exposedFaces: { sx: number, sy: number, face: number }[],
         holeIndices: number[],
         solidIndices: number[]
     }> = new Map();
@@ -24,7 +24,7 @@ export class WorldRenderer {
 
     private scratchCanvas: HTMLCanvasElement;
     private scratchCtx: CanvasRenderingContext2D;
-    
+
     // Batched melted ground rendering
     private meltedBatchCanvas: HTMLCanvasElement;
     private meltedBatchCtx: CanvasRenderingContext2D;
@@ -61,6 +61,10 @@ export class WorldRenderer {
         }
     }
 
+    public isGPUActive(): boolean {
+        return this.staticBuffer !== null && GPUDriver.getInstance().isReady();
+    }
+
     private requestGPURebuild(delay: number = 100) {
         if (!this.staticBuffer) return;
         if (this.gpuRebuildTimer) clearTimeout(this.gpuRebuildTimer);
@@ -83,14 +87,14 @@ export class WorldRenderer {
     }
 
     private getDamagedTileData(tx: number, ty: number, hpData: Float32Array): {
-        exposedFaces: {sx: number, sy: number, face: number}[],
+        exposedFaces: { sx: number, sy: number, face: number }[],
         holeIndices: number[],
         solidIndices: number[]
     } {
         const key = `${tx},${ty}`;
         if (this.damagedTileCache.has(key)) return this.damagedTileCache.get(key)!;
 
-        const exposedFaces: {sx: number, sy: number, face: number}[] = [];
+        const exposedFaces: { sx: number, sy: number, face: number }[] = [];
         const holeIndices: number[] = [];
         const solidIndices: number[] = [];
         const subDiv = 10;
@@ -106,20 +110,20 @@ export class WorldRenderer {
 
                 // 0:Top, 1:Bottom, 2:Left, 3:Right
                 if (sy === 0) {
-                    if (this.world.getTile(tx, ty - 1) === MaterialType.NONE) exposedFaces.push({sx, sy, face: 0});
-                } else if (hpData[(sy - 1) * subDiv + sx] <= 0) exposedFaces.push({sx, sy, face: 0});
+                    if (this.world.getTile(tx, ty - 1) === MaterialType.NONE) exposedFaces.push({ sx, sy, face: 0 });
+                } else if (hpData[(sy - 1) * subDiv + sx] <= 0) exposedFaces.push({ sx, sy, face: 0 });
 
                 if (sy === subDiv - 1) {
-                    if (this.world.getTile(tx, ty + 1) === MaterialType.NONE) exposedFaces.push({sx, sy, face: 1});
-                } else if (hpData[(sy + 1) * subDiv + sx] <= 0) exposedFaces.push({sx, sy, face: 1});
+                    if (this.world.getTile(tx, ty + 1) === MaterialType.NONE) exposedFaces.push({ sx, sy, face: 1 });
+                } else if (hpData[(sy + 1) * subDiv + sx] <= 0) exposedFaces.push({ sx, sy, face: 1 });
 
                 if (sx === 0) {
-                    if (this.world.getTile(tx - 1, ty) === MaterialType.NONE) exposedFaces.push({sx, sy, face: 2});
-                } else if (hpData[sy * subDiv + (sx - 1)] <= 0) exposedFaces.push({sx, sy, face: 2});
+                    if (this.world.getTile(tx - 1, ty) === MaterialType.NONE) exposedFaces.push({ sx, sy, face: 2 });
+                } else if (hpData[sy * subDiv + (sx - 1)] <= 0) exposedFaces.push({ sx, sy, face: 2 });
 
                 if (sx === subDiv - 1) {
-                    if (this.world.getTile(tx + 1, ty) === MaterialType.NONE) exposedFaces.push({sx, sy, face: 3});
-                } else if (hpData[sy * subDiv + (sx + 1)] <= 0) exposedFaces.push({sx, sy, face: 3});
+                    if (this.world.getTile(tx + 1, ty) === MaterialType.NONE) exposedFaces.push({ sx, sy, face: 3 });
+                } else if (hpData[sy * subDiv + (sx + 1)] <= 0) exposedFaces.push({ sx, sy, face: 3 });
             }
         }
 
@@ -162,10 +166,10 @@ export class WorldRenderer {
             const activeLight = sun.active ? sun : (moon.active ? moon : null);
 
             this.staticBuffer!.draw(
-                cameraX, cameraY, 
-                viewWidth, viewHeight, 
+                cameraX, cameraY,
+                viewWidth, viewHeight,
                 0.0015, // Perspective strength
-                activeLight ? activeLight.direction : {x: 0, y: -1},
+                activeLight ? activeLight.direction : { x: 0, y: -1 },
                 activeLight ? activeLight.intensity : 0.5
             );
 
@@ -186,7 +190,7 @@ export class WorldRenderer {
                 if (tx < 0 || tx >= this.world.getWidth()) continue;
                 const material = this.world.getTile(tx, ty);
                 if (material === MaterialType.NONE) continue;
-                
+
                 const heatMap = this.world.getHeatMap();
                 const isDamaged = heatMap?.hasTileData(tx, ty);
 
@@ -217,7 +221,7 @@ export class WorldRenderer {
         const worldX = tx * this.tileSize;
         const worldY = ty * this.tileSize;
         const ts = this.tileSize;
-        
+
         const x0 = worldX; const y0 = worldY;
         const x1 = worldX + ts; const y1 = worldY + ts;
 
@@ -238,7 +242,7 @@ export class WorldRenderer {
         // --- SHADING LOGIC ---
         const { sun, moon } = WorldClock.getInstance().getTimeState();
         const activeLight = sun.active ? sun : (moon.active ? moon : null);
-        
+
         const getShadedColor = (nx: number, ny: number) => {
             if (!activeLight) return sideColorBase;
             // Dot product (Light Dir vs Face Normal)
@@ -288,7 +292,7 @@ export class WorldRenderer {
         } else {
             // ROBUST DAMAGED SIDES: Render only exposed sub-tile faces
             const data = this.getDamagedTileData(tx, ty, hpData);
-            
+
             const canSeeTop = v0.y > y0;
             const canSeeBottom = v3.y < y1;
             const canSeeLeft = v0.x > x0;
@@ -303,7 +307,7 @@ export class WorldRenderer {
 
                 const fsx0 = f.sx / subDiv; const fsx1 = (f.sx + 1) / subDiv;
                 const fsy0 = f.sy / subDiv; const fsy1 = (f.sy + 1) / subDiv;
-                
+
                 let p0_side, p1_side, b0_side, b1_side;
                 let faceCol = sideColorBase;
 
@@ -401,7 +405,7 @@ export class WorldRenderer {
                 if (tx < 0 || tx >= this.world.getWidth()) continue;
                 const material = this.world.getTile(tx, ty);
                 if (material === MaterialType.NONE) continue;
-                
+
                 const worldX = tx * this.tileSize;
                 const worldY = ty * this.tileSize;
                 const ts = this.tileSize;
@@ -413,7 +417,7 @@ export class WorldRenderer {
 
                 // Draw the side volume and top as a solid color for the mask
                 ctx.fillStyle = color;
-                
+
                 // Sides
                 const x0 = worldX; const y0 = worldY;
                 const x1 = worldX + ts; const y1 = worldY + ts;
@@ -434,7 +438,7 @@ export class WorldRenderer {
     private renderGround(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, viewWidth: number, viewHeight: number): void {
         const currentSnow = WeatherManager.getInstance().getSnowAccumulation();
         const { sun, moon, isDaylight } = (window as any).WorldClockInstance ? (window as any).WorldClockInstance.getTimeState() : { sun: { active: false, color: '#fff', intensity: 0 }, moon: { active: false, color: '#aaf', intensity: 0 }, isDaylight: true };
-        
+
         // Neutral base color (mid-grey) to allow lightmap multiplication to work
         let r = 70, g = 70, b = 75;
 
@@ -504,7 +508,7 @@ export class WorldRenderer {
         // --- TOP SHADING ---
         const { sun, moon } = WorldClock.getInstance().getTimeState();
         const activeLight = sun.active ? sun : (moon.active ? moon : null);
-        
+
         let shadedTopColor = topColorBase;
         if (activeLight) {
             // Roof faces UP (Z-axis). It gets more light when sun is at zenith (noon).
