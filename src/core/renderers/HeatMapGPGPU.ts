@@ -182,22 +182,15 @@ export class HeatMapGPGPU {
         const x = tx * this.subDiv;
         const y = ty * this.subDiv;
 
-        const packed = new Float32Array(this.subDiv * this.subDiv);
-        for (let i = 0; i < packed.length; i++) {
-            // Pack: floor(A) is material, fract(A) is hp fraction
-            // Actually, we use 1.0 as full HP. So Material + (HP/MaxHP).
-            // But we don't know MaxHP here. MaterialType + 0.99 for full HP.
-            // Let's just use MaterialType + clamp(HP/1000.0, 0.0, 0.99)
-            // Or better: normalized HP between 0 and 1.
-            // Let's assume input HP is already relative or we just use 0.99 for "alive".
-            packed[i] = material[i] + (hp[i] > 0 ? 0.99 : 0.0);
+        // Since we can't easily update just the Alpha channel in RGBA32F, 
+        // we'll read back the current tile or just use updateTileRGBA.
+        // For simplicity and speed in initialization, we'll pack assuming 0 heat/fire/molten.
+        const rgba = new Float32Array(this.subDiv * this.subDiv * 4);
+        for (let i = 0; i < this.subDiv * this.subDiv; i++) {
+            rgba[i * 4 + 3] = material[i] + (hp[i] > 0 ? 0.99 : 0.0);
         }
 
-        [this.textureA, this.textureB].forEach(tex => {
-            gl.bindTexture(gl.TEXTURE_2D, tex);
-            // ALPHA channel is packed data
-            gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, this.subDiv, this.subDiv, gl.ALPHA, gl.FLOAT, packed);
-        });
+        this.updateTileRGBA(tx, ty, rgba);
     }
 
     public updateTileMolten(tx: number, ty: number, molten: Float32Array): void {

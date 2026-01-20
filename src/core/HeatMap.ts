@@ -70,6 +70,7 @@ export class HeatMap {
 
     private gpgpu: HeatMapGPGPU | null = null;
     private useGPU: boolean = false;
+    private worldDataBuffer: Float32Array | null = null;
 
     // Zero-allocation scratch buffers
     private scratchHeat: Float32Array;
@@ -561,13 +562,15 @@ export class HeatMap {
             const fireSpeed = ConfigManager.getInstance().get<number>('Fire', 'fireSpreadSpeed') || 0.4;
             this.gpgpu.update(dt, this.decayRate, this.spreadRate, fireSpeed);
 
-            // Periodic read-back of modified tiles (throttle to 5fps for read-back)
-            if (this.frameCount % 12 === 0) {
+            // OPTIMIZATION: Throttled read-back (approx 2 times per second)
+            // This is the single biggest bottleneck. We only need it for wall destruction physics.
+            if (this.frameCount % 20 === 0) {
                 this.readBackModifiedTiles();
             }
-        }
 
-        this.frameCount++;
+            this.frameCount++;
+            return; // EXIT EARLY - GPGPU handles simulation
+        }
 
         const effectiveDT = dt; // Continuous update
         const toRemove: string[] = [];
@@ -575,6 +578,17 @@ export class HeatMap {
 
         this.activeTiles.forEach(key => {
             const [tx, ty] = key.split(',').map(Number);
+
+            if (this.gpgpu) {
+                const summary = this.tileSummaries.get(key);
+                if (summary) {
+                    const heatData = this.heatData.get(key);
+                    if (heatData) {
+                        WeatherManager.getInstance().removeSnowFromHeat(tx, ty, heatData, this.tileSize, summary.maxHeat);
+                    }
+                }
+                return; // Continue to next tile, skipping simulation body
+            }
 
             // Skip boundaries
             if (tx <= 0 || tx >= this.widthTiles - 1 || ty <= 0 || ty >= this.heightTiles - 1) {
@@ -878,12 +892,25 @@ export class HeatMap {
 
     public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
         if (this.gpgpu) {
+            const drv = GPUDriver.getInstance();
+            // Match GPU canvas to current viewport
+            drv.resize(ctx.canvas.width, ctx.canvas.height);
+
             this.gpgpu.draw(
                 cameraX, cameraY,
                 ctx.canvas.width, ctx.canvas.height,
                 this.widthTiles * this.tileSize, this.heightTiles * this.tileSize
             );
-            // No return here yet, we might still want to draw CPU fire/molten etc. if not ported
+
+            // BLIT: Draw the hidden WebGL canvas into the main 2D context
+            // Since ctx is translated to (-cameraX, -cameraY), drawing at (cameraX, cameraY)
+            // places the GPU-baked visuals correctly on top of the world.
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform to draw full-screen overlay
+            ctx.drawImage(drv.getCanvas(), 0, 0);
+            ctx.restore();
+
+            return; // EXIT EARLY - GPGPU handles rendering
         }
 
         const viewW = ctx.canvas.width;
@@ -1272,19 +1299,21 @@ export class HeatMap {
     private readBackModifiedTiles(): void {
         if (!this.gpgpu) return;
 
-        const scratchRGBA = new Float32Array(this.subDiv * this.subDiv * 4);
+        // Ensure buffer is sized correctly for the current world map
+        const totalPixels = this.widthTiles * this.subDiv * this.heightTiles * this.subDiv;
+        if (!this.worldDataBuffer || this.worldDataBuffer.length !== totalPixels * 4) {
+            this.worldDataBuffer = new Float32Array(totalPixels * 4);
+        }
 
-        // We only need to read back tiles that are 'active' (simulated) 
-        // AND have wall content that could be destroyed.
+        // BATCHED READ: One single sync call for the entire world
+        this.gpgpu.readAllData(this.worldDataBuffer);
+
+        const simW = this.widthTiles * this.subDiv;
+
         for (const key of this.activeTiles) {
             const [tx, ty] = key.split(',').map(Number);
             const hp = this.hpData.get(key);
             if (!hp) continue;
-
-            // Check if it's already mostly destroyed on CPU, no need to read
-            // Actually, we need to read to know IF it got destroyed on GPU.
-
-            this.gpgpu.readTileData(tx, ty, scratchRGBA);
 
             let changed = false;
             const hData = this.heatData.get(key);
@@ -1294,23 +1323,31 @@ export class HeatMap {
 
             if (!hData || !fData || !mData) continue;
 
-            for (let i = 0; i < this.subDiv * this.subDiv; i++) {
-                // R: Heat, G: Fire, B: Molten, A: Packed (Mat+HP)
-                const gHeat = scratchRGBA[i * 4 + 0];
-                const gFire = scratchRGBA[i * 4 + 1];
-                const gMolten = scratchRGBA[i * 4 + 2];
-                const gPacked = scratchRGBA[i * 4 + 3];
+            const startX = tx * this.subDiv;
+            const startY = ty * this.subDiv;
 
-                const gHP = fract(gPacked);
+            for (let subY = 0; subY < this.subDiv; subY++) {
+                for (let subX = 0; subX < this.subDiv; subX++) {
+                    const localIdx = subY * this.subDiv + subX;
+                    const worldIdx = ((startY + subY) * simW + (startX + subX)) * 4;
 
-                // Update CPU state if GPU changed significantly
-                if (Math.abs(hData[i] - gHeat) > 0.05) { hData[i] = gHeat; }
-                if (Math.abs(fData[i] - gFire) > 0.05) { fData[i] = gFire; }
-                if (Math.abs(molten[i] - gMolten) > 0.05) { molten[i] = gMolten; }
+                    // R: Heat, G: Fire, B: Molten, A: Packed (Mat+HP)
+                    const gHeat = this.worldDataBuffer[worldIdx + 0];
+                    const gFire = this.worldDataBuffer[worldIdx + 1];
+                    const gMolten = this.worldDataBuffer[worldIdx + 2];
+                    const gPacked = this.worldDataBuffer[worldIdx + 3];
 
-                if (hp[i] > 0 && gHP <= 0.01) {
-                    hp[i] = 0;
-                    changed = true;
+                    const gHP = fract(gPacked);
+
+                    // Update CPU state if GPU changed significantly
+                    if (Math.abs(hData[localIdx] - gHeat) > 0.05) hData[localIdx] = gHeat;
+                    if (Math.abs(fData[localIdx] - gFire) > 0.05) fData[localIdx] = gFire;
+                    if (Math.abs(molten[localIdx] - gMolten) > 0.05) molten[localIdx] = gMolten;
+
+                    if (hp[localIdx] > 0 && gHP <= 0.01) {
+                        hp[localIdx] = 0;
+                        changed = true;
+                    }
                 }
             }
 

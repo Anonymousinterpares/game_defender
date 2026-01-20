@@ -41,7 +41,9 @@ vec3 getHeatColor(float intensity) {
 
 void main() {
     // Correct UV calculation based on camera and world dimensions
-    vec2 worldPos = u_camera + v_uv * u_viewDim;
+    // Top of screen (v_uv.y=1.0) maps to camera.y
+    // Bottom of screen (v_uv.y=0.0) maps to camera.y + viewDim.y
+    vec2 worldPos = u_camera + vec2(v_uv.x, 1.0 - v_uv.y) * u_viewDim;
     vec2 simUV = worldPos / u_worldDim;
     
     if (simUV.x < 0.0 || simUV.x > 1.0 || simUV.y < 0.0 || simUV.y > 1.0) {
