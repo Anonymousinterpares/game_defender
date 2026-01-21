@@ -12,6 +12,8 @@ export class GPURenderer {
     private worldShader: WorldShader | null = null;
     private quadBuffer: WebGLBuffer | null = null;
     private particleSystem: GPUParticleSystem | null = null;
+    private worldMapTexture: WebGLTexture | null = null;
+    private lastMeshVersion: number = -1;
 
     public getParticleSystem(): GPUParticleSystem | null {
         return this.particleSystem;
@@ -41,10 +43,53 @@ export class GPURenderer {
             ]);
             gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
         }
+
+        if (this.particleSystem && !this.particleSystem['initialized']) {
+             this.particleSystem.init(gl);
+        }
     }
 
     public setWorld(world: World): void {
         this.world = world;
+    }
+
+    private updateWorldTexture(): void {
+        if (!this.world || !this.active) return;
+        const gl = this.context.getGL();
+
+        // Check if world mesh has changed (walls destroyed etc)
+        // Accessing private meshVersion via public getter if available, or just check dirty flag?
+        // World.ts has getMeshVersion()
+        const currentVer = this.world.getMeshVersion();
+        if (this.worldMapTexture && currentVer === this.lastMeshVersion) return;
+
+        this.lastMeshVersion = currentVer;
+
+        if (!this.worldMapTexture) {
+            this.worldMapTexture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, this.worldMapTexture);
+            // R8 is enough for MaterialType (uint8)
+            // But WebGL2 needs careful format. LUMINANCE or RED.
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        }
+
+        gl.bindTexture(gl.TEXTURE_2D, this.worldMapTexture);
+        
+        const width = this.world.getWidth();
+        const height = this.world.getHeight();
+        const buffer = this.world.getTilesSharedBuffer(); // SharedArrayBuffer
+        
+        // Ensure we only pass the exact bytes needed
+        const byteLength = width * height;
+        const data = new Uint8Array(buffer, 0, byteLength);
+
+        // Upload
+        // internalFormat: R8, format: RED, type: UNSIGNED_BYTE
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, data);
     }
 
     public updateConfig(): void {
@@ -62,8 +107,23 @@ export class GPURenderer {
     }
 
     public update(dt: number): void {
-        if (this.active && this.particleSystem) {
-            // Basic inputs for now
+        if (this.active && this.particleSystem && this.world) {
+            this.updateWorldTexture();
+            
+            // Get Wind
+            // For now simple placeholder or fetch from WeatherManager if accessible
+            // We can pass windX, windY.
+            // Let's assume 0,0 for now or fetch global if needed.
+            // But wait, GameplayScene passes nothing. 
+            // We should use the WeatherManager singleton? Yes.
+            // But we need to avoid circular deps if possible. 
+            // WeatherManager is in core.
+            
+            // Pass texture and world info
+            if (this.worldMapTexture) {
+                this.particleSystem.setWorldMap(this.worldMapTexture, this.world.getWidth(), this.world.getHeight(), this.world.getTileSize());
+            }
+
             this.particleSystem.update(dt, performance.now() * 0.001, 0, 0);
         }
     }

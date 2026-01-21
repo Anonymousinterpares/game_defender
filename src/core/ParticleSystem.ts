@@ -179,9 +179,9 @@ export class ParticleSystem {
     }
     public spawnSmoke(x: number, y: number, vx: number, vy: number, life: number, size: number, color: string): number {
         if (this.gpuSystem && ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled')) {
-            // 1 for TYPE_SMOKE
-            this.gpuSystem.uploadParticle(x, y, vx, vy, life, 4, FLAG_ACTIVE); // 4 is SMOKE in Enum??
-            // Check ParticleConstants: SMOKE = 4.
+            // 1 for TYPE_SMOKE (Note: Ensure Enum matches shader, 4 was used but let's be careful)
+            // ParticleConstants.ts: SMOKE = 4
+            this.gpuSystem.uploadParticle(x, y, vx, vy, life, 4, FLAG_ACTIVE); 
             return -1;
         }
         return this.emitter.spawnSmoke(x, y, vx, vy, life, size, color);
@@ -193,6 +193,12 @@ export class ParticleSystem {
         return this.emitter.spawnFlash(x, y, radius);
     }
     public spawnMoltenMetal(x: number, y: number, vx: number, vy: number): number {
+        if (this.gpuSystem && ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled')) {
+            const life = 5.0 + Math.random() * 2.0; // Matched to CPU life
+            // TYPE_MOLTEN = 3
+            this.gpuSystem.uploadParticle(x, y, vx, vy, life, 3, FLAG_ACTIVE);
+            return -1;
+        }
         return this.emitter.spawnMoltenMetal(x, y, vx, vy);
     }
     public setFlame(idx: number, isFlame: boolean): void {

@@ -190,6 +190,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         }
 
         this.gpuRenderer.updateConfig();
+        this.gpuRenderer.update(dt);
         PerfMonitor.getInstance().end('update_total');
     }
 
