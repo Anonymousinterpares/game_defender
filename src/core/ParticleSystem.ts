@@ -180,9 +180,23 @@ export class ParticleSystem {
     }
     public spawnSmoke(x: number, y: number, vx: number, vy: number, life: number, size: number, color: string): number {
         if (this.gpuSystem && ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled')) {
-            // 1 for TYPE_SMOKE (Note: Ensure Enum matches shader, 4 was used but let's be careful)
-            // ParticleConstants.ts: SMOKE = 4
-            this.gpuSystem.uploadParticle(x, y, vx, vy, life, 4, FLAG_ACTIVE); 
+            // Variation: 0.0 (White/Gray), 1.0 (Black/Dense)
+            let variation = 0.0;
+            if (color === '#000' || color === '#111' || color === '#222') variation = 1.0;
+            else if (color === '#666' || color === '#555') variation = 0.5;
+
+            // SPAWN MULTIPLE TINY PARTICLES FOR VOLUMETRIC EFFECT
+            const count = 4; 
+            for (let i = 0; i < count; i++) {
+                const offX = (Math.random() - 0.5) * size * 0.3;
+                const offY = (Math.random() - 0.5) * size * 0.3;
+                const vOffX = (Math.random() - 0.5) * 20;
+                const vOffY = (Math.random() - 0.5) * 20;
+                // Type 4 (SMOKE), Variation passed in flags or separate?
+                // Let's use the 'flags' or just pack it into a 4-bit field if needed.
+                // For now, let's just pass it as 'type + variation' and unpack in shader
+                this.gpuSystem.uploadParticle(x + offX, y + offY, vx + vOffX, vy + vOffY, life * (0.8 + Math.random() * 0.4), 4.0 + variation, FLAG_ACTIVE); 
+            }
             return -1;
         }
         return this.emitter.spawnSmoke(x, y, vx, vy, life, size, color);

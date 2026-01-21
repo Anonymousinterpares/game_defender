@@ -21,10 +21,13 @@ out vec2 v_uv;
 void main() {
     float life = a_props.x;
     float maxLife = a_props.y;
-    float type = a_props.z;
+    float typeWithVar = a_props.z;
     float flags = a_props.w;
 
-    v_type = type;
+    float type = floor(typeWithVar);
+    float variation = fract(typeWithVar); // 0.0 (white), 0.5 (gray), 1.0 (black)
+
+    v_type = typeWithVar; // Pass full value to fragment
     v_lifeRatio = life / maxLife;
     v_uv = a_quadPos;
 
@@ -37,11 +40,13 @@ void main() {
     vec4 baseColor = vec4(1.0);
 
     if (abs(type - TYPE_SMOKE) < 0.1) {
-        // Expand smoke over time
-        size = 20.0 + (1.0 - v_lifeRatio) * 40.0; 
-        // Fade out
-        float alpha = 0.4 * v_lifeRatio; 
-        baseColor = vec4(0.6, 0.6, 0.6, alpha);
+        // --- VOLUMETRIC SMOKE SIZE ---
+        // Start small, expand significantly
+        size = 12.0 + (1.0 - v_lifeRatio) * 60.0; 
+        
+        // Color based on variation
+        float gray = 0.6 - (variation * 0.5); // 0.6 to 0.1
+        baseColor = vec4(vec3(gray), 1.0);
     } else if (abs(type - TYPE_MOLTEN) < 0.1) {
         size = 40.0; // Increased from 4.0 to match CPU glow radius
         // Hot orange/yellow to red
@@ -103,30 +108,49 @@ float noise(vec2 p) {
     return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
 }
 
+// Fractal Brownian Motion (fBm)
+float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    vec2 shift = vec2(100.0);
+    // 3 Octaves for balance between detail and perf
+    for (int i = 0; i < 3; ++i) {
+        v += a * noise(p);
+        p = p * 2.0 + shift;
+        a *= 0.5;
+    }
+    return v;
+}
+
 void main() {
     float dist = length(v_uv);
     if (dist > 1.0) discard;
 
+    float type = floor(v_type);
+    float variation = fract(v_type);
+
     vec4 finalColor = v_color;
     float alpha = v_color.a;
 
-    if (abs(v_type - TYPE_SMOKE) < 0.1) {
-        // --- NOISY SMOKE ---
-        // Use polar coordinates for noise to make it puffier
-        float angle = atan(v_uv.y, v_uv.x);
-        float n = noise(vec2(angle * 1.5, u_time * 0.5 + v_lifeRatio * 2.0));
+    if (abs(type - TYPE_SMOKE) < 0.1) {
+        // --- VOLUMETRIC NOISY SMOKE ---
+        float t = u_time * 0.4;
         
-        // Deform the distance based on noise
-        float boundary = 0.7 + n * 0.3;
+        // Use fBm for wispy detail
+        vec2 p = v_uv * 2.0 + vec2(t, t * 0.5);
+        float n = fbm(p);
+        
+        // Soft boundary that fluctuates with noise
+        float boundary = 0.6 + n * 0.4;
         float shape = 1.0 - smoothstep(0.0, boundary, dist);
         
-        // Internal texture
-        float tex = noise(v_uv * 3.0 + u_time * 0.2);
-        alpha *= shape * (0.6 + tex * 0.4);
+        // Very low alpha per particle for volumetric stacking
+        float baseAlpha = 0.15 * (1.0 - variation * 0.5); // Black smoke is more opaque
+        alpha = shape * baseAlpha * v_lifeRatio;
         
-        // Color variation (darken smoke as it ages or based on noise)
-        finalColor.rgb *= (0.8 + tex * 0.2);
-    } else if (abs(v_type - TYPE_MOLTEN) < 0.1) {
+        // Darken center slightly for depth
+        finalColor.rgb *= (0.7 + n * 0.3);
+    } else if (abs(type - TYPE_MOLTEN) < 0.1) {
         // --- INCANDESCENT MOLTEN ---
         // Flicker based on time and life
         float flicker = noise(vec2(u_time * 10.0, v_lifeRatio * 5.0)) * 0.2 + 0.9;

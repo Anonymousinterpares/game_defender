@@ -37,8 +37,11 @@ void main() {
     
     float life = props.x;
     float maxLife = props.y;
-    float type = props.z;
+    float typeWithVar = props.z;
     float flags = props.w;
+    
+    float type = floor(typeWithVar);
+    float variation = fract(typeWithVar);
 
     // Early exit for dead particles
     if (life <= 0.0 || flags < 1.0) {
@@ -55,29 +58,38 @@ void main() {
         
         vec2 dir = posVel.xy - u_entities[i];
         float distSq = dot(dir, dir);
-        float radius = 50.0; // Interaction radius
+        float radius = 60.0; // Slightly larger interaction
         if (distSq < radius * radius && distSq > 0.01) {
             float dist = sqrt(distSq);
-            float force = (1.0 - dist / radius) * 200.0;
-            posVel.zw += (dir / dist) * force * u_dt;
+            float force = (1.0 - dist / radius) * 300.0;
+            // Smoke is lighter, pushed harder
+            float m = (abs(type - TYPE_SMOKE) < 0.1) ? 2.0 : 1.0;
+            posVel.zw += (dir / dist) * force * m * u_dt;
         }
     }
 
     // Apply Physics
     if (abs(type - TYPE_SMOKE) < 0.1) {
-        // Smoke Physics: Wind + Drift + Turbulence
-        float driftY = -15.0; // Rising
+        // Smoke Physics: Wind + Drift + Curl Turbulence
+        float driftY = -20.0 - variation * 10.0; // Black smoke rises faster (heat)
         
-        // Swirling turbulence based on particle ID and time
         float id = float(gl_VertexID);
-        float t = u_time * 2.0;
-        float turbX = sin(t + id * 0.1) * 15.0 + cos(t * 0.5 + id * 0.05) * 10.0;
-        float turbY = cos(t * 0.7 + id * 0.1) * 10.0;
+        float t = u_time * 1.5;
+        
+        // Approximation of Curl Noise / Vortices
+        vec2 p = posVel.xy * 0.01;
+        float noise1 = sin(p.x + t) * cos(p.y + t);
+        float noise2 = sin(p.y - t) * cos(p.x - t);
+        
+        float curlX = noise1 * 20.0;
+        float curlY = noise2 * 20.0;
 
         // Velocity Damping + Forces
-        float drag = 0.8; // Slightly more drag for smoke to keep it wispy
-        posVel.z += (u_wind.x * 25.0 + turbX - posVel.z * drag) * u_dt;
-        posVel.w += (u_wind.y * 25.0 + driftY + turbY - posVel.w * drag) * u_dt;
+        float drag = 0.6 + variation * 0.4; // Dense smoke has more air resistance
+        posVel.z += (u_wind.x * 30.0 + curlX - posVel.z * drag) * u_dt;
+        posVel.w += (u_wind.y * 30.0 + driftY + curlY - posVel.w * drag) * u_dt;
+        
+        // Expansion: Smoke slows down but spreads out (expansion is visual)
     } else {
         // Standard / Molten Physics
         // Time-based Damping (Friction)
