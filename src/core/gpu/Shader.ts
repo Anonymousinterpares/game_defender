@@ -73,4 +73,9 @@ export class Shader {
         const loc = this.getUniformLocation(name);
         if (loc) this.gl.uniform2fv(loc, val);
     }
+
+    public setUniform4f(name: string, x: number, y: number, z: number, w: number): void {
+        const loc = this.getUniformLocation(name);
+        if (loc) this.gl.uniform4f(loc, x, y, z, w);
+    }
 }

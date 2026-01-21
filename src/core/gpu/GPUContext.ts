@@ -17,7 +17,7 @@ export class GPUContext {
             premultipliedAlpha: true,
             depth: false,
             stencil: false,
-            preserveDrawingBuffer: false
+            preserveDrawingBuffer: true
         });
 
         if (!gl) {

@@ -172,6 +172,6 @@ void main() {
     }
 
     if (alpha <= 0.01) discard;
-    outColor = vec4(finalColor.rgb, alpha);
+    outColor = vec4(finalColor.rgb * alpha, alpha);
 }
 `;

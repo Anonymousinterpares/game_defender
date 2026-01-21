@@ -100,7 +100,8 @@ export const MasterConfig: GameConfigSchema = {
     devModeAlwaysOn: { value: true, type: 'boolean', description: 'Dev commands always active' },
     showLatency: { value: true, type: 'boolean', description: 'Show Network Latency' },
     showVersionAndPos: { value: true, type: 'boolean', description: 'Show Version and Position in HUD' },
-    enableEnemySpawning: { value: false, type: 'boolean', description: 'Enable Enemy Spawning' }
+    enableEnemySpawning: { value: false, type: 'boolean', description: 'Enable Enemy Spawning' },
+    webgl_debug: { value: true, type: 'boolean', description: 'Enable detailed WebGL Debug Logs' }
   },
   Mass: {
     playerHead: { value: 10.0, type: 'number', min: 1, max: 100, step: 1, description: 'Mass of Player Head' },
@@ -115,7 +116,7 @@ export const MasterConfig: GameConfigSchema = {
     npcHordeThrust: { value: 900, type: 'number', min: 100, max: 3000, step: 50, description: 'Thrust for Horde NPC' }
   },
   Visuals: {
-    gpuEnabled: { value: false, type: 'boolean', description: 'Enable GPU Acceleration (Phase 0)' },
+    gpuEnabled: { value: true, type: 'boolean', description: 'Enable GPU Acceleration (Phase 0)' },
     gpuResolutionScale: { value: 1.0, type: 'number', min: 0.1, max: 2.0, step: 0.1, description: 'GPU Render Resolution Scale' },
     enableSmoke: { value: true, type: 'boolean', description: 'Enable Smoke Effects (Wind Responsive)' },
     smokeResolutionScale: { value: 0.5, type: 'number', min: 0.1, max: 1.0, step: 0.05, description: 'Smoke Resolution Scale (Performance)' },
