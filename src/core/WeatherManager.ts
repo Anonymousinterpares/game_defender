@@ -104,9 +104,9 @@ export class WeatherManager {
 
         this.setWeather(type, true);
 
-        // Initial ground wind
+        // Initial ground wind - reduced intensity
         this.windAngle = Math.random() * Math.PI * 2;
-        this.windSpeed = 1.0 + Math.random() * 2.0;
+        this.windSpeed = 0.2 + Math.random() * 0.4;
 
         // Cloud wind is more stable and often different from ground wind
         this.cloudWindAngle = this.windAngle + (Math.random() - 0.5) * 1.5;
@@ -124,16 +124,16 @@ export class WeatherManager {
                 this.targetCloudCoverage = Math.random() * 0.15; // Rare clouds
                 this.targetRainIntensity = 0;
                 this.targetSnowIntensity = 0;
-                this.targetWindSpeed = 0.5 + Math.random() * 1.5;
-                this.targetCloudWindSpeed = 0.8 + Math.random() * 2.0;
+                this.targetWindSpeed = 0.1 + Math.random() * 0.3;
+                this.targetCloudWindSpeed = 0.5 + Math.random() * 1.5;
                 break;
             case WeatherType.CLOUDY:
                 this.targetFogDensity = 0;
                 this.targetCloudCoverage = 0.4 + Math.random() * 0.5; // Distinctly cloudy
                 this.targetRainIntensity = 0;
                 this.targetSnowIntensity = 0;
-                this.targetWindSpeed = 1.0 + Math.random() * 2.0;
-                this.targetCloudWindSpeed = 2.0 + Math.random() * 4.0;
+                this.targetWindSpeed = 0.3 + Math.random() * 0.5;
+                this.targetCloudWindSpeed = 1.5 + Math.random() * 3.0;
                 break;
             case WeatherType.FOG:
                 this.targetFogDensity = 0.6 + Math.random() * 0.4;
@@ -141,23 +141,23 @@ export class WeatherManager {
                 this.targetRainIntensity = 0;
                 this.targetSnowIntensity = 0;
                 this.targetWindSpeed = 0.05 + Math.random() * 0.1;
-                this.targetCloudWindSpeed = 0.5 + Math.random() * 1.0;
+                this.targetCloudWindSpeed = 0.3 + Math.random() * 0.7;
                 break;
             case WeatherType.RAIN:
                 this.targetFogDensity = 0.2 + Math.random() * 0.3;
                 this.targetCloudCoverage = 1.0;
                 this.targetRainIntensity = 0.5 + Math.random() * 0.5;
                 this.targetSnowIntensity = 0;
-                this.targetWindSpeed = 2.0 + Math.random() * 3.0;
-                this.targetCloudWindSpeed = 3.0 + Math.random() * 5.0;
+                this.targetWindSpeed = 0.5 + Math.random() * 1.0;
+                this.targetCloudWindSpeed = 2.0 + Math.random() * 4.0;
                 break;
             case WeatherType.SNOW:
                 this.targetFogDensity = 0.3 + Math.random() * 0.4;
                 this.targetCloudCoverage = 1.0;
                 this.targetRainIntensity = 0;
                 this.targetSnowIntensity = 0.5 + Math.random() * 0.5;
-                this.targetWindSpeed = 1.0 + Math.random() * 2.0;
-                this.targetCloudWindSpeed = 1.5 + Math.random() * 3.0;
+                this.targetWindSpeed = 0.2 + Math.random() * 0.5;
+                this.targetCloudWindSpeed = 1.0 + Math.random() * 2.0;
                 break;
         }
 
@@ -251,7 +251,7 @@ export class WeatherManager {
                 this.targetFogDensity = 0.5 + Math.random() * 0.4; // Max 0.9 for visibility safety
             }
 
-            this.targetWindSpeed = 1.0 + Math.random() * 4.0;
+            this.targetWindSpeed = 0.2 + Math.random() * 0.8;
         }
 
         // Very rarely change the cloud wind target direction
@@ -386,7 +386,7 @@ export class WeatherManager {
         for (let i = 0; i < heatData.length; i++) {
             if (heatData[i] > heatThreshold) {
                 // Remove snow from hot sub-tile - faster melt than spread
-                data[i] = Math.max(0, data[i] - 0.1); 
+                data[i] = Math.max(0, data[i] - 0.1);
             }
         }
     }

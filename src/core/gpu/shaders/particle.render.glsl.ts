@@ -151,21 +151,33 @@ void main() {
         // Darken center slightly for depth
         finalColor.rgb *= (0.7 + n * 0.3);
     } else if (abs(type - TYPE_MOLTEN) < 0.1) {
-        // --- INCANDESCENT MOLTEN ---
-        // Flicker based on time and life
-        float flicker = noise(vec2(u_time * 10.0, v_lifeRatio * 5.0)) * 0.2 + 0.9;
+        // --- INCANDESCENT MOLTEN COOLING RAMP ---
+        float flicker = noise(vec2(u_time * 12.0, v_lifeRatio * 7.0)) * 0.15 + 0.85;
         
-        float core = 1.0 - smoothstep(0.0, 0.15, dist);
-        float glow = pow(1.0 - dist, 4.0); // Natural exponential falloff
+        float core = 1.0 - smoothstep(0.0, 0.12, dist);
+        float glowArea = pow(1.0 - dist, 4.0);
         
-        vec3 glowColor = vec3(1.0, 0.3, 0.0); // Richer orange
-        vec3 coreColor = vec3(1.0, 1.0, 0.9); // White-hot
+        // Dynamic Color Ramp
+        vec3 color;
+        if (v_lifeRatio > 0.8) {
+            // White-hot to Yellow
+            color = mix(vec3(1.0, 0.9, 0.4), vec3(1.0, 1.0, 1.0), (v_lifeRatio - 0.8) * 5.0);
+        } else if (v_lifeRatio > 0.5) {
+            // Yellow to Orange
+            color = mix(vec3(1.0, 0.4, 0.0), vec3(1.0, 0.9, 0.4), (v_lifeRatio - 0.5) * 3.33);
+        } else if (v_lifeRatio > 0.2) {
+            // Orange to Deep Red
+            color = mix(vec3(0.5, 0.0, 0.0), vec3(1.0, 0.4, 0.0), (v_lifeRatio - 0.2) * 3.33);
+        } else {
+            // Deep Red to Dark Cold Grey
+            color = mix(vec3(0.1, 0.1, 0.1), vec3(0.5, 0.0, 0.0), v_lifeRatio * 5.0);
+        }
         
-        vec3 combined = mix(glowColor, coreColor, core);
-        finalColor.rgb = combined * flicker;
+        finalColor.rgb = color * flicker;
         
-        // Boost glow for incandescence
-        alpha = (glow * 0.7 + core) * v_color.a * flicker;
+        // Alpha follows "heat" - cold particles are much dimmer
+        float heatAlpha = mix(0.1, 1.0, smoothstep(0.0, 0.4, v_lifeRatio));
+        alpha = (glowArea * 0.6 + core) * heatAlpha * flicker;
     } else {
         // Hard circle
         if (dist > 0.8) alpha = 0.0;

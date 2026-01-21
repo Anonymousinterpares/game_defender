@@ -52,19 +52,24 @@ void main() {
         return;
     }
 
-    // --- Entity Interaction (Repulsion) ---
-    for (int i = 0; i < 8; i++) {
-        if (u_entities[i].x == 0.0 && u_entities[i].y == 0.0) continue;
-        
-        vec2 dir = posVel.xy - u_entities[i];
-        float distSq = dot(dir, dir);
-        float radius = 60.0; // Slightly larger interaction
-        if (distSq < radius * radius && distSq > 0.01) {
-            float dist = sqrt(distSq);
-            float force = (1.0 - dist / radius) * 300.0;
-            // Smoke is lighter, pushed harder
-            float m = (abs(type - TYPE_SMOKE) < 0.1) ? 2.0 : 1.0;
-            posVel.zw += (dir / dist) * force * m * u_dt;
+// --- Entity Interaction (Repulsion) ---
+    // If bit 3 (FLAG_GROUNDED = 4.0) is set, skip repulsion
+    bool isGrounded = mod(flags, 8.0) >= 4.0;
+    
+    if (!isGrounded) {
+        for (int i = 0; i < 8; i++) {
+            if (u_entities[i].x == 0.0 && u_entities[i].y == 0.0) continue;
+            
+            vec2 dir = posVel.xy - u_entities[i];
+            float distSq = dot(dir, dir);
+            float radius = 60.0; // Slightly larger interaction
+            if (distSq < radius * radius && distSq > 0.01) {
+                float dist = sqrt(distSq);
+                float force = (1.0 - dist / radius) * 300.0;
+                // Smoke is lighter, pushed harder
+                float m = (abs(type - TYPE_SMOKE) < 0.1) ? 2.0 : 1.0;
+                posVel.zw += (dir / dist) * force * m * u_dt;
+            }
         }
     }
 
@@ -88,56 +93,67 @@ void main() {
         float drag = 0.6 + variation * 0.4; // Dense smoke has more air resistance
         posVel.z += (u_wind.x * 30.0 + curlX - posVel.z * drag) * u_dt;
         posVel.w += (u_wind.y * 30.0 + driftY + curlY - posVel.w * drag) * u_dt;
-        
-        // Expansion: Smoke slows down but spreads out (expansion is visual)
     } else {
         // Standard / Molten Physics
-        // Time-based Damping (Friction)
-        float drag = 2.0; // Damping factor
-        if (abs(type - TYPE_MOLTEN) < 0.1) drag = 1.0; // Molten flies further
-        
-        posVel.z -= posVel.z * drag * u_dt;
-        posVel.w -= posVel.w * drag * u_dt;
-    }
+        if (!isGrounded) {
+            // Time-based Damping (Friction)
+            float drag = 2.0; // Damping factor
+            if (abs(type - TYPE_MOLTEN) < 0.1) drag = 1.0; // Molten flies further
+            
+            posVel.z -= posVel.z * drag * u_dt;
+            posVel.w -= posVel.w * drag * u_dt;
 
-    // Predictive Collision
-    vec2 nextPos = posVel.xy + posVel.zw * u_dt;
-    ivec2 gridPos = ivec2(nextPos / u_tileSize);
-    
-    // Bounds Check & Wall Collision
-    bool hit = false;
-    
-    if (gridPos.x >= 0 && gridPos.x < int(u_mapSize.x) && gridPos.y >= 0 && gridPos.y < int(u_mapSize.y)) {
-        // Sample R8 Texture (Red channel contains MaterialType)
-        // texelFetch expects (x, y) integer coords
-        float cell = texelFetch(u_worldMap, gridPos, 0).r;
-        
-        if (cell > 0.0) {
-            hit = true;
-            
-            // Resolve Collision (Simple Slide/Bounce)
-            // Check X
-            vec2 testX = posVel.xy + vec2(posVel.z * u_dt, 0.0);
-            ivec2 gridX = ivec2(testX / u_tileSize);
-            if (gridX.x >= 0 && gridX.x < int(u_mapSize.x) && texelFetch(u_worldMap, gridX, 0).r > 0.0) {
-                posVel.z *= -0.5; // Bounce X
+            // Ground checking for molten: if moving very slowly, it might have settled
+            if (abs(type - TYPE_MOLTEN) < 0.1) {
+                if (length(posVel.zw) < 1.0) {
+                    flags += 4.0; // Set FLAG_GROUNDED
+                    isGrounded = true;
+                    posVel.zw = vec2(0.0);
+                }
             }
-            
-            // Check Y
-            vec2 testY = posVel.xy + vec2(0.0, posVel.w * u_dt);
-            ivec2 gridY = ivec2(testY / u_tileSize);
-            if (gridY.y >= 0 && gridY.y < int(u_mapSize.y) && texelFetch(u_worldMap, gridY, 0).r > 0.0) {
-                posVel.w *= -0.5; // Bounce Y
-            }
+        } else {
+            // Particle is grounded - no movement
+            posVel.zw = vec2(0.0);
         }
     }
 
-    if (!hit) {
+    // Predictive Collision
+    if (!isGrounded) {
+        vec2 nextPos = posVel.xy + posVel.zw * u_dt;
+        ivec2 gridPos = ivec2(nextPos / u_tileSize);
+        
+        // Bounds Check & Wall Collision
+        bool hit = false;
+        
+        if (gridPos.x >= 0 && gridPos.x < int(u_mapSize.x) && gridPos.y >= 0 && gridPos.y < int(u_mapSize.y)) {
+            float cell = texelFetch(u_worldMap, gridPos, 0).r;
+            
+            if (cell > 0.0) {
+                hit = true;
+                
+                // Resolve Collision (Simple Slide/Bounce)
+                vec2 testX = posVel.xy + vec2(posVel.z * u_dt, 0.0);
+                ivec2 gridX = ivec2(testX / u_tileSize);
+                if (gridX.x >= 0 && gridX.x < int(u_mapSize.x) && texelFetch(u_worldMap, gridX, 0).r > 0.0) {
+                    posVel.z *= -0.5; // Bounce X
+                }
+                
+                vec2 testY = posVel.xy + vec2(0.0, posVel.w * u_dt);
+                ivec2 gridY = ivec2(testY / u_tileSize);
+                if (gridY.y >= 0 && gridY.y < int(u_mapSize.y) && texelFetch(u_worldMap, gridY, 0).r > 0.0) {
+                    posVel.w *= -0.5; // Bounce Y
+                }
+
+                // If molten hits a wall, it immediately grounds (lands)
+                if (abs(type - TYPE_MOLTEN) < 0.1) {
+                    flags += 4.0; 
+                    isGrounded = true;
+                    posVel.zw = vec2(0.0);
+                }
+            }
+        }
+
         // Commit Move
-        posVel.x += posVel.z * u_dt;
-        posVel.y += posVel.w * u_dt;
-    } else {
-        // Move with modified velocity (slide)
         posVel.x += posVel.z * u_dt;
         posVel.y += posVel.w * u_dt;
     }

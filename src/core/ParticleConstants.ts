@@ -8,6 +8,7 @@ export enum ParticleType {
 
 export const FLAG_ACTIVE = 1 << 0;
 export const FLAG_IS_FLAME = 1 << 1;
+export const FLAG_GROUNDED = 1 << 2;
 
 export const MAX_PARTICLES = 100000;
 
