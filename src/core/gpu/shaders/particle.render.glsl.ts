@@ -75,12 +75,33 @@ in vec2 v_uv;
 
 out vec4 outColor;
 
+uniform float u_time;
+
 // Constants
 #define TYPE_STANDARD 0.0
 #define TYPE_SHOCKWAVE 1.0
 #define TYPE_FLASH 2.0
 #define TYPE_MOLTEN 3.0
 #define TYPE_SMOKE 4.0
+
+// 2D Hash for noise
+float hash(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+// Simple Value Noise
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
 
 void main() {
     float dist = length(v_uv);
@@ -90,31 +111,37 @@ void main() {
     float alpha = v_color.a;
 
     if (abs(v_type - TYPE_SMOKE) < 0.1) {
-        // Soft circle for smoke
-        // dist 0 -> 1. 
-        // Soft edge from 0.0 to 1.0
-        float shape = 1.0 - smoothstep(0.0, 1.0, dist);
-        // Add some noise or variation? For now smooth puff.
-        alpha *= shape;
+        // --- NOISY SMOKE ---
+        // Use polar coordinates for noise to make it puffier
+        float angle = atan(v_uv.y, v_uv.x);
+        float n = noise(vec2(angle * 1.5, u_time * 0.5 + v_lifeRatio * 2.0));
+        
+        // Deform the distance based on noise
+        float boundary = 0.7 + n * 0.3;
+        float shape = 1.0 - smoothstep(0.0, boundary, dist);
+        
+        // Internal texture
+        float tex = noise(v_uv * 3.0 + u_time * 0.2);
+        alpha *= shape * (0.6 + tex * 0.4);
+        
+        // Color variation (darken smoke as it ages or based on noise)
+        finalColor.rgb *= (0.8 + tex * 0.2);
     } else if (abs(v_type - TYPE_MOLTEN) < 0.1) {
-        // Bright core, soft glow
-        // CPU: Core radius ~2-4px, Glow ~20-30px.
-        // Quad is 40px (dist 1.0 = 20px).
-        // Core is roughly 0.1 of dist.
+        // --- INCANDESCENT MOLTEN ---
+        // Flicker based on time and life
+        float flicker = noise(vec2(u_time * 10.0, v_lifeRatio * 5.0)) * 0.2 + 0.9;
         
         float core = 1.0 - smoothstep(0.0, 0.15, dist);
-        float glow = 1.0 - smoothstep(0.1, 1.0, dist); // Broad glow
+        float glow = pow(1.0 - dist, 4.0); // Natural exponential falloff
         
-        // Accumulate
-        vec3 glowColor = vec3(1.0, 0.4, 0.0); // Orange glow
-        vec3 coreColor = vec3(1.0, 1.0, 0.8); // White-yellow core
+        vec3 glowColor = vec3(1.0, 0.3, 0.0); // Richer orange
+        vec3 coreColor = vec3(1.0, 1.0, 0.9); // White-hot
         
         vec3 combined = mix(glowColor, coreColor, core);
-        finalColor.rgb = combined;
+        finalColor.rgb = combined * flicker;
         
-        // Alpha logic
-        alpha = glow * 0.8 + core; // Core is opaque
-        alpha *= v_color.a; // Fade out with life
+        // Boost glow for incandescence
+        alpha = (glow * 0.7 + core) * v_color.a * flicker;
     } else {
         // Hard circle
         if (dist > 0.8) alpha = 0.0;

@@ -27,7 +27,18 @@ export class GPUParticleSystem {
     private worldH: number = 0;
     private tileSize: number = 32;
 
+    // Disturbers (Player/Enemies)
+    private entities: Float32Array = new Float32Array(16); // 8 vec2s
+
     constructor() { }
+
+    public setEntities(positions: {x: number, y: number}[]): void {
+        this.entities.fill(0);
+        for (let i = 0; i < Math.min(positions.length, 8); i++) {
+            this.entities[i * 2] = positions[i].x;
+            this.entities[i * 2 + 1] = positions[i].y;
+        }
+    }
 
     public setWorldMap(tex: WebGLTexture, w: number, h: number, tileSize: number): void {
         this.worldMap = tex;
@@ -157,6 +168,7 @@ export class GPUParticleSystem {
         this.updateShader!.setUniform1f("u_dt", dt);
         this.updateShader!.setUniform1f("u_time", time);
         this.updateShader!.setUniform2f("u_wind", windX, windY);
+        this.updateShader!.setUniform2fv("u_entities", this.entities);
         
         // Use actual world dimensions in pixels for boundary checks
         const worldPixelW = this.worldW * this.tileSize;
@@ -167,8 +179,7 @@ export class GPUParticleSystem {
         if (this.worldMap) {
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, this.worldMap);
-            const loc = this.updateShader!.getUniformLocation("u_worldMap");
-            if (loc) gl.uniform1i(loc, 0);
+            this.updateShader!.setUniform1i("u_worldMap", 0);
 
             this.updateShader!.setUniform1f("u_tileSize", this.tileSize);
             this.updateShader!.setUniform2f("u_mapSize", this.worldW, this.worldH);
@@ -199,6 +210,7 @@ export class GPUParticleSystem {
         this.renderShader!.use();
         this.renderShader!.setUniform2f("u_camera", camX, camY);
         this.renderShader!.setUniform2f("u_resolution", screenW, screenH);
+        this.renderShader!.setUniform1f("u_time", performance.now() * 0.001);
 
         gl.bindVertexArray(renderVAO);
 

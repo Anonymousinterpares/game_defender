@@ -63,4 +63,14 @@ export class Shader {
         const loc = this.getUniformLocation(name);
         if (loc) this.gl.uniform1f(loc, val);
     }
+
+    public setUniform1i(name: string, val: number): void {
+        const loc = this.getUniformLocation(name);
+        if (loc) this.gl.uniform1i(loc, val);
+    }
+
+    public setUniform2fv(name: string, val: Float32Array | number[]): void {
+        const loc = this.getUniformLocation(name);
+        if (loc) this.gl.uniform2fv(loc, val);
+    }
 }

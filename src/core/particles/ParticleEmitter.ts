@@ -140,6 +140,12 @@ export class ParticleEmitter {
         if (!heatMap) return;
         const activeTiles = heatMap.activeTiles;
         const tileSize = world.getTileSize();
+        const ps = (window as any).ParticleSystemInstance || (this as any)._ps || (world as any).particleSystem; 
+        // Note: The project uses ParticleSystem.getInstance()
+        // Importing it here might cause circularity, let's use the singleton directly if it's available.
+        // Actually, let's assume ParticleSystem.getInstance() is safe to use.
+        
+        const ParticleSystemClass = (this.constructor as any).ParticleSystemRef;
 
         activeTiles.forEach((key: string) => {
             const summary = heatMap.getTileSummary(key);
@@ -160,43 +166,44 @@ export class ParticleEmitter {
                         const life = 3.0 + Math.random() * 2.0;
                         const size = (tileSize * 2.5) + (fireIntensity * tileSize * 2.5);
 
-                        this.spawnSmoke(
-                            centerX + offset,
-                            centerY + offset,
-                            (Math.random() - 0.5) * 30,
-                            -30 - Math.random() * 50,
-                            life,
-                            size,
-                            '#000'
-                        );
+                        // Use the globally accessible ParticleSystem if possible to ensure GPU redirection
+                        const target = (globalThis as any).ParticleSystem?.getInstance();
+                        if (target) {
+                             target.spawnSmoke(centerX + offset, centerY + offset, (Math.random() - 0.5) * 30, -30 - Math.random() * 50, life, size, '#000');
+                        } else {
+                            this.spawnSmoke(centerX + offset, centerY + offset, (Math.random() - 0.5) * 30, -30 - Math.random() * 50, life, size, '#000');
+                        }
                     }
                 }
             }
 
             // 2. RESIDUE HEAT SMOKE (Smaller/Lighter)
             if (summary.maxHeat > 0.4 && Math.random() < summary.avgHeat * 0.4) {
-                this.spawnSmoke(
-                    centerX + (Math.random() - 0.5) * tileSize,
-                    centerY + (Math.random() - 0.5) * tileSize,
-                    (Math.random() - 0.5) * 15,
-                    -15 - Math.random() * 20,
-                    2.0,
-                    tileSize * 1.2,
-                    '#666'
-                );
+                const target = (globalThis as any).ParticleSystem?.getInstance();
+                if (target) {
+                    target.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, (Math.random() - 0.5) * 15, -15 - Math.random() * 20, 2.0, tileSize * 1.2, '#666');
+                } else {
+                    this.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, (Math.random() - 0.5) * 15, -15 - Math.random() * 20, 2.0, tileSize * 1.2, '#666');
+                }
             }
         });
     }
 
     private emitEntitySmoke(player: ParticleTarget | null, enemies: ParticleTarget[]): void {
         const targets = player ? [player, ...enemies] : enemies;
+        const targetPS = (globalThis as any).ParticleSystem?.getInstance();
+
         targets.forEach(t => {
             if (t.active && (t as any).isOnFire) {
                 // Persistent dense smoke trailing from burning characters
                 for (let i = 0; i < 2; i++) {
                     const wx = t.x + (Math.random() - 0.5) * t.radius;
                     const wy = t.y + (Math.random() - 0.5) * t.radius;
-                    this.spawnSmoke(wx, wy, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, 1.5 + Math.random(), 18 + Math.random() * 12, '#000');
+                    if (targetPS) {
+                        targetPS.spawnSmoke(wx, wy, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, 1.5 + Math.random(), 18 + Math.random() * 12, '#000');
+                    } else {
+                        this.spawnSmoke(wx, wy, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, 1.5 + Math.random(), 18 + Math.random() * 12, '#000');
+                    }
                 }
             }
         });

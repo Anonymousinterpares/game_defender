@@ -190,7 +190,15 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         }
 
         this.gpuRenderer.updateConfig();
-        this.gpuRenderer.update(dt);
+        
+        // Collect entities for GPU particle interaction
+        const gpuEntities: {x: number, y: number}[] = [];
+        if (this.player && this.player.active) gpuEntities.push({ x: this.player.x, y: this.player.y });
+        this.enemies.forEach(e => {
+            if (e.active && gpuEntities.length < 8) gpuEntities.push({ x: e.x, y: e.y });
+        });
+
+        this.gpuRenderer.update(dt, gpuEntities);
         PerfMonitor.getInstance().end('update_total');
     }
 

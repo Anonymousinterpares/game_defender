@@ -106,23 +106,17 @@ export class GPURenderer {
         }
     }
 
-    public update(dt: number): void {
+    public update(dt: number, entities: {x: number, y: number}[] = []): void {
         if (this.active && this.particleSystem && this.world) {
             this.updateWorldTexture();
-            
-            // Get Wind
-            // For now simple placeholder or fetch from WeatherManager if accessible
-            // We can pass windX, windY.
-            // Let's assume 0,0 for now or fetch global if needed.
-            // But wait, GameplayScene passes nothing. 
-            // We should use the WeatherManager singleton? Yes.
-            // But we need to avoid circular deps if possible. 
-            // WeatherManager is in core.
             
             // Pass texture and world info
             if (this.worldMapTexture) {
                 this.particleSystem.setWorldMap(this.worldMapTexture, this.world.getWidth(), this.world.getHeight(), this.world.getTileSize());
             }
+
+            // Pass entities for particle interaction
+            this.particleSystem.setEntities(entities);
 
             this.particleSystem.update(dt, performance.now() * 0.001, 0, 0);
         }

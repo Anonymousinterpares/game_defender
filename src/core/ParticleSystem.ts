@@ -53,6 +53,7 @@ export class ParticleSystem {
     public static getInstance(): ParticleSystem {
         if (!ParticleSystem.instance) {
             ParticleSystem.instance = new ParticleSystem();
+            (globalThis as any).ParticleSystem = ParticleSystem;
         }
         return ParticleSystem.instance;
     }

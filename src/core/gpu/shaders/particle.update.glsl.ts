@@ -7,6 +7,7 @@ uniform float u_dt;
 uniform vec2 u_wind;
 uniform vec2 u_worldSize; // width, height (pixels)
 uniform float u_time;     // For noise/turbulence
+uniform vec2 u_entities[8]; // Player/Enemy positions
 
 // Map Collision
 uniform sampler2D u_worldMap;
@@ -48,21 +49,35 @@ void main() {
         return;
     }
 
+    // --- Entity Interaction (Repulsion) ---
+    for (int i = 0; i < 8; i++) {
+        if (u_entities[i].x == 0.0 && u_entities[i].y == 0.0) continue;
+        
+        vec2 dir = posVel.xy - u_entities[i];
+        float distSq = dot(dir, dir);
+        float radius = 50.0; // Interaction radius
+        if (distSq < radius * radius && distSq > 0.01) {
+            float dist = sqrt(distSq);
+            float force = (1.0 - dist / radius) * 200.0;
+            posVel.zw += (dir / dist) * force * u_dt;
+        }
+    }
+
     // Apply Physics
     if (abs(type - TYPE_SMOKE) < 0.1) {
         // Smoke Physics: Wind + Drift + Turbulence
         float driftY = -15.0; // Rising
         
-        // Simple procedural turbulence
-        float t = u_time * 0.001;
-        float turbX = sin(t * 2.0 + float(gl_VertexID)) * 10.0;
-        float turbY = cos(t * 1.5 + float(gl_VertexID)) * 5.0;
+        // Swirling turbulence based on particle ID and time
+        float id = float(gl_VertexID);
+        float t = u_time * 2.0;
+        float turbX = sin(t + id * 0.1) * 15.0 + cos(t * 0.5 + id * 0.05) * 10.0;
+        float turbY = cos(t * 0.7 + id * 0.1) * 10.0;
 
         // Velocity Damping + Forces
-        // posVel.z is vx, posVel.w is vy
-        float drag = 0.5;
-        posVel.z += (u_wind.x * 20.0 + turbX - posVel.z * drag) * u_dt;
-        posVel.w += (u_wind.y * 20.0 + driftY + turbY - posVel.w * drag) * u_dt;
+        float drag = 0.8; // Slightly more drag for smoke to keep it wispy
+        posVel.z += (u_wind.x * 25.0 + turbX - posVel.z * drag) * u_dt;
+        posVel.w += (u_wind.y * 25.0 + driftY + turbY - posVel.w * drag) * u_dt;
     } else {
         // Standard / Molten Physics
         // Time-based Damping (Friction)
