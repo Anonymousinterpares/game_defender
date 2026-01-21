@@ -23,14 +23,15 @@ export class ParticleSimulation {
         player: ParticleTarget | null,
         enemies: ParticleTarget[],
         weather: any,
-        isHost: boolean
+        isHost: boolean,
+        pixelsPerMeter: number = 6.4 // Default approx for 1 tile = 5m
     ): SimulationEvents {
 
         const damageEvents: { targetIdx: number, damage: number }[] = [];
         const heatEvents: { x: number, y: number, intensity: number, radius: number }[] = [];
 
-        const windX = weather ? weather.windDir.x * weather.windSpeed : 0;
-        const windY = weather ? weather.windDir.y * weather.windSpeed : 0;
+        const windX = weather ? weather.windDir.x * weather.windSpeed * pixelsPerMeter : 0;
+        const windY = weather ? weather.windDir.y * weather.windSpeed * pixelsPerMeter : 0;
 
         // Use a loop bound by MAX_PARTICLES, or data.activeCount if maintainable?
         // Worker uses full loop. Optimization: Use activeIndices if available?
@@ -51,18 +52,19 @@ export class ParticleSimulation {
 
             if (pType === ParticleType.SMOKE) {
                 // Smoke physics: Wind + Drift + Turbulence
-                const driftY = -15; // Rising heat
+                // Drift: Rising at ~2.0 m/s
+                const driftY = -2.0 * pixelsPerMeter;
                 // We use i as a random seed offset for turbulence
                 const time = Date.now() * 0.001 + i;
                 // Note: Date.now() in worker might differ slightly but physics simulation usually uses passed time or frame count.
                 // However, the original code used Date.now(). In a deterministic sim, we should pass 'time' as argument.
                 // For visual smoke, it's fine.
 
-                const turbX = Math.sin(time * 2) * 10;
-                const turbY = Math.cos(time * 1.5) * 5;
+                const turbX = Math.sin(time * 2) * 1.5 * pixelsPerMeter; // 1.5 m/s turbulence
+                const turbY = Math.cos(time * 1.5) * 0.8 * pixelsPerMeter;
 
-                data.vx[i] += (windX * 20 + turbX - data.vx[i] * 0.5) * dt;
-                data.vy[i] += (windY * 20 + driftY + turbY - data.vy[i] * 0.5) * dt;
+                data.vx[i] += (windX + turbX - data.vx[i] * 0.5) * dt;
+                data.vy[i] += (windY + driftY + turbY - data.vy[i] * 0.5) * dt;
 
                 data.x[i] += data.vx[i] * dt;
                 data.y[i] += data.vy[i] * dt;
@@ -92,7 +94,8 @@ export class ParticleSimulation {
                 }
 
                 if (pType === ParticleType.MOLTEN) {
-                    const gravity = 80;
+                    // Constant gravity from config (9.81 m/s²)
+                    const gravity = 9.81 * pixelsPerMeter;
                     data.vz[i] += gravity * dt;
                     data.z[i] += data.vz[i] * dt;
 

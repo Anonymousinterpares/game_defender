@@ -35,7 +35,7 @@ self.onmessage = (e: MessageEvent) => {
     }
     else if (type === 'update') {
         if (!particleData || !worldCollision) return;
-        const { dt, player, enemies, weather } = data;
+        const { dt, player, enemies, weather, pixelsPerMeter } = data;
 
         const events = ParticleSimulation.update(
             dt,
@@ -44,7 +44,8 @@ self.onmessage = (e: MessageEvent) => {
             player,
             enemies,
             weather,
-            isHost
+            isHost,
+            pixelsPerMeter
         );
 
         // Signal completion and send events

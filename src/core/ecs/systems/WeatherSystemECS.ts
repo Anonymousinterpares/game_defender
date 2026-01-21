@@ -80,6 +80,7 @@ export class WeatherSystemECS implements System {
 
     public update(dt: number, entityManager: EntityManager): void {
         const weather = WeatherManager.getInstance().getWeatherState();
+        const ppm = ConfigManager.getInstance().getPixelsPerMeter();
 
         // Update Repulsion Zones
         this.repulsionZones = this.repulsionZones.filter(zone => {
@@ -89,8 +90,8 @@ export class WeatherSystemECS implements System {
 
         if (weather.precipitationIntensity < 0.05) return;
 
-        const windX = weather.windDir.x * weather.windSpeed * 50;
-        const windY = weather.windDir.y * weather.windSpeed * 50;
+        const windX = weather.windDir.x * weather.windSpeed * ppm;
+        const windY = weather.windDir.y * weather.windSpeed * ppm;
         const isRain = weather.type === WeatherType.RAIN;
 
         // Bounds for wrapping (relative to camera)
@@ -102,17 +103,17 @@ export class WeatherSystemECS implements System {
 
         this.particles.forEach(p => {
             if (isRain) {
-                p.vz = -500;
+                p.vz = -10 * ppm; // ~10 m/s fall
                 p.vx = (p.vx * 0.95) + windX * 0.05;
                 p.vy = (p.vy * 0.95) + windY * 0.05;
             } else {
-                p.vz = -100 - Math.random() * 50;
-                const sway = Math.sin(Date.now() * 0.002 + p.life * 10) * 30;
+                p.vz = (-1.5 - Math.random() * 1.0) * ppm; // ~1.5 m/s fall
+                const sway = Math.sin(Date.now() * 0.002 + p.life * 10) * 5 * ppm; // ~5 m/s sway
                 p.vx = (p.vx * 0.95) + (windX + sway) * 0.05;
                 p.vy = (p.vy * 0.95) + windY * 0.05;
             }
 
-            const fallSpeed = isRain ? 500 : 120;
+            const fallSpeed = isRain ? 10 * ppm : 1.5 * ppm;
 
             // Apply Repulsion
             this.repulsionZones.forEach(zone => {

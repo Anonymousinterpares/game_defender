@@ -154,7 +154,7 @@ export const FLUID_FORCES = `#version 300 es
     uniform sampler2D u_velocity;
     uniform sampler2D u_density; // R=density, G=temp
     uniform vec2 u_wind;
-    uniform vec2 u_worldSize;
+    uniform float u_buoyancy;
     uniform float u_dt;
     in vec2 v_uv;
     out vec4 outColor;
@@ -164,13 +164,11 @@ export const FLUID_FORCES = `#version 300 es
         vec2 densTemp = texture(u_density, v_uv).xy;
         
         // Buoyancy: Heat makes it rise. 
-        // 0.05 UV/sec is ~80 pixels/sec in a 1600px world.
-        float buoyancy = densTemp.y * 0.05; 
+        // u_buoyancy is pre-scaled to UV/sec in TS
+        float buoy = densTemp.y * u_buoyancy; 
         
-        // Wind: Normalize to UV space (world pixels -> 0..1)
-        vec2 uvWind = vec2(u_wind.x / u_worldSize.x, -u_wind.y / u_worldSize.y);
-        
-        vel += (uvWind + vec2(0.0, buoyancy)) * u_dt;
+        // Wind: Now passed in UV/sec directly
+        vel += (u_wind + vec2(0.0, buoy)) * u_dt;
         outColor = vec4(vel, 0.0, 1.0);
     }
 `;

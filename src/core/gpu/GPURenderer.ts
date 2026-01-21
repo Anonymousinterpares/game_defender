@@ -62,8 +62,10 @@ export class GPURenderer {
             this.fluidSim.init(gl, 256, 256); // 256x256 fluid grid
 
             // Bridge CPU Particle System events to Fluid Splats
-            // Use a persistent reference to prevent multiple registrations if initResources is called twice
-            ParticleSystem.getInstance().onSmokeSpawned = (x, y, color) => {
+            const ps = ParticleSystem.getInstance();
+            ps.onClear = () => this.clear();
+
+            ps.onSmokeSpawned = (x, y, color) => {
                 const debug = ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug');
                 if (debug) console.log(`[GPU] Smoke Spawned at (${x.toFixed(1)}, ${y.toFixed(1)}) color: ${color}`);
 
@@ -93,15 +95,17 @@ export class GPURenderer {
 
                 const wpW = this.world.getWidthPixels();
                 const wpH = this.world.getHeightPixels();
-                // Randomize radius a bit for more natural puffs
-                const radius = 35.0 + Math.random() * 25.0;
+                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
+
+                // Randomize radius: 5.0m to 9.0m puff
+                const radius = (5.0 + Math.random() * 4.0) * ppm;
 
                 if (debug) console.log(`[GPU] Splat: density=${density}, temp=${temp}, radius=${radius.toFixed(1)}`);
                 this.fluidSim.splat(x, y, radius, density, temp, variation, wpW, wpH);
 
-                // Add some initial velocity "burst" to push smoke outwards
-                const vx = (Math.random() - 0.5) * 60.0;
-                const vy = (Math.random() - 0.5) * 60.0;
+                // Add some initial velocity "burst" to push smoke outwards (approx 10 m/s)
+                const vx = (Math.random() - 0.5) * 10.0 * ppm;
+                const vy = (Math.random() - 0.5) * 10.0 * ppm;
                 this.fluidSim.splatVelocity(x, y, radius * 0.7, vx, vy, wpW, wpH);
             };
         }
@@ -155,6 +159,11 @@ export class GPURenderer {
         } else if (!this.active && wasActive) {
             console.log("[GPU] Pipeline Deactivated");
         }
+    }
+
+    public clear(): void {
+        if (this.particleSystem) this.particleSystem.clear();
+        if (this.fluidSim) this.fluidSim.clear();
     }
 
     public update(dt: number, entities: { x: number, y: number }[] = []): void {

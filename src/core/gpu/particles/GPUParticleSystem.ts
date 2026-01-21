@@ -127,6 +127,19 @@ export class GPUParticleSystem {
         if (debug) console.log("[GPU] Particle System initialized.");
     }
 
+    public clear(): void {
+        if (!this.initialized) return;
+        const gl = this.gl;
+        const emptyData = new Float32Array(MAX_PARTICLES * 8);
+        this.buffers.forEach(vbo => {
+            gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+            gl.bufferSubData(gl.ARRAY_BUFFER, 0, emptyData);
+        });
+        this.nextSpawnIdx = 0;
+        this.tfIndex = 0;
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    }
+
     public spawn(x: number, y: number, count: number, type: number): void {
         // Placeholder
     }
@@ -165,20 +178,26 @@ export class GPUParticleSystem {
         const sourceVAO = this.updateVaos[this.tfIndex];
         const destBuffer = this.buffers[1 - this.tfIndex];
 
-        // Fetch actual wind
+        // Fetch wind and scale factors
+        const config = ConfigManager.getInstance();
+        const ppm = config.getPixelsPerMeter();
         const weather = WeatherManager.getInstance().getWeatherState();
         let windX = 0;
         let windY = 0;
         if (weather) {
-            windX = weather.windDir.x * weather.windSpeed;
-            windY = weather.windDir.y * weather.windSpeed;
+            windX = weather.windDir.x * weather.windSpeed * ppm;
+            windY = weather.windDir.y * weather.windSpeed * ppm;
         }
+
+        const gravity = config.get<number>('Physics', 'gravity') || 9.81;
 
         // 1. Transform Feedback Pass
         this.updateShader!.use();
         this.updateShader!.setUniform1f("u_dt", dt);
         this.updateShader!.setUniform1f("u_time", time);
         this.updateShader!.setUniform2f("u_wind", windX, windY);
+        this.updateShader!.setUniform1f("u_gravity", gravity * ppm);
+        this.updateShader!.setUniform1f("u_ppm", ppm);
         this.updateShader!.setUniform2fv("u_entities", this.entities);
 
         // Use actual world dimensions in pixels for boundary checks

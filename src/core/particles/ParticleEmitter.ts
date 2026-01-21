@@ -46,12 +46,13 @@ export class ParticleEmitter {
         const i = this.getNextIndex();
         if (i === -1) return -1;
 
+        const ppm = ConfigManager.getInstance().getPixelsPerMeter();
         const d = this.data;
         d.x[i] = x; d.y[i] = y; d.z[i] = 0;
         d.prevX[i] = x; d.prevY[i] = y; d.prevZ[i] = 0;
         d.vx[i] = vx; d.vy[i] = vy; d.vz[i] = 0;
         d.life[i] = life; d.maxLife[i] = life;
-        d.radius[i] = 1 + Math.random() * 2;
+        d.radius[i] = (0.1 + Math.random() * 0.2) * ppm; // 0.1m - 0.3m
         d.startRadius[i] = d.radius[i];
         d.type[i] = ParticleType.STANDARD;
         d.colorIdx[i] = this.getColorIndex(color);
@@ -112,15 +113,18 @@ export class ParticleEmitter {
         const i = this.getNextIndex();
         if (i === -1) return -1;
 
+        const ppm = ConfigManager.getInstance().getPixelsPerMeter();
         const life = 5.0 + Math.random() * 2.0;
 
         const d = this.data;
         d.x[i] = x; d.y[i] = y; d.z[i] = 0;
         d.prevX[i] = x; d.prevY[i] = y; d.prevZ[i] = 0;
         d.vx[i] = vx; d.vy[i] = vy;
-        d.vz[i] = -60 - Math.random() * 40;
+        // -10 to -16 m/s upward burst
+        d.vz[i] = (-10 - Math.random() * 6) * ppm;
         d.life[i] = life; d.maxLife[i] = life;
-        d.radius[i] = 4 + Math.random() * 2;
+        // 0.5m to 1.0m radius
+        d.radius[i] = (0.5 + Math.random() * 0.5) * ppm;
         d.type[i] = ParticleType.MOLTEN;
         d.colorIdx[i] = this.getColorIndex('#ffff00');
         d.flags[i] = FLAG_ACTIVE;
@@ -140,11 +144,11 @@ export class ParticleEmitter {
         if (!heatMap) return;
         const activeTiles = heatMap.activeTiles;
         const tileSize = world.getTileSize();
-        const ps = (window as any).ParticleSystemInstance || (this as any)._ps || (world as any).particleSystem; 
+        const ps = (window as any).ParticleSystemInstance || (this as any)._ps || (world as any).particleSystem;
         // Note: The project uses ParticleSystem.getInstance()
         // Importing it here might cause circularity, let's use the singleton directly if it's available.
         // Actually, let's assume ParticleSystem.getInstance() is safe to use.
-        
+
         const ParticleSystemClass = (this.constructor as any).ParticleSystemRef;
 
         activeTiles.forEach((key: string) => {
@@ -158,6 +162,7 @@ export class ParticleEmitter {
             // 1. DENSE FIRE SMOKE (Major Tile Level)
             if (summary.burningCount > 0) {
                 const fireIntensity = summary.burningCount / 100; // 10x10 subDiv
+                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
 
                 if (Math.random() < fireIntensity * 0.9 + 0.3) {
                     const count = 1 + Math.floor(fireIntensity * 4);
@@ -168,10 +173,13 @@ export class ParticleEmitter {
 
                         // Use the globally accessible ParticleSystem if possible to ensure GPU redirection
                         const target = (globalThis as any).ParticleSystem?.getInstance();
+                        const vx = (Math.random() - 0.5) * 5 * ppm; // 5m/s spread
+                        const vy = (-5 - Math.random() * 8) * ppm;  // 5-13m/s rise
+
                         if (target) {
-                             target.spawnSmoke(centerX + offset, centerY + offset, (Math.random() - 0.5) * 30, -30 - Math.random() * 50, life, size, '#000');
+                            target.spawnSmoke(centerX + offset, centerY + offset, vx, vy, life, size, '#000');
                         } else {
-                            this.spawnSmoke(centerX + offset, centerY + offset, (Math.random() - 0.5) * 30, -30 - Math.random() * 50, life, size, '#000');
+                            this.spawnSmoke(centerX + offset, centerY + offset, vx, vy, life, size, '#000');
                         }
                     }
                 }
@@ -179,11 +187,15 @@ export class ParticleEmitter {
 
             // 2. RESIDUE HEAT SMOKE (Smaller/Lighter)
             if (summary.maxHeat > 0.4 && Math.random() < summary.avgHeat * 0.4) {
+                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
                 const target = (globalThis as any).ParticleSystem?.getInstance();
+                const vx = (Math.random() - 0.5) * 2 * ppm;
+                const vy = (-2 - Math.random() * 3) * ppm;
+
                 if (target) {
-                    target.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, (Math.random() - 0.5) * 15, -15 - Math.random() * 20, 2.0, tileSize * 1.2, '#666');
+                    target.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, vx, vy, 2.0, tileSize * 1.2, '#666');
                 } else {
-                    this.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, (Math.random() - 0.5) * 15, -15 - Math.random() * 20, 2.0, tileSize * 1.2, '#666');
+                    this.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, vx, vy, 2.0, tileSize * 1.2, '#666');
                 }
             }
         });

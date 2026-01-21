@@ -104,22 +104,26 @@ export class PhysicsSystem implements System {
                 physics.steeringForceY = 0;
             }
 
-            // 4. Calculate Friction Force: Ff = -v * mass * coeff * gravity
+            // 4. Calculate Friction Force: Ff = -v * mass * coeff * gravity_ref
             // We use the entity's frictionMultiplier to allow per-entity adjustments
+            const ppm = config.getPixelsPerMeter();
             const appliedFrictionCoeff = currentFriction * physics.frictionMultiplier;
-            const frictionFX = -physics.vx * physics.mass * appliedFrictionCoeff * gravity;
-            const frictionFY = -physics.vy * physics.mass * appliedFrictionCoeff * gravity;
+            // mu * g gives a decay rate in s^-1
+            const frictionFX = -physics.vx * physics.mass * appliedFrictionCoeff * (gravity / 5.0);
+            const frictionFY = -physics.vy * physics.mass * appliedFrictionCoeff * (gravity / 5.0);
 
             forceX += frictionFX;
             forceY += frictionFY;
 
             // 5. Physics Update (Euler integration)
-            const ax = forceX / physics.mass;
-            const ay = forceY / physics.mass;
-            
+            // If maxThrust is in Newtons, we scale acceleration by ppm
+            const ax = (forceX / physics.mass);
+            const ay = (forceY / physics.mass);
+
             // Apply Gravity to Z if in air
             if (transform.z < 0 || physics.vz !== 0) {
-                forceZ += physics.mass * gravity * 50; // Simple gravity factor
+                // gravity is m/s^2, so we multiply by ppm to get pixels/s^2
+                forceZ += physics.mass * gravity * ppm;
                 const az = forceZ / physics.mass;
                 physics.vz += az * dt;
             }
@@ -153,7 +157,8 @@ export class PhysicsSystem implements System {
             // 7. Align Rotation to Velocity (for Projectiles)
             if (physics.alignRotationToVelocity) {
                 const speedSq = physics.vx * physics.vx + physics.vy * physics.vy;
-                if (speedSq > 100) {
+                const minSpeed = 2.0 * ppm; // approx 2m/s
+                if (speedSq > (minSpeed * minSpeed)) {
                     transform.rotation = Math.atan2(physics.vy, physics.vx);
                 }
             }
@@ -188,8 +193,9 @@ export class PhysicsSystem implements System {
             nextX += separation.x;
             nextY += separation.y;
             if (separation.x !== 0 || separation.y !== 0) {
-                physics.vx += separation.x * 5;
-                physics.vy += separation.y * 5;
+                // Separation force scaled by ppm
+                physics.vx += separation.x * 5 * ppm;
+                physics.vy += separation.y * 5 * ppm;
             }
 
             // 10. Commit Final Position

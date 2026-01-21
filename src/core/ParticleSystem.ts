@@ -20,6 +20,7 @@ export class ParticleSystem {
     private gpuSystem: GPUParticleSystem | null = null;
 
     public onSmokeSpawned: ((x: number, y: number, color: string) => void) | null = null;
+    public onClear: (() => void) | null = null;
 
     public setGPUSystem(sys: GPUParticleSystem | null) {
         this.gpuSystem = sys;
@@ -190,15 +191,15 @@ export class ParticleSystem {
             else if (color === '#666' || color === '#555') variation = 0.5;
 
             // SPAWN MULTIPLE TINY PARTICLES FOR VOLUMETRIC EFFECT
-            const count = 4; 
+            const count = 4;
             for (let i = 0; i < count; i++) {
                 const offX = (Math.random() - 0.5) * size * 0.3;
                 const offY = (Math.random() - 0.5) * size * 0.3;
                 const vOffX = (Math.random() - 0.5) * 20;
                 const vOffY = (Math.random() - 0.5) * 20;
-                
+
                 // Pack variation into fraction: 4.0, 4.5, 4.9
-                this.gpuSystem.uploadParticle(x + offX, y + offY, vx + vOffX, vy + vOffY, life * (0.8 + Math.random() * 0.4), 4.0 + variation, FLAG_ACTIVE); 
+                this.gpuSystem.uploadParticle(x + offX, y + offY, vx + vOffX, vy + vOffY, life * (0.8 + Math.random() * 0.4), 4.0 + variation, FLAG_ACTIVE);
             }
             return -1;
         }
@@ -249,7 +250,8 @@ export class ParticleSystem {
                         dt,
                         player: player ? { x: player.x, y: player.y, radius: player.radius, active: player.active } : null,
                         enemies: enemies.map(e => ({ x: e.x, y: e.y, radius: e.radius, active: e.active })),
-                        weather: WeatherManager.getInstance().getWeatherState()
+                        weather: WeatherManager.getInstance().getWeatherState(),
+                        pixelsPerMeter: ConfigManager.getInstance().getPixelsPerMeter()
                     }
                 });
             }
@@ -258,6 +260,7 @@ export class ParticleSystem {
             if (world) {
                 const mm = (window as any).MultiplayerManager?.getInstance();
                 const isHost = !mm || mm.isHost;
+                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
 
                 const events = ParticleSimulation.update(
                     dt,
@@ -266,7 +269,8 @@ export class ParticleSystem {
                     player,
                     enemies,
                     WeatherManager.getInstance().getWeatherState(),
-                    isHost
+                    isHost,
+                    ppm
                 );
 
                 // Accumulate events
@@ -304,5 +308,7 @@ export class ParticleSystem {
 
     public clear(): void {
         this.data.clear();
+        if (this.gpuSystem) this.gpuSystem.clear();
+        if (this.onClear) this.onClear();
     }
 }

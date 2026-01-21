@@ -67,7 +67,7 @@ export class FluidSimulation {
         this._initialized = true;
     }
 
-    private clear(): void {
+    public clear(): void {
         const gl = this.gl!;
         gl.viewport(0, 0, this.width, this.height);
 
@@ -126,12 +126,18 @@ export class FluidSimulation {
         const safeDt = Math.min(dt, 0.033);
         if (safeDt <= 0) return;
 
-        gl.viewport(0, 0, this.width, this.height);
+        // Fetch wind and scale factors
+        const config = ConfigManager.getInstance();
+        const ppm = config.getPixelsPerMeter();
+        const mpt = config.getMetersPerTile();
+        const worldWidthMeters = worldW * mpt;
+        const worldHeightMeters = worldH * mpt;
 
-        // Fetch wind
         const weather = WeatherManager.getInstance().getWeatherState();
-        const windX = weather ? weather.windDir.x * weather.windSpeed : 0;
-        const windY = weather ? weather.windDir.y * weather.windSpeed : 0;
+
+        // Convert wind (m/s) to UV/s
+        const uvWindX = weather ? (weather.windDir.x * weather.windSpeed) / worldWidthMeters : 0;
+        const uvWindY = weather ? (weather.windDir.y * weather.windSpeed) / worldHeightMeters : 0;
 
         // 1. Advection
         this.advect(this.velocityFBOs[0].tex, this.velocityFBOs[0].tex, this.velocityFBOs[1].fbo, safeDt, 1.0);
@@ -143,8 +149,9 @@ export class FluidSimulation {
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1].fbo);
         this.forcesShader!.use();
         this.forcesShader!.setUniform1f("u_dt", safeDt);
-        this.forcesShader!.setUniform2f("u_wind", windX, windY);
-        this.forcesShader!.setUniform2f("u_worldSize", worldW, worldH);
+        this.forcesShader!.setUniform2f("u_wind", uvWindX, uvWindY);
+        // Buoyancy in UV/s: Rising at approx 0.5 m/s base
+        this.forcesShader!.setUniform1f("u_buoyancy", 0.5 / worldHeightMeters);
         this.forcesShader!.setUniform1i("u_velocity", 0);
         this.forcesShader!.setUniform1i("u_density", 1);
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[0].tex);
@@ -205,8 +212,10 @@ export class FluidSimulation {
         this.renderQuad();
         this.velocityFBOs.reverse();
 
-        // Cleanup: Unbind framebuffer to return to main drawing target
+        // Cleanup: Unbind framebuffer and textures to prevent state leaks/flickering
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
     private advect(vel: WebGLTexture, src: WebGLTexture, dest: WebGLFramebuffer, dt: number, dissipation: number): void {
@@ -251,6 +260,7 @@ export class FluidSimulation {
 
         // Cleanup
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
     public splatVelocity(x: number, y: number, radius: number, vx: number, vy: number, worldW: number, worldH: number): void {
@@ -275,6 +285,7 @@ export class FluidSimulation {
 
         // Cleanup
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
     public getDensityTexture(): WebGLTexture | null {

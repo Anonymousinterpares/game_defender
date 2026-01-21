@@ -5,6 +5,8 @@ layout(location = 1) in vec4 a_props;       // life, maxLife, type, flags
 // Standard Physics Uniforms
 uniform float u_dt;
 uniform vec2 u_wind;
+uniform float u_gravity;
+uniform float u_ppm;
 uniform vec2 u_worldSize; // width, height (pixels)
 uniform float u_time;     // For noise/turbulence
 uniform vec2 u_entities[8]; // Player/Enemy positions
@@ -76,7 +78,8 @@ void main() {
     // Apply Physics
     if (abs(type - TYPE_SMOKE) < 0.1) {
         // Smoke Physics: Wind + Drift + Curl Turbulence
-        float driftY = -20.0 - variation * 10.0; // Black smoke rises faster (heat)
+        // Drift: Rising at ~2.0 m/s
+        float driftY = -2.0 * u_ppm; 
         
         float id = float(gl_VertexID);
         float t = u_time * 1.5;
@@ -86,19 +89,24 @@ void main() {
         float noise1 = sin(p.x + t) * cos(p.y + t);
         float noise2 = sin(p.y - t) * cos(p.x - t);
         
-        float curlX = noise1 * 20.0;
-        float curlY = noise2 * 20.0;
+        float turbX = noise1 * 1.5 * u_ppm;
+        float turbY = noise2 * 0.8 * u_ppm;
 
         // Velocity Damping + Forces
-        float drag = 0.6 + variation * 0.4; // Dense smoke has more air resistance
-        posVel.z += (u_wind.x * 30.0 + curlX - posVel.z * drag) * u_dt;
-        posVel.w += (u_wind.y * 30.0 + driftY + curlY - posVel.w * drag) * u_dt;
+        float drag = 0.5; // Matched to CPU
+        posVel.z += (u_wind.x + turbX - posVel.z * drag) * u_dt;
+        posVel.w += (u_wind.y + driftY + turbY - posVel.w * drag) * u_dt;
     } else {
         // Standard / Molten Physics
         if (!isGrounded) {
             // Time-based Damping (Friction)
             float drag = 2.0; // Damping factor
             if (abs(type - TYPE_MOLTEN) < 0.1) drag = 1.0; // Molten flies further
+            
+            // Apply Gravity to Molten
+            if (abs(type - TYPE_MOLTEN) < 0.1) {
+                posVel.w += u_gravity * u_dt; // u_gravity already scaled by ppm in TS
+            }
             
             posVel.z -= posVel.z * drag * u_dt;
             posVel.w -= posVel.w * drag * u_dt;

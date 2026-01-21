@@ -22,6 +22,7 @@ export const MasterConfig: GameConfigSchema = {
     width: { value: 50, type: 'number', min: 10, max: 5000, step: 10, description: 'Map Width (Tiles)' },
     height: { value: 50, type: 'number', min: 10, max: 5000, step: 10, description: 'Map Height (Tiles)' },
     tileSize: { value: 32, type: 'number', min: 16, max: 128, step: 1, description: 'Tile Size (Pixels)' },
+    metersPerTile: { value: 0.1, type: 'number', min: 0.1, max: 100, step: 0.1, description: 'Coordinate Scale (Meters per Tile)' },
     wallHeight: { value: 32, type: 'number', min: 4, max: 128, step: 1, description: 'Wall Height (Pixels)' },
     renderDistance: { value: 50, type: 'number', min: 10, max: 100, step: 1, description: 'Render Distance (Units)' }
   },
@@ -202,14 +203,14 @@ export const MasterConfig: GameConfigSchema = {
   },
   Weather: {
     initialWeather: {
-      value: 'rain',
+      value: 'clear',
       type: 'string',
       description: 'Initial weather type',
       options: ['clear', 'cloudy', 'fog', 'rain', 'snow', 'random']
     },
     transitionSpeed: { value: 0.05, type: 'number', min: 0.01, max: 1.0, step: 0.01, description: 'Speed of weather transitions' },
-    windMinSpeed: { value: 0.5, type: 'number', min: 0, max: 10, step: 0.1, description: 'Minimum wind speed' },
-    windMaxSpeed: { value: 5.0, type: 'number', min: 0, max: 20, step: 0.1, description: 'Maximum wind speed' }
+    windMinSpeed: { value: 0.5, type: 'number', min: 0, max: 10, step: 0.1, description: 'Minimum wind speed (m/s)' },
+    windMaxSpeed: { value: 15.0, type: 'number', min: 0, max: 50, step: 0.1, description: 'Maximum wind speed (m/s)' }
   },
   Benchmark: {
     showPerfMetrics: { value: false, type: 'boolean', description: 'Show Performance Graphs' },
@@ -247,6 +248,14 @@ export class ConfigManager {
     return undefined;
   }
 
+  public getPixelsPerMeter(): number {
+    return this.get<number>('World', 'tileSize') / this.get<number>('World', 'metersPerTile');
+  }
+
+  public getMetersPerTile(): number {
+    return this.get<number>('World', 'metersPerTile');
+  }
+
   public set<T>(category: string, key: string, newValue: T): void {
     if (MasterConfig[category] && MasterConfig[category][key]) {
       // @ts-ignore
@@ -271,6 +280,12 @@ export class ConfigManager {
     }
   }
 
+  public resetToDefaults(): void {
+    localStorage.removeItem('neon_rogue_config');
+    // Reload page or re-initialize? For now, just clear and log.
+    console.warn('Config reset to defaults. Please reload to apply all changes.');
+  }
+
   private loadFromLocalStorage(): void {
     try {
       const saved = localStorage.getItem('neon_rogue_config');
@@ -280,12 +295,21 @@ export class ConfigManager {
           if (MasterConfig[cat]) {
             for (const key in flatConfig[cat]) {
               if (MasterConfig[cat][key]) {
+                // SPECIAL CASE: If we are in development and the code value for metersPerTile 
+                // has been changed by the user, we might want to respect it. 
+                // But for now, we follow standard persistence.
                 MasterConfig[cat][key].value = flatConfig[cat][key];
               }
             }
           }
         }
         console.log('Config loaded from localStorage');
+
+        // Ensure metersPerTile is at least the minimum
+        const mpt = this.get<number>('World', 'metersPerTile');
+        if (mpt < 0.1) {
+          MasterConfig.World.metersPerTile.value = 0.1;
+        }
       }
     } catch (e) {
       console.warn('Failed to load config from localStorage', e);
