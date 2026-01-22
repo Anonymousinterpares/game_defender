@@ -228,8 +228,11 @@ export class ConfigManager {
 
   // Flattened simplified config for direct access
   // access like ConfigManager.get('World', 'width')
+  private defaults: any = {};
 
   private constructor() {
+    // Deep copy defaults BEFORE loading from storage
+    this.defaults = JSON.parse(JSON.stringify(MasterConfig));
     this.loadFromLocalStorage();
   }
 
@@ -284,8 +287,21 @@ export class ConfigManager {
 
   public resetToDefaults(): void {
     localStorage.removeItem('neon_rogue_config');
-    // Reload page or re-initialize? For now, just clear and log.
-    console.warn('Config reset to defaults. Please reload to apply all changes.');
+
+    // Restore defaults to MasterConfig in memory just in case, 
+    // though reload is safer for static dependencies.
+    for (const cat in this.defaults) {
+      if (MasterConfig[cat]) {
+        for (const key in this.defaults[cat]) {
+          if (MasterConfig[cat][key]) {
+            MasterConfig[cat][key].value = this.defaults[cat][key].value;
+          }
+        }
+      }
+    }
+
+    console.warn('Config reset to defaults. Reloading...');
+    window.location.reload();
   }
 
   private loadFromLocalStorage(): void {
@@ -305,6 +321,7 @@ export class ConfigManager {
             }
           }
         }
+
         console.log('Config loaded from localStorage');
 
         // Ensure metersPerTile is at least the minimum

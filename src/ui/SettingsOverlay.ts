@@ -66,7 +66,10 @@ export class SettingsOverlay {
             <div class="overlay-content">
                 <div class="overlay-header">
                     <h3>GAME SETTINGS</h3>
-                    <button class="hud-btn" id="btn-close-overlay">X</button>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="hud-btn" id="btn-reset-defaults" style="border-color: #ff3300; color: #ff3300;">RESET DEFAULTS</button>
+                        <button class="hud-btn" id="btn-close-overlay">X</button>
+                    </div>
                 </div>
                 <div class="overlay-body">
                     <div class="overlay-sidebar"></div>
@@ -77,7 +80,17 @@ export class SettingsOverlay {
 
         parent.appendChild(this.container);
 
-        // Bind Close
+        // Bind Buttons
+        const resetBtn = this.container.querySelector('#btn-reset-defaults');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                if (confirm('Are you sure you want to reset all settings to default? The page will reload.')) {
+                    EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
+                    ConfigManager.getInstance().resetToDefaults();
+                }
+            });
+        }
+
         const closeBtn = this.container.querySelector('#btn-close-overlay');
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
@@ -99,11 +112,7 @@ export class SettingsOverlay {
         const schema = ConfigManager.getInstance().getSchema();
         const categories = Object.keys(schema);
 
-        // Filter out Keybindings for now as they are complex to handle in overlay
-        // or just let them show up but be empty?
-        // Current requirement says "all settings". Let's exclude Keybindings for simpler Phase 1 or include if safe.
-        // Implementation Plan said "reusing Schema", so we will include all. 
-        // Note: Keybindings might be tricky in a small panel, but let's try.
+        // Filter out Keybindings from sidebar if needed, but keeping for now.
 
         categories.forEach(cat => {
             const btn = document.createElement('button');
@@ -132,6 +141,11 @@ export class SettingsOverlay {
             return;
         }
 
+        // Special TimeSystem Controls
+        if (this.currentTab === 'TimeSystem') {
+            this.renderTimeControls(content);
+        }
+
         const categoryData = schema[this.currentTab];
         if (!categoryData) return;
 
@@ -139,6 +153,80 @@ export class SettingsOverlay {
             const control = this.createControlElement(this.currentTab, key, item as ConfigItem<any>);
             content.appendChild(control);
         }
+    }
+
+    private renderTimeControls(parent: Element): void {
+        const wrapper = document.createElement('div');
+        wrapper.style.marginBottom = '20px';
+        wrapper.style.padding = '10px';
+        wrapper.style.border = '1px dashed var(--steam-gold)';
+        wrapper.style.background = 'rgba(0,0,0,0.2)';
+
+        wrapper.innerHTML = '<h4 style="margin:0 0 10px 0; color:var(--steam-gold);">DEBUG: TIME TRAVEL</h4>';
+
+        // Time of Day Slider
+        const timeGroup = document.createElement('div');
+        timeGroup.className = 'control-group';
+        timeGroup.innerHTML = '<label>SET TIME OF DAY (0-24)</label>';
+        const timeFlex = document.createElement('div');
+        timeFlex.style.display = 'flex';
+        timeFlex.style.gap = '10px';
+
+        const timeSlider = document.createElement('input');
+        timeSlider.type = 'range';
+        timeSlider.min = '0';
+        timeSlider.max = '24';
+        timeSlider.step = '0.1';
+        timeSlider.value = WorldClock.getInstance().getHour().toString();
+        timeSlider.style.flex = '1';
+
+        const timeDisplay = document.createElement('span');
+        timeDisplay.className = 'value-display';
+        timeDisplay.textContent = parseFloat(timeSlider.value).toFixed(1);
+
+        timeSlider.addEventListener('input', (e) => {
+            const val = parseFloat((e.target as HTMLInputElement).value);
+            timeDisplay.textContent = val.toFixed(1);
+            WorldClock.getInstance().setHour(val);
+        });
+
+        timeFlex.appendChild(timeSlider);
+        timeFlex.appendChild(timeDisplay);
+        timeGroup.appendChild(timeFlex);
+        wrapper.appendChild(timeGroup);
+
+        // Moon Phase Slider
+        const moonGroup = document.createElement('div');
+        moonGroup.className = 'control-group';
+        moonGroup.innerHTML = '<label>SET MOON PHASE (0.0-1.0)</label>';
+        const moonFlex = document.createElement('div');
+        moonFlex.style.display = 'flex';
+        moonFlex.style.gap = '10px';
+
+        const moonSlider = document.createElement('input');
+        moonSlider.type = 'range';
+        moonSlider.min = '0';
+        moonSlider.max = '1';
+        moonSlider.step = '0.01';
+        moonSlider.value = WorldClock.getInstance().getMoonPhase().toString();
+        moonSlider.style.flex = '1';
+
+        const moonDisplay = document.createElement('span');
+        moonDisplay.className = 'value-display';
+        moonDisplay.textContent = parseFloat(moonSlider.value).toFixed(2);
+
+        moonSlider.addEventListener('input', (e) => {
+            const val = parseFloat((e.target as HTMLInputElement).value);
+            moonDisplay.textContent = val.toFixed(2);
+            WorldClock.getInstance().setMoonPhase(val);
+        });
+
+        moonFlex.appendChild(moonSlider);
+        moonFlex.appendChild(moonDisplay);
+        moonGroup.appendChild(moonFlex);
+        wrapper.appendChild(moonGroup);
+
+        parent.appendChild(wrapper);
     }
 
     private createControlElement(category: string, key: string, item: ConfigItem<any>): HTMLElement {

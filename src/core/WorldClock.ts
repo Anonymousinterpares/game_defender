@@ -107,6 +107,18 @@ export class WorldClock {
         this.gameSeconds = (hour % 24) * 3600;
     }
 
+    public getHour(): number {
+        return (this.gameSeconds / 3600) % 24;
+    }
+
+    public setMoonPhase(phase: number): void {
+        this.moonPhase = Math.max(0, Math.min(1, phase));
+    }
+
+    public getMoonPhase(): number {
+        return this.moonPhase;
+    }
+
     public getTimeState(): TimeState {
         const totalSeconds = this.gameSeconds;
         const hour = Math.floor(totalSeconds / 3600);
