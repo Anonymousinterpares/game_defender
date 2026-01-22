@@ -113,7 +113,9 @@ export class WeatherSystemECS implements System {
                 p.vy = (p.vy * 0.95) + windY * 0.05;
             }
 
-            const fallSpeed = isRain ? 10 * ppm : 1.5 * ppm;
+            const metersPerTile = ConfigManager.getInstance().get<number>('World', 'metersPerTile');
+            // Fix: Scale speed by metersPerTile so rain looks fast even when zoomed out
+            const fallSpeed = isRain ? 10 * ppm * metersPerTile : 1.5 * ppm * metersPerTile;
 
             // Apply Repulsion
             this.repulsionZones.forEach(zone => {

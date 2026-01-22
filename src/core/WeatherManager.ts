@@ -176,7 +176,7 @@ export class WeatherManager {
 
         // Fog/Wind Interdependency: High wind scatters fog
         if (this.windSpeed > 1.0 && this.targetFogDensity > 0) {
-            this.targetFogDensity = Math.max(0, this.targetFogDensity - (this.windSpeed - 1.0) * dt * 0.1);
+            this.targetFogDensity = Math.max(0, this.targetFogDensity - (this.windSpeed - 1.0) * dt * 0.02);
         }
 
         // Interpolate densities with strict clamping

@@ -31,11 +31,12 @@ export class WorldShader extends Shader {
                     line = 0.8;
                 }
 
-                // Phase 0 Success: BRIGHT NEON GREEN grid lines.
-                // Using PREMULTIPLIED ALPHA: Since WebGL canvas defaults to premultiplied alpha in the browser compositor,
-                // any pixel with alpha 0.0 MUST have RGB 0.0 to stay transparent.
-                float alpha = line * 0.4;
-                outColor = vec4(0.0, alpha, 0.0, alpha);
+                // Fixed: Changed from debug NEON GREEN to subtle dark grid
+                // This prevents the "Green Screen" flash when fluid sim has gaps
+                float alpha = line * 0.1;
+                // PREMULTIPLY ALPHA: RGB must be scaled by Alpha for correct blending
+                // vec4(0.0) when alpha is 0.0 to prevent brightening the background
+                outColor = vec4(0.1 * alpha, 0.1 * alpha, 0.1 * alpha, alpha);
             }
         `;
 

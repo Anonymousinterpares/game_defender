@@ -234,6 +234,10 @@ export class GPURenderer {
         this.context.resize(width, height);
         const gl = this.context.getGL();
 
+        // ROOT CAUSE FIX: Force update viewport! 
+        // FluidSimulation messes with viewport (256x256) and if resize() caches values, this doesn't get reset.
+        gl.viewport(0, 0, width, height);
+
         // State Hygiene
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.bindVertexArray(null);
