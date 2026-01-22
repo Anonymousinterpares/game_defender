@@ -32,14 +32,8 @@ export class ParticleEmitter {
     }
 
     public update(dt: number, world: World | null, player: ParticleTarget | null, enemies: ParticleTarget[]): void {
-        if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke') && world) {
-            this.smokeInterval += dt;
-            if (this.smokeInterval > 0.05) { // 20 times per second
-                this.smokeInterval = 0;
-                this.emitHeatSmoke(world);
-                this.emitEntitySmoke(player, enemies);
-            }
-        }
+        // No-op: Emitter is now purely passive.
+        // Logic moved to ParticleSystem.
     }
 
     public spawnParticle(x: number, y: number, color: string, vx: number, vy: number, life: number = 0.5): number {
@@ -139,87 +133,7 @@ export class ParticleEmitter {
         else this.data.flags[idx] &= ~FLAG_IS_FLAME;
     }
 
-    private emitHeatSmoke(world: World): void {
-        const heatMap = world.getHeatMap();
-        if (!heatMap) return;
-        const activeTiles = heatMap.activeTiles;
-        const tileSize = world.getTileSize();
-        const ps = (window as any).ParticleSystemInstance || (this as any)._ps || (world as any).particleSystem;
-        // Note: The project uses ParticleSystem.getInstance()
-        // Importing it here might cause circularity, let's use the singleton directly if it's available.
-        // Actually, let's assume ParticleSystem.getInstance() is safe to use.
 
-        const ParticleSystemClass = (this.constructor as any).ParticleSystemRef;
-
-        activeTiles.forEach((key: string) => {
-            const summary = heatMap.getTileSummary(key);
-            if (!summary) return;
-
-            const [tx, ty] = key.split(',').map(Number);
-            const centerX = tx * tileSize + tileSize / 2;
-            const centerY = ty * tileSize + tileSize / 2;
-
-            // 1. DENSE FIRE SMOKE (Major Tile Level)
-            if (summary.burningCount > 0) {
-                const fireIntensity = summary.burningCount / 100; // 10x10 subDiv
-                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
-
-                if (Math.random() < fireIntensity * 0.9 + 0.3) {
-                    const count = 1 + Math.floor(fireIntensity * 4);
-                    for (let i = 0; i < count; i++) {
-                        const offset = (Math.random() - 0.5) * tileSize;
-                        const life = 3.0 + Math.random() * 2.0;
-                        const size = (tileSize * 2.5) + (fireIntensity * tileSize * 2.5);
-
-                        // Use the globally accessible ParticleSystem if possible to ensure GPU redirection
-                        const target = (globalThis as any).ParticleSystem?.getInstance();
-                        const vx = (Math.random() - 0.5) * 5 * ppm; // 5m/s spread
-                        const vy = (-5 - Math.random() * 8) * ppm;  // 5-13m/s rise
-
-                        if (target) {
-                            target.spawnSmoke(centerX + offset, centerY + offset, vx, vy, life, size, '#000');
-                        } else {
-                            this.spawnSmoke(centerX + offset, centerY + offset, vx, vy, life, size, '#000');
-                        }
-                    }
-                }
-            }
-
-            // 2. RESIDUE HEAT SMOKE (Smaller/Lighter)
-            if (summary.maxHeat > 0.4 && Math.random() < summary.avgHeat * 0.4) {
-                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
-                const target = (globalThis as any).ParticleSystem?.getInstance();
-                const vx = (Math.random() - 0.5) * 2 * ppm;
-                const vy = (-2 - Math.random() * 3) * ppm;
-
-                if (target) {
-                    target.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, vx, vy, 2.0, tileSize * 1.2, '#666');
-                } else {
-                    this.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, vx, vy, 2.0, tileSize * 1.2, '#666');
-                }
-            }
-        });
-    }
-
-    private emitEntitySmoke(player: ParticleTarget | null, enemies: ParticleTarget[]): void {
-        const targets = player ? [player, ...enemies] : enemies;
-        const targetPS = (globalThis as any).ParticleSystem?.getInstance();
-
-        targets.forEach(t => {
-            if (t.active && (t as any).isOnFire) {
-                // Persistent dense smoke trailing from burning characters
-                for (let i = 0; i < 2; i++) {
-                    const wx = t.x + (Math.random() - 0.5) * t.radius;
-                    const wy = t.y + (Math.random() - 0.5) * t.radius;
-                    if (targetPS) {
-                        targetPS.spawnSmoke(wx, wy, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, 1.5 + Math.random(), 18 + Math.random() * 12, '#000');
-                    } else {
-                        this.spawnSmoke(wx, wy, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, 1.5 + Math.random(), 18 + Math.random() * 12, '#000');
-                    }
-                }
-            }
-        });
-    }
 
     public updateColorsAndPrune(): void {
         this.data.activeCount = 0;

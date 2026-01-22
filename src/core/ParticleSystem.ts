@@ -249,6 +249,15 @@ export class ParticleSystem {
     }
 
     public update(dt: number, world: World | null, player: ParticleTarget | null, enemies: ParticleTarget[]): void {
+        if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke') && world) {
+            this.smokeInterval += dt;
+            if (this.smokeInterval > 0.05) { // 20 times per second
+                this.smokeInterval = 0;
+                this.emitHeatSmoke(world);
+                this.emitEntitySmoke(player, enemies);
+            }
+        }
+
         // 1. Spawning
         this.emitter.update(dt, world, player, enemies);
 
@@ -318,6 +327,68 @@ export class ParticleSystem {
             }
         }
         return active;
+    }
+
+    private smokeInterval: number = 0;
+
+    private emitHeatSmoke(world: World): void {
+        const heatMap = world.getHeatMap();
+        if (!heatMap) return;
+        const activeTiles = heatMap.activeTiles;
+        const tileSize = world.getTileSize();
+
+        activeTiles.forEach((key: string) => {
+            const summary = heatMap.getTileSummary(key);
+            if (!summary) return;
+
+            const [tx, ty] = key.split(',').map(Number);
+            const centerX = tx * tileSize + tileSize / 2;
+            const centerY = ty * tileSize + tileSize / 2;
+
+            // 1. DENSE FIRE SMOKE (Major Tile Level)
+            if (summary.burningCount > 0) {
+                const fireIntensity = summary.burningCount / 100;
+                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
+
+                if (Math.random() < fireIntensity * 0.9 + 0.3) {
+                    const count = 1 + Math.floor(fireIntensity * 4);
+                    for (let i = 0; i < count; i++) {
+                        const offset = (Math.random() - 0.5) * tileSize;
+                        const life = 3.0 + Math.random() * 2.0;
+                        const size = (tileSize * 2.5) + (fireIntensity * tileSize * 2.5);
+
+                        const vx = (Math.random() - 0.5) * 5 * ppm;
+                        const vy = (-5 - Math.random() * 8) * ppm;
+
+                        // STRICT SEPARATION: calls local logic which checks GPU flag
+                        this.spawnSmoke(centerX + offset, centerY + offset, vx, vy, life, size, '#000');
+                    }
+                }
+            }
+
+            // 2. RESIDUE HEAT SMOKE (Smaller/Lighter)
+            if (summary.maxHeat > 0.4 && Math.random() < summary.avgHeat * 0.4) {
+                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
+                const vx = (Math.random() - 0.5) * 2 * ppm;
+                const vy = (-2 - Math.random() * 3) * ppm;
+
+                this.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, vx, vy, 2.0, tileSize * 1.2, '#666');
+            }
+        });
+    }
+
+    private emitEntitySmoke(player: ParticleTarget | null, enemies: ParticleTarget[]): void {
+        const targets = player ? [player, ...enemies] : enemies;
+
+        targets.forEach(t => {
+            if (t.active && (t as any).isOnFire) {
+                for (let i = 0; i < 2; i++) {
+                    const wx = t.x + (Math.random() - 0.5) * t.radius;
+                    const wy = t.y + (Math.random() - 0.5) * t.radius;
+                    this.spawnSmoke(wx, wy, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, 1.5 + Math.random(), 18 + Math.random() * 12, '#000');
+                }
+            }
+        });
     }
 
     public clear(): void {
