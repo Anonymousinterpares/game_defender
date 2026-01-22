@@ -127,6 +127,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         SoundManager.getInstance().stopLoopSpatial('hit_laser');
         SoundManager.getInstance().stopLoopSpatial('hit_ray');
         this.gpuRenderer.dispose();
+        ParticleSystem.getInstance().setGPUSystem(null);
     }
 
     update(dt: number): void {
@@ -190,9 +191,9 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         }
 
         this.gpuRenderer.updateConfig();
-        
+
         // Collect entities for GPU particle interaction
-        const gpuEntities: {x: number, y: number}[] = [];
+        const gpuEntities: { x: number, y: number }[] = [];
         if (this.player && this.player.active) gpuEntities.push({ x: this.player.x, y: this.player.y });
         this.enemies.forEach(e => {
             if (e.active && gpuEntities.length < 8) gpuEntities.push({ x: e.x, y: e.y });

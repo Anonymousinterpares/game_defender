@@ -59,8 +59,13 @@ const FLUID_RENDER_FRAG = `#version 300 es
         vec3 color = mix(vec3(0.1), vec3(0.9), variation);
         
         // Final alpha blending (Exponential Tonemapping for physical transparency)
-        // alpha = 1.0 - exp(-density * factor)
-        float alpha = 1.0 - exp(-noiseDensity * 0.5);
+        // We use a curve that drops slowly at low densities to keep the "Haze" visible.
+        float alpha = 1.0 - exp(-noiseDensity * 0.4);
+        
+        // Boost noise visibility at low densities to create organic remnants
+        float hazeCleanliness = smoothstep(0.0, 0.2, density);
+        alpha *= mix(0.6 + n * 0.4, 1.0, hazeCleanliness);
+        
         outColor = vec4(color * alpha, alpha);
     }
 `;

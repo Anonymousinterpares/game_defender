@@ -156,12 +156,17 @@ export class GPURenderer {
         const wasActive = this.active;
         this.active = ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled') || false;
 
-        if (this.active && !wasActive) {
-            console.log("[GPU] Context Request...");
-            this.context.init();
-            this.initResources();
-            console.log("[GPU] Pipeline Activated");
-        } else if (!this.active && wasActive) {
+        if (this.active) {
+            // Ensure static instance is correct even if scene was partially reused
+            GPURenderer.instance = this;
+
+            if (!wasActive) {
+                console.log("[GPU] Context Request...");
+                this.context.init();
+                this.initResources();
+                console.log("[GPU] Pipeline Activated");
+            }
+        } else if (wasActive) {
             console.log("[GPU] Pipeline Deactivated");
         }
     }
@@ -321,6 +326,10 @@ export class GPURenderer {
     }
 
     public dispose(): void {
+        this.active = false;
+        if (GPURenderer.instance === this) {
+            GPURenderer.instance = null;
+        }
         ParticleSystem.getInstance().onSmokeSpawned = null;
         this.context.dispose();
     }

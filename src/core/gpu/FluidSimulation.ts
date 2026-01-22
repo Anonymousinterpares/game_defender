@@ -157,12 +157,13 @@ export class FluidSimulation {
         );
         this.velocityIdx = 1 - this.velocityIdx;
 
-        // Advect density using velocity
+        // 4. Advection of Density
+        // Use a very light global dissipation (0.995) to let the shader's non-linear decay control the profile
         this.advect(
             this.velocityFBOs[this.velocityIdx].tex,
             this.densityFBOs[this.densityIdx].tex,
             this.densityFBOs[1 - this.densityIdx].fbo,
-            safeDt, 0.992
+            safeDt, 0.995
         );
         this.densityIdx = 1 - this.densityIdx;
 
