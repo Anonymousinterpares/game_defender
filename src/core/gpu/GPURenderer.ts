@@ -9,6 +9,7 @@ import { FluidShader } from "./FluidShader";
 
 
 export class GPURenderer {
+    public static instance: GPURenderer | null = null;
     private context: GPUContext;
     private world: World | null = null;
     private active: boolean = false;
@@ -19,12 +20,14 @@ export class GPURenderer {
     private fluidSim: FluidSimulation | null = null;
     private worldMapTexture: WebGLTexture | null = null;
     private lastMeshVersion: number = -1;
+    private lastEntityPositions: Map<number, { x: number, y: number }> = new Map();
 
     public getParticleSystem(): GPUParticleSystem | null {
         return this.particleSystem;
     }
 
     constructor() {
+        GPURenderer.instance = this;
         this.context = new GPUContext();
         this.particleSystem = new GPUParticleSystem();
         this.fluidSim = new FluidSimulation();
@@ -183,6 +186,30 @@ export class GPURenderer {
             this.particleSystem.update(dt, performance.now() * 0.001, 0, 0);
 
             if (this.fluidSim) {
+                // 1. Entity Stirring (Wakes)
+                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
+                const wpW = this.world.getWidthPixels();
+                const wpH = this.world.getHeightPixels();
+
+                for (let i = 0; i < entities.length; i++) {
+                    const e = entities[i];
+                    const last = this.lastEntityPositions.get(i);
+                    if (last) {
+                        const vx = (e.x - last.x) / dt;
+                        const vy = (e.y - last.y) / dt;
+                        const speedSq = vx * vx + vy * vy;
+
+                        // Only stir if moving significantly (> 0.5m/s)
+                        if (speedSq > (0.5 * ppm) * (0.5 * ppm)) {
+                            // Inject entity velocity into fluid (half radius of a puff)
+                            const radius = 1.5 * ppm;
+                            // Add a bit of "stirring strength"
+                            this.fluidSim.splatVelocity(e.x, e.y, radius, vx * 0.5, vy * 0.5, wpW, wpH);
+                        }
+                    }
+                    this.lastEntityPositions.set(i, { x: e.x, y: e.y });
+                }
+
                 this.fluidSim.update(dt, this.world.getWidthPixels(), this.world.getHeightPixels());
             }
         }

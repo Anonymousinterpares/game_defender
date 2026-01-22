@@ -136,10 +136,10 @@ export class FluidSimulation {
 
         // Fetch wind and scale factors
         const config = ConfigManager.getInstance();
-        const ppm = config.getPixelsPerMeter();
         const mpt = config.getMetersPerTile();
-        const worldWidthMeters = worldW * mpt;
-        const worldHeightMeters = worldH * mpt;
+        const tileSize = config.get<number>('World', 'tileSize');
+        const worldWidthMeters = (worldW / tileSize) * mpt;
+        const worldHeightMeters = (worldH / tileSize) * mpt;
 
         const weather = WeatherManager.getInstance().getWeatherState();
 
@@ -148,12 +148,12 @@ export class FluidSimulation {
         const uvWindY = weather ? (weather.windDir.y * weather.windSpeed) / worldHeightMeters : 0;
 
         // 1. Advection
-        // Advect velocity using itself
+        // Advect velocity using itself - WITH DRAG (0.99 dissipation)
         this.advect(
             this.velocityFBOs[this.velocityIdx].tex,
             this.velocityFBOs[this.velocityIdx].tex,
             this.velocityFBOs[1 - this.velocityIdx].fbo,
-            safeDt, 1.0
+            safeDt, 0.99 // Use 0.99 for velocity drag (air resistance)
         );
         this.velocityIdx = 1 - this.velocityIdx;
 
@@ -170,6 +170,7 @@ export class FluidSimulation {
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1 - this.velocityIdx].fbo);
         this.forcesShader!.use();
         this.forcesShader!.setUniform1f("u_dt", safeDt);
+        this.forcesShader!.setUniform1f("u_time", performance.now() * 0.001);
         this.forcesShader!.setUniform2f("u_wind", uvWindX, uvWindY);
         this.forcesShader!.setUniform1f("u_buoyancy", 0.5 / worldHeightMeters);
         this.forcesShader!.setUniform1i("u_velocity", 0);

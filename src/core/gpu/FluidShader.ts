@@ -58,8 +58,9 @@ const FLUID_RENDER_FRAG = `#version 300 es
         // Map variation to smoke color (0.1 = dense/black, 0.9 = light/white)
         vec3 color = mix(vec3(0.1), vec3(0.9), variation);
         
-        // Final alpha blending (premultiplied style)
-        float alpha = clamp(noiseDensity * 1.5, 0.0, 1.0);
+        // Final alpha blending (Exponential Tonemapping for physical transparency)
+        // alpha = 1.0 - exp(-density * factor)
+        float alpha = 1.0 - exp(-noiseDensity * 0.5);
         outColor = vec4(color * alpha, alpha);
     }
 `;

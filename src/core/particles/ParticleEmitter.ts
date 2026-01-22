@@ -2,6 +2,7 @@ import { ParticleData, ParticleTarget } from './ParticleData';
 import { ParticleType, FLAG_ACTIVE, FLAG_IS_FLAME, MAX_PARTICLES } from '../ParticleConstants';
 import { ConfigManager } from '../../config/MasterConfig';
 import { World } from '../World';
+import { GPURenderer } from '../gpu/GPURenderer';
 
 export class ParticleEmitter {
     private data: ParticleData;
@@ -60,7 +61,13 @@ export class ParticleEmitter {
         return i;
     }
 
-    public spawnSmoke(x: number, y: number, vx: number, vy: number, life: number, size: number, color: string): number {
+    public spawnSmoke(x: number, y: number, vx: number, vy: number, life: number = 2.0, size: number = 32, color: string = '#777'): number {
+        // Use GPURenderer.instance for synchronization
+        const gpu = GPURenderer.instance?.isActive() || false;
+
+        // If GPU is active, skip spawning physical particle to avoid "Double Smoke"
+        if (gpu) return -1;
+
         const i = this.getNextIndex();
         if (i === -1) return -1;
 

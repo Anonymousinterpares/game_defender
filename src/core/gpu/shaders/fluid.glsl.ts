@@ -21,7 +21,15 @@ export const FLUID_ADVECT = `#version 300 es
     void main() {
         vec2 vel = texture(u_velocity, v_uv).xy;
         vec2 coord = v_uv - u_dt * vel;
-        outColor = u_dissipation * max(texture(u_source, coord), 0.0);
+        
+        // Boundary Masking: Vacuum out smoke near world edges to prevent smearing
+        float mask = 1.0;
+        float border = 0.01; // 1% border zones
+        if (coord.x < border || coord.x > (1.0 - border) || coord.y < border || coord.y > (1.0 - border)) {
+            mask = 0.0;
+        }
+
+        outColor = u_dissipation * mask * max(texture(u_source, coord), 0.0);
     }
 `;
 
@@ -38,11 +46,18 @@ export const FLUID_SPLAT = `#version 300 es
     void main() {
         vec2 diff = (v_uv - u_point) / u_texelSize;
         float d = dot(diff, diff);
-        // Standard Gaussian: exp(-dist^2 / (2 * sigma^2))
-        // Here u_radius acts as 2 * sigma^2
+        
+        // Gaussian splat with DENSITY CAPPING
+        float scale = 1.0; 
         float m = exp(-d / max(u_radius, 1.0));
         vec4 base = texture(u_source, v_uv);
-        outColor = base + m * u_color;
+        
+        // Cap additive density to prevent "Blinding White" blobs
+        // R=density, B=variation
+        float newDensity = base.r + m * u_color.r;
+        float cappedDensity = min(newDensity, 5.0); // Allow some accumulation but don't over-saturate
+        
+        outColor = vec4(cappedDensity, base.g + m * u_color.g, base.b + m * u_color.b, 1.0);
     }
 `;
 
@@ -156,19 +171,29 @@ export const FLUID_FORCES = `#version 300 es
     uniform vec2 u_wind;
     uniform float u_buoyancy;
     uniform float u_dt;
+    uniform float u_time;
     in vec2 v_uv;
     out vec4 outColor;
+
+    float noise(vec2 p) {
+        return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+    }
 
     void main() {
         vec2 vel = texture(u_velocity, v_uv).xy;
         vec2 densTemp = texture(u_density, v_uv).xy;
         
         // Buoyancy: Heat makes it rise. 
-        // u_buoyancy is pre-scaled to UV/sec in TS
         float buoy = densTemp.y * u_buoyancy; 
         
-        // Wind: Now passed in UV/sec directly
-        vel += (u_wind + vec2(0.0, buoy)) * u_dt;
+        // Micro-Turbulence: Subtle jitter
+        // We only apply noise if there is smoke (density > 0.01)
+        float n = noise(v_uv * 10.0 + u_time * 0.5) - 0.5;
+        float n2 = noise(v_uv * 11.0 - u_time * 0.4) - 0.5;
+        vec2 turbulence = vec2(n, n2) * 0.05 * densTemp.x; // Scale by density
+
+        // Wind + Buoyancy + Turbulence
+        vel += (u_wind + vec2(0.0, buoy) + turbulence) * u_dt;
         outColor = vec4(vel, 0.0, 1.0);
     }
 `;
