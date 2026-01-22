@@ -20,6 +20,8 @@ export class ParticleSystem {
     private gpuSystem: GPUParticleSystem | null = null;
 
     public onSmokeSpawned: ((x: number, y: number, color: string) => void) | null = null;
+    // Phase 3: Add callback for projectile/explosion velocity injection
+    public onVelocitySplatRequested: ((x: number, y: number, vx: number, vy: number, radius: number) => void) | null = null;
     public onClear: (() => void) | null = null;
 
     public setGPUSystem(sys: GPUParticleSystem | null) {
@@ -88,6 +90,18 @@ export class ParticleSystem {
                 const life = 2.0 + Math.random() * 1.5;
                 const color = Math.random() < 0.5 ? '#222' : '#444';
                 this.spawnSmoke(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed, life, 15 + Math.random() * 15, color);
+
+                // Phase 3: Inject radial velocity impulses into fluid
+                if (this.onVelocitySplatRequested) {
+                    const offsetDist = radius * 0.3;
+                    this.onVelocitySplatRequested(
+                        x + Math.cos(angle) * offsetDist,
+                        y + Math.sin(angle) * offsetDist,
+                        Math.cos(angle) * speed * 2.0,
+                        Math.sin(angle) * speed * 2.0,
+                        radius * 1.5
+                    );
+                }
             }
 
             if (data.moltenCount && data.moltenCount > 0) {
@@ -110,6 +124,18 @@ export class ParticleSystem {
             }
             if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke')) {
                 this.spawnSmoke(data.x, data.y, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, 1.0, 10, '#555');
+
+                // Phase 3: Add velocity impulse from projectile impact (random direction)
+                if (this.onVelocitySplatRequested) {
+                    const impactAngle = Math.random() * Math.PI * 2;
+                    const impactSpeed = 50;
+                    this.onVelocitySplatRequested(
+                        data.x, data.y,
+                        Math.cos(impactAngle) * impactSpeed,
+                        Math.sin(impactAngle) * impactSpeed,
+                        40
+                    );
+                }
             }
         });
 

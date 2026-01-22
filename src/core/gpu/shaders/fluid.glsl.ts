@@ -39,8 +39,11 @@ export const FLUID_ADVECT = `#version 300 es
         float densityDissipation = u_dissipation - peakFactor;
         float newDensity = density * clamp(densityDissipation, 0.9, 1.0);
         
+        // Phase 4: Temperature cools down faster than density dissipates
+        float tempDecay = 0.985;
+        
         // For other channels (velocity/temp/variation), use standard dissipation
-        outColor = vec4(newDensity, source.gba) * u_dissipation * mask;
+        outColor = vec4(newDensity, source.g * tempDecay, source.ba) * u_dissipation * mask;
     }
 `;
 
@@ -63,10 +66,11 @@ void main() {
         float m = exp(-d / max(u_radius, 1.0));
         vec4 base = texture(u_source, v_uv);
 
-        // Cap additive density to prevent "Blinding White" blobs
+        // Cap additive density to prevent excessive accumulation
         // R=density, B=variation
+        // Phase 1: Reduced cap from 5.0 to 2.0 for realistic transparency
         float newDensity = base.r + m * u_color.r;
-        float cappedDensity = min(newDensity, 5.0); // Allow some accumulation but don't over-saturate
+        float cappedDensity = min(newDensity, 2.0);
 
     outColor = vec4(cappedDensity, base.g + m * u_color.g, base.b + m * u_color.b, 1.0);
 }

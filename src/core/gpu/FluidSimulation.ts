@@ -143,9 +143,10 @@ export class FluidSimulation {
 
         const weather = WeatherManager.getInstance().getWeatherState();
 
-        // Convert wind (m/s) to UV/s
-        const uvWindX = weather ? (weather.windDir.x * weather.windSpeed) / worldWidthMeters : 0;
-        const uvWindY = weather ? (weather.windDir.y * weather.windSpeed) / worldHeightMeters : 0;
+        // Phase 2: Physics-to-grid amplification for wind (reduced from 100 to 10 for realistic speed)
+        const windScale = 10.0;
+        const uvWindX = weather ? (weather.windDir.x * weather.windSpeed * windScale) / worldWidthMeters : 0;
+        const uvWindY = weather ? (weather.windDir.y * weather.windSpeed * windScale) / worldHeightMeters : 0;
 
         // 1. Advection
         // Advect velocity using itself - WITH DRAG (0.99 dissipation)
@@ -158,12 +159,12 @@ export class FluidSimulation {
         this.velocityIdx = 1 - this.velocityIdx;
 
         // 4. Advection of Density
-        // Use a very light global dissipation (0.995) to let the shader's non-linear decay control the profile
+        // Phase 1: Increased dissipation from 0.995 to 0.98 for faster smoke decay
         this.advect(
             this.velocityFBOs[this.velocityIdx].tex,
             this.densityFBOs[this.densityIdx].tex,
             this.densityFBOs[1 - this.densityIdx].fbo,
-            safeDt, 0.995
+            safeDt, 0.98
         );
         this.densityIdx = 1 - this.densityIdx;
 
@@ -173,7 +174,8 @@ export class FluidSimulation {
         this.forcesShader!.setUniform1f("u_dt", safeDt);
         this.forcesShader!.setUniform1f("u_time", performance.now() * 0.001);
         this.forcesShader!.setUniform2f("u_wind", uvWindX, uvWindY);
-        this.forcesShader!.setUniform1f("u_buoyancy", 0.5 / worldHeightMeters);
+        // Phase 4: Increased from 0.5 to 5.0 for stronger buoyancy
+        this.forcesShader!.setUniform1f("u_buoyancy", 5.0 / worldHeightMeters);
         this.forcesShader!.setUniform1i("u_velocity", 0);
         this.forcesShader!.setUniform1i("u_density", 1);
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[this.velocityIdx].tex);
@@ -270,22 +272,30 @@ export class FluidSimulation {
 
         // Atomic Viewport: Simulation happens in grid space
         gl.viewport(0, 0, this.width, this.height);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.densityFBOs[1 - this.densityIdx].fbo);
+
+        // FIXED ACCUMULATION: Read from current idx, write to 1-idx, then toggle
+        // This ensures consecutive splats in same frame accumulate instead of overwrite
+        const srcIdx = this.densityIdx;
+        const dstIdx = 1 - srcIdx;
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.densityFBOs[dstIdx].fbo);
         this.splatShader!.use();
 
         if (debug) console.log(`[GPU] Fluid Splat UV: (${uvX.toFixed(3)}, ${uvY.toFixed(3)})`);
 
         this.splatShader!.setUniform2f("u_point", uvX, uvY);
-        const uvRadius = (radius / worldW) * 500.0;
-        this.splatShader!.setUniform1f("u_radius", uvRadius);
+        // Phase 2: Physics-based radius (replace magic number 500.0)
+        const gridRadius = (radius / (worldW / this.width)) * 1.5;
+        this.splatShader!.setUniform1f("u_radius", gridRadius);
         this.splatShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
         this.splatShader!.setUniform1i("u_source", 0);
         this.splatShader!.setUniform4f("u_color", r, g, b, 1.0);
 
-        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.densityFBOs[this.densityIdx].tex);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.densityFBOs[srcIdx].tex);
         this.renderQuad();
 
-        this.densityIdx = 1 - this.densityIdx;
+        // Toggle so next splat reads from output of this one
+        this.densityIdx = dstIdx;
 
         // SANITY SHIELD CLEANUP: No leaking state
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -305,21 +315,31 @@ export class FluidSimulation {
             return;
         }
 
+        // Atomic Viewport: Simulation happens in grid space
         gl.viewport(0, 0, this.width, this.height);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1 - this.velocityIdx].fbo);
+
+        // FIXED ACCUMULATION: Read from current idx, write to 1-idx, then toggle
+        const srcIdx = this.velocityIdx;
+        const dstIdx = 1 - srcIdx;
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[dstIdx].fbo);
         this.splatShader!.use();
 
         this.splatShader!.setUniform2f("u_point", uvX, uvY);
-        const uvRadius = (radius / worldW) * 500.0;
-        this.splatShader!.setUniform1f("u_radius", uvRadius);
+        // Phase 2: Physics-based radius (replace magic number 500.0)
+        const gridRadius = (radius / (worldW / this.width)) * 1.5;
+        this.splatShader!.setUniform1f("u_radius", gridRadius);
         this.splatShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
         this.splatShader!.setUniform1i("u_source", 0);
-        this.splatShader!.setUniform4f("u_color", vx / worldW, -vy / worldH, 0.0, 1.0);
+        // Phase 2: Add velocity scale factor (was too weak after normalization)
+        const velScale = 2.0;
+        this.splatShader!.setUniform4f("u_color", (vx / worldW) * velScale, (-vy / worldH) * velScale, 0.0, 1.0);
 
-        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[this.velocityIdx].tex);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[srcIdx].tex);
         this.renderQuad();
 
-        this.velocityIdx = 1 - this.velocityIdx;
+        // Toggle so next splat reads from output of this one
+        this.velocityIdx = dstIdx;
 
         // SANITY SHIELD CLEANUP
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);

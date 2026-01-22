@@ -46,10 +46,21 @@ export class GPURenderer {
         // Register callback ONCE for the life of the app
         const ps = ParticleSystem.getInstance();
         ps.onSmokeSpawned = this.handleSmokeSpawned;
+        ps.onVelocitySplatRequested = this.handleVelocitySplat; // Phase 3
         ps.onClear = () => this.clear();
 
         this.updateConfig();
     }
+
+    // Phase 3: Handler for projectile/explosion velocity injection
+    private handleVelocitySplat = (x: number, y: number, vx: number, vy: number, radius: number) => {
+        if (!this.active || !this.fluidSimulation || !this.world) {
+            return;
+        }
+        const wpW = this.world.getWidthPixels();
+        const wpH = this.world.getHeightPixels();
+        this.fluidSimulation.splatVelocity(x, y, radius, vx, vy, wpW, wpH);
+    };
 
     private initResources(): void {
         const gl = this.context.getGL();
@@ -96,34 +107,39 @@ export class GPURenderer {
         }
 
         // Eulerian Splat: R=Density, G=Temperature, B=Variation
-        let density = 0.6;
-        let temp = 0.5;
+        // Phase 6: Apply user-configurable density multiplier
+        const densityMult = ConfigManager.getInstance().get<number>('Visuals', 'smokeDensityMultiplier') || 1.0;
+
+        // CALIBRATED VALUES (Phase 1): Reduced density for realistic transparency
+        let density = 0.12 * densityMult;
+        let temp = 0.15;
         let variation = 0.5;
 
         if (color === '#000' || color === '#111' || color === '#222') {
-            density = 1.1;
-            temp = 4.0;
+            density = 0.2 * densityMult;   // Dark/thick smoke (was 1.1)
+            temp = 0.8;      // Hot (was 4.0)
             variation = 0.05;
         } else if (color === '#888' || color === '#666' || color === '#555') {
-            density = 0.8;
-            temp = 1.5;
+            density = 0.15 * densityMult;  // Medium smoke (was 0.8)
+            temp = 0.3;      // Warm (was 1.5)
             variation = 0.5;
         } else {
-            density = 0.5;
-            temp = 0.6;
+            density = 0.08 * densityMult;  // Light smoke (was 0.5)
+            temp = 0.1;      // Cool (was 0.6)
             variation = 0.9;
         }
 
         const wpW = this.world.getWidthPixels();
         const wpH = this.world.getHeightPixels();
         const ppm = ConfigManager.getInstance().getPixelsPerMeter();
-        const radius = (5.0 + Math.random() * 4.0) * ppm;
+        const radius = (3.0 + Math.random() * 2.0) * ppm; // Smaller radius (was 5-9)
 
         this.fluidSimulation.splat(x, y, radius, density, temp, variation, wpW, wpH);
 
-        const vx = (Math.random() - 0.5) * 10.0 * ppm;
-        const vy = (Math.random() - 0.5) * 10.0 * ppm;
-        this.fluidSimulation.splatVelocity(x, y, radius * 0.7, vx, vy, wpW, wpH);
+        // Phase 3: Increased velocity injection for better interaction
+        const vx = (Math.random() - 0.5) * 20.0 * ppm;
+        const vy = (Math.random() - 0.5) * 20.0 * ppm;
+        this.fluidSimulation.splatVelocity(x, y, radius * 0.8, vx, vy, wpW, wpH);
     };
 
     public setWorld(world: World): void {
@@ -202,7 +218,8 @@ export class GPURenderer {
                     const speedSq = vx * vx + vy * vy;
                     if (speedSq > (0.5 * ppm) * (0.5 * ppm)) {
                         const radius = 1.5 * ppm;
-                        this.fluidSimulation.splatVelocity(e.x, e.y, radius, vx * 0.5, vy * 0.5, wpW, wpH);
+                        // Phase 3: Increased from 0.5 to 2.0 for stronger entity interaction
+                        this.fluidSimulation.splatVelocity(e.x, e.y, radius, vx * 2.0, vy * 2.0, wpW, wpH);
                     }
                 }
                 this.lastEntityPositions.set(i, { x: e.x, y: e.y });
