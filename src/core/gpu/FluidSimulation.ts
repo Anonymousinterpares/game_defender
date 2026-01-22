@@ -24,6 +24,10 @@ export class FluidSimulation {
     private applyVorticityShader: Shader | null = null;
 
     private quadBuffer: WebGLBuffer | null = null;
+    private velocityIdx: number = 0;
+    private densityIdx: number = 0;
+    private pressureIdx: number = 0;
+
     private _initialized = false;
 
     constructor() { }
@@ -84,6 +88,10 @@ export class FluidSimulation {
             gl.clearColor(0, 0, 0, 0);
             gl.clear(gl.COLOR_BUFFER_BIT);
         });
+
+        this.velocityIdx = 0;
+        this.densityIdx = 0;
+        this.pressureIdx = 0;
     }
 
     private createFBO(): { fbo: WebGLFramebuffer, tex: WebGLTexture } {
@@ -140,44 +148,56 @@ export class FluidSimulation {
         const uvWindY = weather ? (weather.windDir.y * weather.windSpeed) / worldHeightMeters : 0;
 
         // 1. Advection
-        this.advect(this.velocityFBOs[0].tex, this.velocityFBOs[0].tex, this.velocityFBOs[1].fbo, safeDt, 1.0);
-        this.velocityFBOs.reverse();
-        this.advect(this.velocityFBOs[0].tex, this.densityFBOs[0].tex, this.densityFBOs[1].fbo, safeDt, 0.992);
-        this.densityFBOs.reverse();
+        // Advect velocity using itself
+        this.advect(
+            this.velocityFBOs[this.velocityIdx].tex,
+            this.velocityFBOs[this.velocityIdx].tex,
+            this.velocityFBOs[1 - this.velocityIdx].fbo,
+            safeDt, 1.0
+        );
+        this.velocityIdx = 1 - this.velocityIdx;
+
+        // Advect density using velocity
+        this.advect(
+            this.velocityFBOs[this.velocityIdx].tex,
+            this.densityFBOs[this.densityIdx].tex,
+            this.densityFBOs[1 - this.densityIdx].fbo,
+            safeDt, 0.992
+        );
+        this.densityIdx = 1 - this.densityIdx;
 
         // 2. Forces (Buoyancy + Wind)
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1].fbo);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1 - this.velocityIdx].fbo);
         this.forcesShader!.use();
         this.forcesShader!.setUniform1f("u_dt", safeDt);
         this.forcesShader!.setUniform2f("u_wind", uvWindX, uvWindY);
-        // Buoyancy in UV/s: Rising at approx 0.5 m/s base
         this.forcesShader!.setUniform1f("u_buoyancy", 0.5 / worldHeightMeters);
         this.forcesShader!.setUniform1i("u_velocity", 0);
         this.forcesShader!.setUniform1i("u_density", 1);
-        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[0].tex);
-        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.densityFBOs[0].tex);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[this.velocityIdx].tex);
+        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.densityFBOs[this.densityIdx].tex);
         this.renderQuad();
-        this.velocityFBOs.reverse();
+        this.velocityIdx = 1 - this.velocityIdx;
 
         // 3. Vorticity Confinement
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.vorticityFBO!.fbo);
         this.vorticityShader!.use();
         this.vorticityShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
         this.vorticityShader!.setUniform1i("u_velocity", 0);
-        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[0].tex);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[this.velocityIdx].tex);
         this.renderQuad();
 
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1].fbo);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1 - this.velocityIdx].fbo);
         this.applyVorticityShader!.use();
         this.applyVorticityShader!.setUniform1f("u_dt", safeDt);
         this.applyVorticityShader!.setUniform1f("u_curl", 30.0); // Confinement strength
         this.applyVorticityShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
         this.applyVorticityShader!.setUniform1i("u_velocity", 0);
         this.applyVorticityShader!.setUniform1i("u_vorticity", 1);
-        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[0].tex);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[this.velocityIdx].tex);
         gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.vorticityFBO!.tex);
         this.renderQuad();
-        this.velocityFBOs.reverse();
+        this.velocityIdx = 1 - this.velocityIdx;
 
         // 4. Divergence
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.divergenceFBO!.fbo);
@@ -185,32 +205,32 @@ export class FluidSimulation {
         this.divergenceShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
         this.divergenceShader!.setUniform1i("u_velocity", 0);
         gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[0].tex);
+        gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[this.velocityIdx].tex);
         this.renderQuad();
 
         // 5. Jacobi Pressure
         for (let i = 0; i < 20; i++) {
-            gl.bindFramebuffer(gl.FRAMEBUFFER, this.pressureFBOs[1].fbo);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.pressureFBOs[1 - this.pressureIdx].fbo);
             this.pressureShader!.use();
             this.pressureShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
             this.pressureShader!.setUniform1i("u_pressure", 0);
             this.pressureShader!.setUniform1i("u_divergence", 1);
-            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.pressureFBOs[0].tex);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.pressureFBOs[this.pressureIdx].tex);
             gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.divergenceFBO!.tex);
             this.renderQuad();
-            this.pressureFBOs.reverse();
+            this.pressureIdx = 1 - this.pressureIdx;
         }
 
         // 6. Subtract Gradient
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1].fbo);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1 - this.velocityIdx].fbo);
         this.subtractShader!.use();
         this.subtractShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
         this.subtractShader!.setUniform1i("u_pressure", 0);
         this.subtractShader!.setUniform1i("u_velocity", 1);
-        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.pressureFBOs[0].tex);
-        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[0].tex);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.pressureFBOs[this.pressureIdx].tex);
+        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[this.velocityIdx].tex);
         this.renderQuad();
-        this.velocityFBOs.reverse();
+        this.velocityIdx = 1 - this.velocityIdx;
 
         // Cleanup: Unbind framebuffer and textures to prevent state leaks/flickering
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -236,7 +256,9 @@ export class FluidSimulation {
         const debug = ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug');
         const gl = this.gl!;
         gl.viewport(0, 0, this.width, this.height);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.densityFBOs[1].fbo);
+
+        // Use Density Pong as target
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.densityFBOs[1 - this.densityIdx].fbo);
         this.splatShader!.use();
 
         const uvX = x / worldW;
@@ -245,18 +267,22 @@ export class FluidSimulation {
 
         this.splatShader!.setUniform2f("u_point", uvX, uvY);
 
-        // Scale radius to grid size: 1.0 in world is 1/worldW in UV. 
-        // We want radius in grid texels, but Gaussian shader expects (UV_dist^2 / radius_factor).
-        // A radius of 0.005 in UV space is approx 1.28 texels in a 256 grid.
-        const uvRadius = (radius / worldW) * 500.0; // Boosted factor for visibility
+        // Scale radius to grid size
+        const uvRadius = (radius / worldW) * 500.0;
         this.splatShader!.setUniform1f("u_radius", uvRadius);
 
         this.splatShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
         this.splatShader!.setUniform1i("u_source", 0);
+
+        // CAP DENSITY: Prevent blinding white by limiting splat intensity
+        // variation is already in b.
         this.splatShader!.setUniform4f("u_color", r, g, b, 1.0);
-        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.densityFBOs[0].tex);
+
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.densityFBOs[this.densityIdx].tex);
         this.renderQuad();
-        this.densityFBOs.reverse();
+
+        // Swap!
+        this.densityIdx = 1 - this.densityIdx;
 
         // Cleanup
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -266,7 +292,8 @@ export class FluidSimulation {
     public splatVelocity(x: number, y: number, radius: number, vx: number, vy: number, worldW: number, worldH: number): void {
         const gl = this.gl!;
         gl.viewport(0, 0, this.width, this.height);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1].fbo);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1 - this.velocityIdx].fbo);
         this.splatShader!.use();
         this.splatShader!.setUniform2f("u_point", x / worldW, 1.0 - (y / worldH));
 
@@ -275,13 +302,12 @@ export class FluidSimulation {
         this.splatShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
         this.splatShader!.setUniform1i("u_source", 0);
 
-        // Normalize velocity injection: vx is pixels/sec. 
-        // We convert to UV/sec (vx/worldW).
         this.splatShader!.setUniform4f("u_color", vx / worldW, -vy / worldH, 0.0, 1.0);
 
-        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[0].tex);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[this.velocityIdx].tex);
         this.renderQuad();
-        this.velocityFBOs.reverse();
+
+        this.velocityIdx = 1 - this.velocityIdx;
 
         // Cleanup
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -289,6 +315,6 @@ export class FluidSimulation {
     }
 
     public getDensityTexture(): WebGLTexture | null {
-        return this._initialized ? this.densityFBOs[0].tex : null;
+        return this._initialized ? this.densityFBOs[this.densityIdx].tex : null;
     }
 }

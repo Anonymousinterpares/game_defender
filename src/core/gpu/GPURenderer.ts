@@ -60,8 +60,10 @@ export class GPURenderer {
         if (this.fluidSim && !this.fluidSim.isInitialized) {
             console.log("[GPU] Initializing Fluid Solver (256x256)...");
             this.fluidSim.init(gl, 256, 256); // 256x256 fluid grid
+        }
 
-            // Bridge CPU Particle System events to Fluid Splats
+        // ALWAYS register callbacks, even if fluid was already initialized (new game session)
+        if (this.fluidSim) {
             const ps = ParticleSystem.getInstance();
             ps.onClear = () => this.clear();
 
