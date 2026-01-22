@@ -7,17 +7,29 @@ import { FluidSimulation } from "./FluidSimulation";
 import { ParticleSystem } from "../ParticleSystem";
 import { FluidShader } from "./FluidShader";
 
-
 export class GPURenderer {
-    public static instance: GPURenderer | null = null;
+    private static _instance: GPURenderer | null = null;
+
+    public static getInstance(): GPURenderer {
+        if (!this._instance) {
+            this._instance = new GPURenderer();
+        }
+        return this._instance;
+    }
+
+    // Deprecated static instance property for backward compatibility
+    public static get instance(): GPURenderer | null {
+        return this._instance;
+    }
+
     private context: GPUContext;
     private world: World | null = null;
     private active: boolean = false;
     private worldShader: WorldShader | null = null;
     private fluidShader: FluidShader | null = null;
     private quadBuffer: WebGLBuffer | null = null;
-    private particleSystem: GPUParticleSystem | null = null;
-    private fluidSim: FluidSimulation | null = null;
+    private particleSystem: GPUParticleSystem;
+    private fluidSimulation: FluidSimulation;
     private worldMapTexture: WebGLTexture | null = null;
     private lastMeshVersion: number = -1;
     private lastEntityPositions: Map<number, { x: number, y: number }> = new Map();
@@ -26,15 +38,22 @@ export class GPURenderer {
         return this.particleSystem;
     }
 
-    constructor() {
-        GPURenderer.instance = this;
+    private constructor() {
         this.context = new GPUContext();
         this.particleSystem = new GPUParticleSystem();
-        this.fluidSim = new FluidSimulation();
+        this.fluidSimulation = new FluidSimulation();
+
+        // Register callback ONCE for the life of the app
+        const ps = ParticleSystem.getInstance();
+        ps.onSmokeSpawned = this.handleSmokeSpawned;
+        ps.onClear = () => this.clear();
+
+        this.updateConfig();
     }
 
     private initResources(): void {
         const gl = this.context.getGL();
+
         if (!this.worldShader) {
             this.worldShader = new WorldShader(gl);
         }
@@ -60,61 +79,52 @@ export class GPURenderer {
             this.particleSystem.init(gl);
         }
 
-        if (this.fluidSim && !this.fluidSim.isInitialized) {
+        if (this.fluidSimulation && !this.fluidSimulation.isInitialized) {
             console.log("[GPU] Initializing Fluid Solver (256x256)...");
-            this.fluidSim.init(gl, 256, 256); // 256x256 fluid grid
-        }
-
-        // ALWAYS register callbacks, even if fluid was already initialized (new game session)
-        if (this.fluidSim) {
-            const ps = ParticleSystem.getInstance();
-            ps.onClear = () => this.clear();
-
-            ps.onSmokeSpawned = (x, y, color) => {
-                const debug = ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug');
-                if (debug) console.log(`[GPU] Smoke Spawned at (${x.toFixed(1)}, ${y.toFixed(1)}) color: ${color}`);
-
-                if (!this.active || !this.fluidSim || !this.world) {
-                    if (debug && !this.active) console.warn("[GPU] Smoke dropped: GPU not active");
-                    return;
-                }
-
-                // Eulerian Splat: R=Density, G=Temperature, B=Variation
-                let density = 0.6;
-                let temp = 0.5;
-                let variation = 0.5;
-
-                if (color === '#000' || color === '#111' || color === '#222') {
-                    density = 1.1;
-                    temp = 4.0; // High buoyancy for fire
-                    variation = 0.05; // Darker
-                } else if (color === '#888' || color === '#666' || color === '#555') {
-                    density = 0.8;
-                    temp = 1.5;
-                    variation = 0.5; // Gray
-                } else {
-                    density = 0.5;
-                    temp = 0.6;
-                    variation = 0.9; // Light
-                }
-
-                const wpW = this.world.getWidthPixels();
-                const wpH = this.world.getHeightPixels();
-                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
-
-                // Randomize radius: 5.0m to 9.0m puff
-                const radius = (5.0 + Math.random() * 4.0) * ppm;
-
-                if (debug) console.log(`[GPU] Splat: density=${density}, temp=${temp}, radius=${radius.toFixed(1)}`);
-                this.fluidSim.splat(x, y, radius, density, temp, variation, wpW, wpH);
-
-                // Add some initial velocity "burst" to push smoke outwards (approx 10 m/s)
-                const vx = (Math.random() - 0.5) * 10.0 * ppm;
-                const vy = (Math.random() - 0.5) * 10.0 * ppm;
-                this.fluidSim.splatVelocity(x, y, radius * 0.7, vx, vy, wpW, wpH);
-            };
+            this.fluidSimulation.init(gl, 256, 256);
         }
     }
+
+    private handleSmokeSpawned = (x: number, y: number, color: string) => {
+        // Diagnostic: Check for valid numbers immediately
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            return;
+        }
+
+        if (!this.active || !this.fluidSimulation || !this.world) {
+            return;
+        }
+
+        // Eulerian Splat: R=Density, G=Temperature, B=Variation
+        let density = 0.6;
+        let temp = 0.5;
+        let variation = 0.5;
+
+        if (color === '#000' || color === '#111' || color === '#222') {
+            density = 1.1;
+            temp = 4.0;
+            variation = 0.05;
+        } else if (color === '#888' || color === '#666' || color === '#555') {
+            density = 0.8;
+            temp = 1.5;
+            variation = 0.5;
+        } else {
+            density = 0.5;
+            temp = 0.6;
+            variation = 0.9;
+        }
+
+        const wpW = this.world.getWidthPixels();
+        const wpH = this.world.getHeightPixels();
+        const ppm = ConfigManager.getInstance().getPixelsPerMeter();
+        const radius = (5.0 + Math.random() * 4.0) * ppm;
+
+        this.fluidSimulation.splat(x, y, radius, density, temp, variation, wpW, wpH);
+
+        const vx = (Math.random() - 0.5) * 10.0 * ppm;
+        const vy = (Math.random() - 0.5) * 10.0 * ppm;
+        this.fluidSimulation.splatVelocity(x, y, radius * 0.7, vx, vy, wpW, wpH);
+    };
 
     public setWorld(world: World): void {
         this.world = world;
@@ -124,7 +134,6 @@ export class GPURenderer {
         if (!this.world || !this.active) return;
         const gl = this.context.getGL();
 
-        // Check if world mesh has changed (walls destroyed etc)
         const currentVer = this.world.getMeshVersion();
         if (this.worldMapTexture && currentVer === this.lastMeshVersion) return;
 
@@ -140,13 +149,10 @@ export class GPURenderer {
         }
 
         gl.bindTexture(gl.TEXTURE_2D, this.worldMapTexture);
-
         const width = this.world.getWidth();
         const height = this.world.getHeight();
-        const buffer = this.world.getTilesSharedBuffer(); // SharedArrayBuffer
-
-        const byteLength = width * height;
-        const data = new Uint8Array(buffer, 0, byteLength);
+        const buffer = this.world.getTilesSharedBuffer();
+        const data = new Uint8Array(buffer, 0, width * height);
 
         gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, data);
@@ -157,14 +163,10 @@ export class GPURenderer {
         this.active = ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled') || false;
 
         if (this.active) {
-            // Ensure static instance is correct even if scene was partially reused
-            GPURenderer.instance = this;
-
             if (!wasActive) {
-                console.log("[GPU] Context Request...");
+                console.log("[GPU] Pipeline Activated");
                 this.context.init();
                 this.initResources();
-                console.log("[GPU] Pipeline Activated");
             }
         } else if (wasActive) {
             console.log("[GPU] Pipeline Deactivated");
@@ -173,81 +175,54 @@ export class GPURenderer {
 
     public clear(): void {
         if (this.particleSystem) this.particleSystem.clear();
-        if (this.fluidSim) this.fluidSim.clear();
+        if (this.fluidSimulation) this.fluidSimulation.clear();
     }
 
     public update(dt: number, entities: { x: number, y: number }[] = []): void {
-        if (this.active && this.particleSystem && this.world) {
-            this.updateWorldTexture();
+        if (!this.active || !this.particleSystem || !this.world) return;
 
-            // Pass texture and world info
-            if (this.worldMapTexture) {
-                this.particleSystem.setWorldMap(this.worldMapTexture, this.world.getWidth(), this.world.getHeight(), this.world.getTileSize());
-            }
+        this.updateWorldTexture();
+        if (this.worldMapTexture) {
+            this.particleSystem.setWorldMap(this.worldMapTexture, this.world.getWidth(), this.world.getHeight(), this.world.getTileSize());
+        }
+        this.particleSystem.setEntities(entities);
+        this.particleSystem.update(dt, performance.now() * 0.001, 0, 0);
 
-            // Pass entities for particle interaction
-            this.particleSystem.setEntities(entities);
+        if (this.fluidSimulation) {
+            const ppm = ConfigManager.getInstance().getPixelsPerMeter();
+            const wpW = this.world.getWidthPixels();
+            const wpH = this.world.getHeightPixels();
 
-            this.particleSystem.update(dt, performance.now() * 0.001, 0, 0);
-
-            if (this.fluidSim) {
-                // 1. Entity Stirring (Wakes)
-                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
-                const wpW = this.world.getWidthPixels();
-                const wpH = this.world.getHeightPixels();
-
-                for (let i = 0; i < entities.length; i++) {
-                    const e = entities[i];
-                    const last = this.lastEntityPositions.get(i);
-                    if (last) {
-                        const vx = (e.x - last.x) / dt;
-                        const vy = (e.y - last.y) / dt;
-                        const speedSq = vx * vx + vy * vy;
-
-                        // Only stir if moving significantly (> 0.5m/s)
-                        if (speedSq > (0.5 * ppm) * (0.5 * ppm)) {
-                            // Inject entity velocity into fluid (half radius of a puff)
-                            const radius = 1.5 * ppm;
-                            // Add a bit of "stirring strength"
-                            this.fluidSim.splatVelocity(e.x, e.y, radius, vx * 0.5, vy * 0.5, wpW, wpH);
-                        }
+            for (let i = 0; i < entities.length; i++) {
+                const e = entities[i];
+                const last = this.lastEntityPositions.get(i);
+                if (last) {
+                    const vx = (e.x - last.x) / dt;
+                    const vy = (e.y - last.y) / dt;
+                    const speedSq = vx * vx + vy * vy;
+                    if (speedSq > (0.5 * ppm) * (0.5 * ppm)) {
+                        const radius = 1.5 * ppm;
+                        this.fluidSimulation.splatVelocity(e.x, e.y, radius, vx * 0.5, vy * 0.5, wpW, wpH);
                     }
-                    this.lastEntityPositions.set(i, { x: e.x, y: e.y });
                 }
-
-                this.fluidSim.update(dt, this.world.getWidthPixels(), this.world.getHeightPixels());
+                this.lastEntityPositions.set(i, { x: e.x, y: e.y });
             }
+            this.fluidSimulation.update(dt, wpW, wpH);
         }
     }
 
-    private frameCount: number = 0;
-
     public render(cameraX: number, cameraY: number, width: number, height: number): void {
-        const debug = ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug');
-        if (!this.active || !this.worldShader) {
-            if (debug && this.frameCount % 120 === 0) console.log("[GPU] Render skipped: active=" + this.active);
-            this.frameCount++;
-            return;
-        }
-
-        if (debug && this.frameCount % 120 === 0) {
-            console.log(`[GPU] Rendering frame ${this.frameCount} at (${cameraX.toFixed(0)}, ${cameraY.toFixed(0)}) size: ${width}x${height}`);
-        }
-        this.frameCount++;
+        if (!this.active || !this.worldShader) return;
 
         this.context.resize(width, height);
-
         const gl = this.context.getGL();
 
-        // --- State Cleanup ---
-        // Ensure we are drawing to the screen and not a leakes FBO from update
+        // State Hygiene
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        // Ensure we aren't corrupting the Particle System's VAO
         gl.bindVertexArray(null);
-
         this.context.clear();
 
-        // 1. Render World (Floor/Walls)
+        // 1. Render World
         const shader = this.worldShader;
         shader.use();
         gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
@@ -259,65 +234,63 @@ export class GPURenderer {
         shader.setUniform1f("u_tileSize", this.world?.getTileSize() || 32);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-        // 2. Render Fluid Field (Smoke)
-        if (this.fluidSim) {
-            gl.bindVertexArray(null); // Protection
-            gl.viewport(0, 0, width, height); // Reset to screen resolution
+        // 2. Render Fluid Field
+        if (this.fluidSimulation) {
             this.renderFluid(cameraX, cameraY, width, height);
         }
 
         // 3. Render Particles
         if (this.particleSystem) {
-            gl.viewport(0, 0, width, height); // Just in case
             gl.enable(gl.BLEND);
-            gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); // Premultiplied
+            gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
             this.particleSystem.render(cameraX, cameraY, width, height);
             gl.disable(gl.BLEND);
         }
+
+        // Final Cleanup
+        gl.useProgram(null);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
     }
 
-    private renderFluid(cameraX: number, cameraY: number, width: number, height: number): void {
+    public renderFluid(cameraX: number, cameraY: number, screenW: number, screenH: number): void {
+        if (!this.active || !this.fluidSimulation || !this.world || !this.fluidShader) return;
+
         const gl = this.context.getGL();
-        const tex = this.fluidSim!.getDensityTexture();
+        const canvas = this.context.getCanvas();
+        gl.viewport(0, 0, canvas.width, canvas.height);
+
+        const tex = this.fluidSimulation.getDensityTexture();
         if (!tex) return;
 
-        const shader = this.fluidShader!;
+        const shader = this.fluidShader;
         shader.use();
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
-        gl.enableVertexAttribArray(0);
-        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+        const posLoc = shader.getAttribLocation("a_position");
+        gl.enableVertexAttribArray(posLoc || 0);
+        gl.vertexAttribPointer(posLoc || 0, 2, gl.FLOAT, false, 0, 0);
 
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, tex);
         shader.setUniform1i("u_density", 0);
 
         shader.setUniform2f("u_camera", cameraX, cameraY);
-        shader.setUniform2f("u_resolution", width, height);
+        shader.setUniform2f("u_resolution", screenW, screenH);
         shader.setUniform1f("u_time", performance.now() * 0.001);
-        shader.setUniform2f("u_worldPixels", this.world!.getWidthPixels(), this.world!.getHeightPixels());
+        shader.setUniform2f("u_worldPixels", this.world.getWidthPixels(), this.world.getHeightPixels());
 
-        gl.disable(gl.DEPTH_TEST);
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         gl.disable(gl.BLEND);
-        gl.enable(gl.DEPTH_TEST);
 
-        // Cleanup state
         gl.bindVertexArray(null);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
-    /**
-     * Composites the GPU-rendered content onto the main 2D canvas.
-     * Call this after render() and after the main 2D world has been drawn.
-     */
     public compositeToContext(ctx: CanvasRenderingContext2D): void {
         if (!this.active) return;
-
         const gpuCanvas = this.context.getCanvas();
-        // Draw the GPU canvas on top of the existing 2D content
         ctx.drawImage(gpuCanvas, 0, 0, ctx.canvas.width, ctx.canvas.height);
     }
 
@@ -326,11 +299,7 @@ export class GPURenderer {
     }
 
     public dispose(): void {
+        // Singleton is persistent.
         this.active = false;
-        if (GPURenderer.instance === this) {
-            GPURenderer.instance = null;
-        }
-        ParticleSystem.getInstance().onSmokeSpawned = null;
-        this.context.dispose();
     }
 }

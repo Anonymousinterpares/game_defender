@@ -283,9 +283,15 @@ export class PhysicsSystem implements System {
         }
 
         if (hitCount > 0) {
-            const len = Math.sqrt(avgNX * avgNX + avgNY * avgNY) || 1;
-            avgNX /= len;
-            avgNY /= len;
+            const lenSq = avgNX * avgNX + avgNY * avgNY;
+            if (lenSq > 0.0000001) {
+                const len = Math.sqrt(lenSq);
+                avgNX /= len;
+                avgNY /= len;
+            } else {
+                avgNX = 0;
+                avgNY = 0;
+            }
         }
 
         return { x: finalX, y: finalY, hit: hitAny, nx: avgNX, ny: avgNY };
@@ -342,13 +348,19 @@ export class PhysicsSystem implements System {
             const distSq = dx * dx + dy * dy;
             const radSum = physics.radius + other.radius;
 
-            if (distSq > 0 && distSq < radSum * radSum) {
+            if (distSq > 0.00001 && distSq < radSum * radSum) {
                 const dist = Math.sqrt(distSq);
                 const overlap = radSum - dist;
                 const push = Math.min(overlap, 2.0); // Limit push per frame to avoid instability
 
                 sepX += (dx / dist) * push;
                 sepY += (dy / dist) * push;
+                count++;
+            } else if (distSq <= 0.00001) {
+                // Exact overlap/Zero distance - push in random direction to break symmetry
+                const angle = Math.random() * Math.PI * 2;
+                sepX += Math.cos(angle) * 1.0;
+                sepY += Math.sin(angle) * 1.0;
                 count++;
             }
         }

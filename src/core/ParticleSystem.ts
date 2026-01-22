@@ -182,27 +182,15 @@ export class ParticleSystem {
         return this.emitter.spawnParticle(x, y, color, vx, vy, life);
     }
     public spawnSmoke(x: number, y: number, vx: number, vy: number, life: number, size: number, color: string): number {
-        if (this.onSmokeSpawned) this.onSmokeSpawned(x, y, color);
+        const gpuEnabled = ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled');
 
-        if (this.gpuSystem && ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled')) {
-            // Variation: 0.0 (White/Gray), 0.9 (Black/Dense)
-            let variation = 0.0;
-            if (color === '#000' || color === '#111' || color === '#222') variation = 0.9;
-            else if (color === '#666' || color === '#555') variation = 0.5;
-
-            // SPAWN MULTIPLE TINY PARTICLES FOR VOLUMETRIC EFFECT
-            const count = 4;
-            for (let i = 0; i < count; i++) {
-                const offX = (Math.random() - 0.5) * size * 0.3;
-                const offY = (Math.random() - 0.5) * size * 0.3;
-                const vOffX = (Math.random() - 0.5) * 20;
-                const vOffY = (Math.random() - 0.5) * 20;
-
-                // Pack variation into fraction: 4.0, 4.5, 4.9
-                this.gpuSystem.uploadParticle(x + offX, y + offY, vx + vOffX, vy + vOffY, life * (0.8 + Math.random() * 0.4), 4.0 + variation, FLAG_ACTIVE);
+        if (gpuEnabled) {
+            if (this.onSmokeSpawned) {
+                this.onSmokeSpawned(x, y, color);
             }
-            return -1;
+            return -1; // Handled by GPU Fluid Simulation
         }
+
         return this.emitter.spawnSmoke(x, y, vx, vy, life, size, color);
     }
     public spawnShockwave(x: number, y: number, radius: number): number {

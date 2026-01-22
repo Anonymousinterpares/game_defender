@@ -238,6 +238,8 @@ export class FluidSimulation {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, null);
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.useProgram(null);
+        gl.bindVertexArray(null);
     }
 
     private advect(vel: WebGLTexture, src: WebGLTexture, dest: WebGLFramebuffer, dt: number, dissipation: number): void {
@@ -257,53 +259,61 @@ export class FluidSimulation {
     public splat(x: number, y: number, radius: number, r: number, g: number, b: number, worldW: number, worldH: number): void {
         const debug = ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug');
         const gl = this.gl!;
-        gl.viewport(0, 0, this.width, this.height);
-
-        // Use Density Pong as target
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.densityFBOs[1 - this.densityIdx].fbo);
-        this.splatShader!.use();
 
         const uvX = x / worldW;
         const uvY = 1.0 - (y / worldH);
+
+        // PROTECTION: Skip splat if coordinates or parameters are invalid (Infinity/NaN)
+        if (!Number.isFinite(uvX) || !Number.isFinite(uvY) || !Number.isFinite(radius) || !Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
+            return;
+        }
+
+        // Atomic Viewport: Simulation happens in grid space
+        gl.viewport(0, 0, this.width, this.height);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.densityFBOs[1 - this.densityIdx].fbo);
+        this.splatShader!.use();
+
         if (debug) console.log(`[GPU] Fluid Splat UV: (${uvX.toFixed(3)}, ${uvY.toFixed(3)})`);
 
         this.splatShader!.setUniform2f("u_point", uvX, uvY);
-
-        // Scale radius to grid size
         const uvRadius = (radius / worldW) * 500.0;
         this.splatShader!.setUniform1f("u_radius", uvRadius);
-
         this.splatShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
         this.splatShader!.setUniform1i("u_source", 0);
-
-        // CAP DENSITY: Prevent blinding white by limiting splat intensity
-        // variation is already in b.
         this.splatShader!.setUniform4f("u_color", r, g, b, 1.0);
 
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.densityFBOs[this.densityIdx].tex);
         this.renderQuad();
 
-        // Swap!
         this.densityIdx = 1 - this.densityIdx;
 
-        // Cleanup
+        // SANITY SHIELD CLEANUP: No leaking state
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.useProgram(null);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        gl.disableVertexAttribArray(0);
     }
 
     public splatVelocity(x: number, y: number, radius: number, vx: number, vy: number, worldW: number, worldH: number): void {
         const gl = this.gl!;
-        gl.viewport(0, 0, this.width, this.height);
 
+        const uvX = x / worldW;
+        const uvY = 1.0 - (y / worldH);
+
+        if (!Number.isFinite(uvX) || !Number.isFinite(uvY) || !Number.isFinite(vx) || !Number.isFinite(vy) || !Number.isFinite(radius)) {
+            return;
+        }
+
+        gl.viewport(0, 0, this.width, this.height);
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.velocityFBOs[1 - this.velocityIdx].fbo);
         this.splatShader!.use();
-        this.splatShader!.setUniform2f("u_point", x / worldW, 1.0 - (y / worldH));
 
+        this.splatShader!.setUniform2f("u_point", uvX, uvY);
         const uvRadius = (radius / worldW) * 500.0;
         this.splatShader!.setUniform1f("u_radius", uvRadius);
         this.splatShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
         this.splatShader!.setUniform1i("u_source", 0);
-
         this.splatShader!.setUniform4f("u_color", vx / worldW, -vy / worldH, 0.0, 1.0);
 
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[this.velocityIdx].tex);
@@ -311,9 +321,12 @@ export class FluidSimulation {
 
         this.velocityIdx = 1 - this.velocityIdx;
 
-        // Cleanup
+        // SANITY SHIELD CLEANUP
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.useProgram(null);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        gl.disableVertexAttribArray(0);
     }
 
     public getDensityTexture(): WebGLTexture | null {

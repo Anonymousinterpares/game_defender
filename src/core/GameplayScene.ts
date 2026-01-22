@@ -76,7 +76,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         this.hud = new GameplayHUD(this);
         this.lightingRenderer = new LightingRenderer(this);
         this.benchmark = new BenchmarkSystem(this);
-        this.gpuRenderer = new GPURenderer();
+        this.gpuRenderer = GPURenderer.getInstance();
     }
 
     public subtractCoins(amount: number): boolean {
@@ -126,7 +126,8 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         SoundManager.getInstance().stopLoopSpatial('shoot_ray');
         SoundManager.getInstance().stopLoopSpatial('hit_laser');
         SoundManager.getInstance().stopLoopSpatial('hit_ray');
-        this.gpuRenderer.dispose();
+        // GPURenderer is a persistent singleton, no need to dispose it here.
+        // We just deactivate active gameplay tracking.
         ParticleSystem.getInstance().setGPUSystem(null);
     }
 
