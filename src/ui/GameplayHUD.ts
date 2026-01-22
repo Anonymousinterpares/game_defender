@@ -20,14 +20,18 @@ export interface HUDParent {
     refreshHUD(): void;
 }
 
+import { SettingsOverlay } from './SettingsOverlay';
+
 export class GameplayHUD {
     private backButton: HTMLButtonElement | null = null;
     private muteButton: HTMLButtonElement | null = null;
+    private settingsButton: HTMLButtonElement | null = null; // New Button
     private volumeSlider: HTMLInputElement | null = null;
     private clockDisplay: HTMLElement | null = null;
     private dockButton: HTMLButtonElement | null = null;
     private dockContainer: HTMLElement | null = null;
     public isDockOpen: boolean = false;
+    private settingsOverlay: SettingsOverlay | null = null; // Overlay instance
 
     constructor(private parent: HUDParent) { }
 
@@ -46,6 +50,24 @@ export class GameplayHUD {
             this.parent.sceneManager.switchScene('menu');
         });
         uiLayer.appendChild(this.backButton);
+
+        // Check for Debug Overlay Config
+        const showOverlay = ConfigManager.getInstance().get<boolean>('Debug', 'show_overlay_settings');
+        if (showOverlay) {
+            this.settingsOverlay = new SettingsOverlay();
+
+            this.settingsButton = document.createElement('button');
+            this.settingsButton.textContent = 'TOGGLE GAME SETTINGS';
+            this.settingsButton.className = 'hud-btn-blue'; // Use the new blue class
+            this.settingsButton.style.position = 'absolute';
+            this.settingsButton.style.top = '50px'; // Below MENU button (10px + 40px approx)
+            this.settingsButton.style.right = '10px';
+            this.settingsButton.addEventListener('click', () => {
+                EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
+                this.settingsOverlay?.toggle();
+            });
+            uiLayer.appendChild(this.settingsButton);
+        }
 
         this.muteButton = document.createElement('button');
         this.updateMuteButtonText();
@@ -113,11 +135,13 @@ export class GameplayHUD {
 
     public cleanup(): void {
         if (this.backButton) { this.backButton.remove(); this.backButton = null; }
+        if (this.settingsButton) { this.settingsButton.remove(); this.settingsButton = null; }
         if (this.dockButton) { this.dockButton.remove(); this.dockButton = null; }
         if (this.muteButton) { this.muteButton.remove(); this.muteButton = null; }
         if (this.volumeSlider) { this.volumeSlider.remove(); this.volumeSlider = null; }
         if (this.clockDisplay) { this.clockDisplay.remove(); this.clockDisplay = null; }
         if (this.dockContainer) { this.dockContainer.remove(); this.dockContainer = null; }
+        if (this.settingsOverlay) { this.settingsOverlay.dispose(); this.settingsOverlay = null; }
     }
 
     public update(dt: number): void {

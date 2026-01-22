@@ -523,3 +523,89 @@ canvas {
         }
     }
 }
+
+/* Settings Overlay Side Panel */
+.settings-overlay-container {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 0; /* Animated */
+    height: 100vh;
+    background: linear-gradient(to left, rgba(26,21,18,0.98), rgba(43,34,30,0.95));
+    border-left: 3px double var(--steam-brass);
+    box-shadow: -10px 0 30px rgba(0,0,0,0.8);
+    overflow: hidden;
+    transition: width 0.3s ease-out;
+    pointer-events: auto;
+    z-index: 1500; /* Above HUD but below critical errors */
+
+    &.open {
+        width: 600px;
+    }
+
+    .overlay-content {
+        width: 600px; /* Fixed width content to avoid squishing */
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .overlay-header {
+      padding: 10px 15px;
+      background: rgba(0,0,0,0.3);
+      border-bottom: 2px solid var(--steam-brass);
+      display: flex;
+        justify-content: space-between;
+      h3 {
+          margin: 0;
+          color: var(--steam-gold);
+          font-family: 'Rye', serif;
+          font-size: 1.2em;
+      }
+    }
+
+    .overlay-body {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+    }
+
+    .overlay-sidebar {
+        width: 150px;
+        background: rgba(0,0,0,0.2);
+        border-right: 1px solid var(--steam-iron);
+        overflow-y: auto;
+        
+        .tab-btn {
+            padding: 10px;
+            font-size: 0.8em;
+        }
+    }
+
+    .overlay-controls {
+        flex: 1;
+        padding: 15px;
+        overflow-y: auto;
+        
+        .control-group {
+            margin-bottom: 12px;
+            
+            label { font-size: 0.8em; }
+            input[type=range] { height: 6px; }
+            .value-display { font-size: 0.9em; }
+        }
+    }
+}
+
+.hud-btn-blue {
+    @extend .hud-btn;
+    background: linear-gradient(to bottom, #1e3a52, #112233);
+    border-color: #4a90e2;
+    color: #8ecfff;
+    
+    &:hover {
+        background: #2a5070;
+        color: #fff;
+        box-shadow: 0 0 10px #4a90e2;
+    }
+}
