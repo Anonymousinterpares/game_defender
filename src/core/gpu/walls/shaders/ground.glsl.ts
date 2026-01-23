@@ -51,6 +51,56 @@ vec3 getHeatColor(float t) {
     else return vec3(1.0, 1.0, (t - 0.8) / 0.2);
 }
 
+// Unified Shadow Function (DDA Algorithm)
+float getShadow(vec2 startPos, vec2 dir, float maxDist, sampler2D structMap, vec2 worldPixels) {
+    vec2 rayDir = -normalize(dir.xy); // Ray goes TOWARDS the light
+    
+    // DDA Initialization
+    // We work in "texel space" (0..u_structureSize)
+    vec2 structSize = vec2(textureSize(structMap, 0));
+    vec2 pos = (startPos / worldPixels) * structSize;
+    vec2 step = sign(rayDir);
+    
+    // Distance to next texel boundary
+    vec2 deltaDist = abs(1.0 / rayDir);
+    vec2 sideDist;
+    
+    // Initial sideDist
+    if (rayDir.x < 0.0) sideDist.x = (pos.x - floor(pos.x)) * deltaDist.x;
+    else sideDist.x = (floor(pos.x) + 1.0 - pos.x) * deltaDist.x;
+    
+    if (rayDir.y < 0.0) sideDist.y = (pos.y - floor(pos.y)) * deltaDist.y;
+    else sideDist.y = (floor(pos.y) + 1.0 - pos.y) * deltaDist.y;
+    
+    float distTraveled = 0.0;
+    float shadow = 0.0;
+    
+    // Loop max 80 steps
+    for(int i = 0; i < 80; i++) {
+        if (distTraveled > (maxDist / worldPixels.x) * structSize.x) break;
+        
+        // Sample
+        vec2 sampleUV = (floor(pos) + 0.5) / structSize;
+        float val = texture(structMap, sampleUV).r;
+        if (val > 0.4) {
+            shadow = smoothstep(0.4, 0.6, val);
+            break;
+        }
+        
+        // Advance
+        if (sideDist.x < sideDist.y) {
+            distTraveled = sideDist.x;
+            sideDist.x += deltaDist.x;
+            pos.x += step.x;
+        } else {
+            distTraveled = sideDist.y;
+            sideDist.y += deltaDist.y;
+            pos.y += step.y;
+        }
+    }
+    return shadow;
+}
+
 void main() {
     vec2 screenUV = v_worldPos * 0.5 + 0.5;
     vec2 worldPos = u_camera + vec2(screenUV.x * u_resolution.x, (1.0 - screenUV.y) * u_resolution.y);
@@ -66,38 +116,16 @@ void main() {
     
     // 2. Multi-Light Calculation
     vec3 lightAcc = u_ambientColor;
-    
+
     // Sun
     if (u_sunIntensity > 0.01) {
-        float shadow = 0.0;
-        vec2 dir = -normalize(u_sunDir.xy); 
-        // Sub-pixel ray-marching for precision
-        for(float d = 4.0; d < 150.0; d += 6.0) {
-            vec2 checkPos = worldPos + dir * d;
-            vec2 checkUV = vec2(checkPos.x / u_worldPixels.x, checkPos.y / u_worldPixels.y);
-            // Sample the high-res structure map
-            float wall = texture(u_structureMap, checkUV).r;
-            if (wall > 0.0) {
-                shadow = 1.0;
-                break;
-            }
-        }
+        float shadow = getShadow(worldPos, u_sunDir.xy, 150.0, u_structureMap, u_worldPixels);
         lightAcc += u_sunColor * u_sunIntensity * 0.7 * (1.0 - shadow);
     }
     
     // Moon
     if (u_moonIntensity > 0.01) {
-        float shadow = 0.0;
-        vec2 dir = -normalize(u_moonDir.xy);
-        for(float d = 4.0; d < 120.0; d += 8.0) {
-            vec2 checkPos = worldPos + dir * d;
-            vec2 checkUV = vec2(checkPos.x / u_worldPixels.x, checkPos.y / u_worldPixels.y);
-            float wall = texture(u_structureMap, checkUV).r;
-            if (wall > 0.0) {
-                shadow = 1.0;
-                break;
-            }
-        }
+        float shadow = getShadow(worldPos, u_moonDir.xy, 120.0, u_structureMap, u_worldPixels);
         lightAcc += u_moonColor * u_moonIntensity * 0.5 * (1.0 - shadow);
     }
     

@@ -65,8 +65,8 @@ export class GPUWallRenderer {
 
         this.structureTexture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, this.structureTexture);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
@@ -130,7 +130,7 @@ export class GPUWallRenderer {
             console.log("[GPU Walls] Ground texture loaded.");
         };
         image.onerror = () => console.error("[GPU Walls] Failed to load ground texture.");
-        image.src = `${import.meta.env.BASE_URL}textures/Ground103_1K-JPG/Ground103_1K-JPG_Color.jpg`;
+        image.src = `${import.meta.env.BASE_URL}textures/GROUND/Ground103_1K-JPG/Ground103_1K-JPG_Color.jpg`;
     }
 
     public render(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, worldMap: WebGLTexture | null): void {

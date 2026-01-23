@@ -147,17 +147,15 @@ export class WorldRenderer {
     }
 
     private adjustColor(hex: string, multiplier: number): string {
-        // Handle shorthand hex or black
-        if (hex.length === 4) {
-            const r = parseInt(hex[1] + hex[1], 16);
-            const g = parseInt(hex[2] + hex[2], 16);
-            const b = parseInt(hex[3] + hex[3], 16);
-            return `rgb(${Math.min(255, Math.floor(r * multiplier))}, ${Math.min(255, Math.floor(g * multiplier))}, ${Math.min(255, Math.floor(b * multiplier))})`;
-        }
+        const { r, g, b } = this.hexToRgb(hex);
+        return `rgb(${Math.min(255, Math.floor(r * multiplier))}, ${Math.min(255, Math.floor(g * multiplier))}, ${Math.min(255, Math.floor(b * multiplier))})`;
+    }
+
+    private hexToRgb(hex: string): { r: number, g: number, b: number } {
         const r = parseInt(hex.slice(1, 3), 16);
         const g = parseInt(hex.slice(3, 5), 16);
         const b = parseInt(hex.slice(5, 7), 16);
-        return `rgb(${Math.min(255, Math.floor(r * multiplier))}, ${Math.min(255, Math.floor(g * multiplier))}, ${Math.min(255, Math.floor(b * multiplier))})`;
+        return { r, g, b };
     }
 
     private renderWallSidesOnly(ctx: CanvasRenderingContext2D, tx: number, ty: number, material: MaterialType, centerX: number, centerY: number): void {
@@ -461,19 +459,43 @@ export class WorldRenderer {
 
         const isDamaged = heatMap?.hasTileData(tx, ty) && hpData;
 
-        // --- TOP SHADING ---
-        const { sun, moon } = WorldClock.getInstance().getTimeState();
-        const activeLight = sun.active ? sun : (moon.active ? moon : null);
+        // --- TOP SHADING (Hybrid GPU/CPU Sync) ---
+        const clock = (window as any).WorldClockInstance || WorldClock.getInstance();
+        const timeState = clock.getTimeState();
+        const { sun, moon, baseAmbient } = timeState;
 
-        let shadedTopColor = topColorBase;
+        // Parse Base Ambient
+        const amb = baseAmbient.match(/\d+/g)?.map(Number) || [30, 30, 30];
+        const ambR = amb[0] / 255; const ambG = amb[1] / 255; const ambB = amb[2] / 255;
+
+        // Parse Wall Base Color
+        const wallBase = this.hexToRgb(topColorBase);
+
+        // Final Lighting Components
+        let rAcc = 0, gAcc = 0, bAcc = 0;
+
+        // 1. Ambient Baseline
+        rAcc = wallBase.r * ambR;
+        gAcc = wallBase.g * ambG;
+        bAcc = wallBase.b * ambB;
+
+        // 2. Direct Light (Sun/Moon)
+        const activeLight = sun.active ? sun : (moon.active ? moon : null);
         if (activeLight) {
-            // Roof faces UP (Z-axis). It gets more light when sun is at zenith (noon).
-            // We simulate this with intensity and a small boost.
-            const mult = 0.6 + activeLight.intensity * 0.7;
-            shadedTopColor = this.adjustColor(topColorBase, mult);
-        } else {
-            shadedTopColor = this.adjustColor(topColorBase, 0.5); // Ambient night
+            const lCol = activeLight.color.startsWith('#') ? this.hexToRgb(activeLight.color) : { r: 255, g: 255, b: 255 };
+            const lR = lCol.r / 255; const lG = lCol.g / 255; const lB = lCol.b / 255;
+
+            // Roof faces UP. Light impact depends on verticality.
+            // We simulate this with intensity and a zenith boost.
+            let intensity = activeLight.intensity * 0.7;
+            if (!sun.active) intensity *= 0.6; // Moonlight is softer
+
+            rAcc += wallBase.r * lR * intensity;
+            gAcc += wallBase.g * lG * intensity;
+            bAcc += wallBase.b * lB * intensity;
         }
+
+        const shadedTopColor = `rgb(${Math.min(255, Math.floor(rAcc))}, ${Math.min(255, Math.floor(gAcc))}, ${Math.min(255, Math.floor(bAcc))})`;
 
         if (!isDamaged) {
             ctx.fillStyle = shadedTopColor;
