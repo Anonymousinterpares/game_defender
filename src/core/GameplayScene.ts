@@ -346,9 +346,11 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         ctx.restore();
         PerfMonitor.getInstance().end('render_world');
 
-        PerfMonitor.getInstance().begin('render_lighting');
-        this.lightingRenderer.render(ctx);
-        PerfMonitor.getInstance().end('render_lighting');
+        if (!gpuActive) {
+            PerfMonitor.getInstance().begin('render_lighting');
+            this.lightingRenderer.render(ctx);
+            PerfMonitor.getInstance().end('render_lighting');
+        }
 
         PerfMonitor.getInstance().begin('render_gpu_fx');
         // Render FX objects (Particles + Fluids) to the GPU buffer

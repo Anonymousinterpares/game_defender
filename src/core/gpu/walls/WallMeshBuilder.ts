@@ -66,9 +66,9 @@ export class WallMeshBuilder {
         const h = this.wallHeight;
         let v = startIdx;
 
-        // 1. TOP FACE (Z = wallHeight)
-        this.addQuad(pos, uv, mBuf, norm, v, wx, wy, h, wx + ts, wy, h, wx, wy + ts, h, wx + ts, wy + ts, h, 0, 0, 1, 1, mat, 0, 0);
-        v += 6;
+        // 1. TOP FACE - REMOVED for GPU mode to allow CPU depth sorting
+        // this.addQuad(pos, uv, mBuf, norm, v, wx, wy, h, wx + ts, wy, h, wx, wy + ts, h, wx + ts, wy + ts, h, 0, 0, 1, 1, mat, 0, 0);
+        // v += 6;
 
         // 2. SIDES (Only if neighbor is NONE)
         // Top Side (Facing Up/North: normal [0, -1])
@@ -112,9 +112,9 @@ export class WallMeshBuilder {
                 const suvX1 = (sx + 1) / this.subDiv;
                 const suvY1 = (sy + 1) / this.subDiv;
 
-                // 1. Sub-Tile TOP FACE
-                this.addQuad(pos, uv, mBuf, norm, v, swx, swy, h, swx + subTs, swy, h, swx, swy + subTs, h, swx + subTs, swy + subTs, h, suvX0, suvY0, suvX1, suvY1, mat, 0, 0);
-                v += 6;
+                // 1. Sub-Tile TOP FACE - REMOVED for GPU mode
+                // this.addQuad(pos, uv, mBuf, norm, v, swx, swy, h, swx + subTs, swy, h, swx, swy + subTs, h, swx + subTs, swy + subTs, h, suvX0, suvY0, suvX1, suvY1, mat, 0, 0);
+                // v += 6;
 
                 // 2. Sub-Tile SIDES
                 // Top
@@ -183,5 +183,6 @@ export class WallMeshBuilder {
     public getUVs(): Float32Array { return this.uvs; }
     public getMaterials(): Float32Array { return this.materials; }
     public getNormals(): Float32Array { return this.normals; }
+    public reset(): void { this.vertexCount = 0; }
     public getVertexCount(): number { return this.vertexCount; }
 }

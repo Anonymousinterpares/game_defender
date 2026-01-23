@@ -309,7 +309,6 @@ export class WorldRenderer {
     }
 
     public renderWallTopOnly(ctx: CanvasRenderingContext2D, tx: number, ty: number, material: MaterialType, centerX: number, centerY: number, gpuActive: boolean = false): void {
-        if (gpuActive) return;
 
         this.wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
         const worldX = tx * this.tileSize;

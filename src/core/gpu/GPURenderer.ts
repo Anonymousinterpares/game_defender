@@ -8,6 +8,8 @@ import { ParticleSystem } from "../ParticleSystem";
 import { FluidShader } from "./FluidShader";
 import { GPUHeatSystem } from "./heatmap/GPUHeatSystem";
 import { GPUWallRenderer } from "./walls/GPUWallRenderer";
+import { GPULightBuffer } from "./GPULightBuffer";
+import { LightManager } from "../LightManager";
 
 export class GPURenderer {
     private static _instance: GPURenderer | null = null;
@@ -33,6 +35,7 @@ export class GPURenderer {
     private fluidSimulation: FluidSimulation;
     private heatSystem: GPUHeatSystem;
     private wallRenderer: GPUWallRenderer;
+    private lightBuffer: GPULightBuffer;
     private worldMapTexture: WebGLTexture | null = null;
     private lastMeshVersion: number = -1;
     private lastEntityPositions: Map<number, { x: number, y: number }> = new Map();
@@ -47,6 +50,7 @@ export class GPURenderer {
         this.fluidSimulation = new FluidSimulation();
         this.heatSystem = new GPUHeatSystem();
         this.wallRenderer = new GPUWallRenderer();
+        this.lightBuffer = new GPULightBuffer(32);
 
         const ps = ParticleSystem.getInstance();
         ps.onSmokeSpawned = this.handleSmokeSpawned;
@@ -79,6 +83,7 @@ export class GPURenderer {
         if (!this.fluidSimulation.isInitialized) this.fluidSimulation.init(gl, 256, 256);
         if (!this.heatSystem.isInitialized) this.heatSystem.init(gl, 512, 512);
         if (!this.wallRenderer['initialized']) this.wallRenderer.init(gl);
+        this.lightBuffer.init(gl);
     }
 
     private handleSmokeSpawned = (x: number, y: number, color: string) => {
@@ -130,6 +135,7 @@ export class GPURenderer {
         if (this.particleSystem) this.particleSystem.clear();
         if (this.fluidSimulation) this.fluidSimulation.clear();
         if (this.heatSystem) this.heatSystem.clear();
+        if (this.wallRenderer) this.wallRenderer.clear();
     }
 
     public update(dt: number, entities: { x: number, y: number }[] = []): void {
@@ -153,6 +159,10 @@ export class GPURenderer {
             this.fluidSimulation.update(dt, wpW, wpH);
         }
         if (this.heatSystem) this.heatSystem.update(dt);
+
+        // Update Light Buffer
+        const lights = LightManager.getInstance().getLights();
+        this.lightBuffer.update(lights);
     }
 
     private updateWorldTexture(): void {
@@ -179,7 +189,7 @@ export class GPURenderer {
         gl.viewport(0, 0, canvas.width, canvas.height);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         this.context.clear();
-        this.wallRenderer.render(this.world, cameraX, cameraY, width, height, this.heatSystem);
+        this.wallRenderer.render(this.world, cameraX, cameraY, width, height, this.heatSystem, this.lightBuffer, this.worldMapTexture);
     }
 
     public renderFX(cameraX: number, cameraY: number, width: number, height: number): void {

@@ -72,7 +72,8 @@ export class FluidSimulation {
     }
 
     public clear(): void {
-        const gl = this.gl!;
+        if (!this.gl) return;
+        const gl = this.gl;
         gl.viewport(0, 0, this.width, this.height);
 
         const fbos = [
@@ -259,8 +260,9 @@ export class FluidSimulation {
     }
 
     public splat(x: number, y: number, radius: number, r: number, g: number, b: number, worldW: number, worldH: number): void {
+        if (!this.gl) return;
         const debug = ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug');
-        const gl = this.gl!;
+        const gl = this.gl;
 
         const uvX = x / worldW;
         const uvY = 1.0 - (y / worldH);
@@ -306,7 +308,8 @@ export class FluidSimulation {
     }
 
     public splatVelocity(x: number, y: number, radius: number, vx: number, vy: number, worldW: number, worldH: number): void {
-        const gl = this.gl!;
+        if (!this.gl) return;
+        const gl = this.gl;
 
         const uvX = x / worldW;
         const uvY = 1.0 - (y / worldH);

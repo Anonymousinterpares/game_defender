@@ -258,7 +258,7 @@ export class LightingRenderer {
         lctx.save();
         lctx.globalCompositeOperation = 'screen';
         const silColor = isDaylight ? 'rgb(70, 65, 60)' : 'rgb(30, 35, 50)';
-        
+
         // REVEAL WALLS using the live silhouette buffer
         this.sourceCtx.clearRect(0, 0, w, h);
         this.sourceCtx.drawImage(this.silCanvas, 0, 0, w, h);
@@ -537,13 +537,13 @@ export class LightingRenderer {
             const [coordsB, typeB] = b.split('_');
             const [gxA, gyA] = coordsA.split(',').map(Number);
             const [gxB, gyB] = coordsB.split(',').map(Number);
-            
+
             // Priority 1: Distance to camera
             const camGX = Math.floor(this.parent.cameraX / this.chunkSize);
             const camGY = Math.floor(this.parent.cameraY / this.chunkSize);
             const distA = Math.abs(gxA - camGX) + Math.abs(gyA - camGY);
             const distB = Math.abs(gxB - camGX) + Math.abs(gyB - camGY);
-            
+
             if (distA !== distB) return distA - distB;
             return 0;
         });
@@ -624,10 +624,10 @@ export class LightingRenderer {
         sctx.clearRect(0, 0, this.chunkSize, this.chunkSize);
         const worldX = gx * this.chunkSize;
         const worldY = gy * this.chunkSize;
-        
+
         // Increase padding to account for max shadow length (250px) + wall height projection
-        const padding = 400; 
-        
+        const padding = 400;
+
         const tileSize = this.parent.world!.getTileSize();
         const startTx = Math.floor((worldX - padding) / tileSize);
         const endTx = Math.ceil((worldX + this.chunkSize + padding) / tileSize);
@@ -674,7 +674,7 @@ export class LightingRenderer {
                                 const idx = sy * subDiv + sx;
                                 if (hpData[idx] > 0) {
                                     const fsx0 = sx / subDiv; const fsx1 = (sx + 1) / subDiv;
-                                    
+
                                     // Project sub-tile top shadow point from its ground base
                                     const ps0 = { x: x + fsx0 * tileSize + dx, y: y + fsy0 * tileSize + dy };
                                     const ps1 = { x: x + fsx1 * tileSize + dx, y: y + fsy0 * tileSize + dy };
@@ -686,9 +686,9 @@ export class LightingRenderer {
 
                                     // Base footprint sub-quad
                                     sctx.beginPath();
-                                    sctx.moveTo(bx0 - worldX, by0 - worldY); 
+                                    sctx.moveTo(bx0 - worldX, by0 - worldY);
                                     sctx.lineTo(bx1 - worldX, by0 - worldY);
-                                    sctx.lineTo(bx1 - worldX, by1 - worldY); 
+                                    sctx.lineTo(bx1 - worldX, by1 - worldY);
                                     sctx.lineTo(bx0 - worldX, by1 - worldY);
                                     sctx.fill();
 

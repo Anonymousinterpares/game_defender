@@ -88,4 +88,8 @@ export class Shader {
         const loc = this.getUniformLocation(name);
         if (loc) this.gl.uniformMatrix4fv(loc, false, data);
     }
+
+    public getProgram(): WebGLProgram {
+        return this.program;
+    }
 }
