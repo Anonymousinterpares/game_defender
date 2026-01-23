@@ -182,6 +182,11 @@ export class GPUWallRenderer {
             this.shader.setUniform1f("u_perspectiveStrength", strength);
             this.shader.setUniform2f("u_worldPixels", world.getWidthPixels(), world.getHeightPixels());
 
+            const shadowRange = ConfigManager.getInstance().get<number>('Lighting', 'explosionShadowRangeTiles') || 40.0;
+            this.shader.setUniform1f("u_shadowRange", shadowRange);
+            this.shader.setUniform2f("u_structureSize", this.structureW, this.structureH);
+            this.shader.setUniform1f("u_tileSize", world.getTileSize());
+
             const { sun, moon } = timeState;
             this.shader.setUniform3f("u_sunDir", sun.direction.x, sun.direction.y, 1.0);
             this.shader.setUniform3f("u_sunColor", ...this.parseColor(sun.color));
@@ -200,6 +205,12 @@ export class GPUWallRenderer {
                 gl.activeTexture(gl.TEXTURE0);
                 gl.bindTexture(gl.TEXTURE_2D, heatTex);
                 this.shader.setUniform1i("u_heatTexture", 0);
+            }
+
+            if (this.structureTexture) {
+                gl.activeTexture(gl.TEXTURE1);
+                gl.bindTexture(gl.TEXTURE_2D, this.structureTexture);
+                this.shader.setUniform1i("u_structureMap", 1);
             }
 
             gl.drawArrays(gl.TRIANGLES, 0, this.meshBuilder.getVertexCount());
@@ -223,6 +234,9 @@ export class GPUWallRenderer {
         shader.setUniform2f("u_worldPixels", world.getWidthPixels(), world.getHeightPixels());
         shader.setUniform1f("u_tileSize", world.getTileSize());
         shader.setUniform1f("u_textureScale", 10.0); // Tile texture every 10 tiles
+
+        const shadowRange = ConfigManager.getInstance().get<number>('Lighting', 'explosionShadowRangeTiles') || 40.0;
+        shader.setUniform1f("u_shadowRange", shadowRange);
 
         const { sun, moon } = timeState;
         shader.setUniform1f("u_sunIntensity", sun.active ? sun.intensity : 0.0);

@@ -181,12 +181,13 @@ export const MasterConfig: GameConfigSchema = {
     transientLights: {
       value: {
         muzzle: { color: '#ffcc66', intensity: 1.2, radius: 180, ttl: 0.06 },
-        impact: { color: '#ffffff', intensity: 1.5, radius: 120, ttl: 0.1 },
+        impact: { color: '#ffffff', intensity: 1.5, radius: 120, ttl: 1.0 },
         explosion: { color: '#ff7700', intensity: 6.0, radius: 600, ttl: 0.6 }
       },
       type: 'object',
       description: 'Settings for short-lived light sources (Muzzle flash, Impacts, Explosions)'
-    }
+    },
+    explosionShadowRangeTiles: { value: 40, type: 'number', min: 10, max: 200, step: 5, description: 'Max raytracing distance for explosions (Tiles)' }
   },
   TimeSystem: {
     realSecondsPerHour: { value: 120, type: 'number', description: 'Duration of one game hour (seconds)' },

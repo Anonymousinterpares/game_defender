@@ -22,6 +22,10 @@ uniform vec3 u_moonColor;
 uniform float u_moonIntensity;
 
 uniform vec3 u_ambientColor; 
+uniform sampler2D u_structureMap;
+uniform vec2 u_structureSize;
+uniform float u_shadowRange;
+uniform float u_tileSize;
 
 in vec2 v_worldPos;
 in vec2 v_uv;
@@ -35,6 +39,45 @@ vec3 getHeatColor(float t) {
     if (t < 0.4) return vec3(0.39 + 0.61 * (t / 0.4), 0.0, 0.0);
     else if (t < 0.8) return vec3(1.0, (t - 0.4) / 0.4, 0.0);
     else return vec3(1.0, 1.0, (t - 0.8) / 0.2);
+}
+
+// Raymarching DDA shadow function
+float getShadow(vec2 startPos, vec2 dir, float maxDist, sampler2D structMap, vec2 worldPixels) {
+    vec2 rayDir = -normalize(dir.xy); 
+    vec2 structSize = vec2(textureSize(structMap, 0));
+    vec2 pos = (startPos / worldPixels) * structSize;
+    vec2 step = sign(rayDir);
+    vec2 deltaDist = abs(1.0 / rayDir);
+    vec2 sideDist;
+    
+    if (rayDir.x < 0.0) sideDist.x = (pos.x - floor(pos.x)) * deltaDist.x;
+    else sideDist.x = (floor(pos.x) + 1.0 - pos.x) * deltaDist.x;
+    
+    if (rayDir.y < 0.0) sideDist.y = (pos.y - floor(pos.y)) * deltaDist.y;
+    else sideDist.y = (floor(pos.y) + 1.0 - pos.y) * deltaDist.y;
+    
+    float distTraveled = 0.0;
+    float shadow = 0.0;
+    
+    for(int i = 0; i < 80; i++) {
+        if (distTraveled > (maxDist / worldPixels.x) * structSize.x) break;
+        vec2 sampleUV = (floor(pos) + 0.5) / structSize;
+        float val = texture(structMap, sampleUV).r;
+        if (val > 0.4) {
+            shadow = smoothstep(0.4, 0.6, val);
+            break;
+        }
+        if (sideDist.x < sideDist.y) {
+            distTraveled = sideDist.x;
+            sideDist.x += deltaDist.x;
+            pos.x += step.x;
+        } else {
+            distTraveled = sideDist.y;
+            sideDist.y += deltaDist.y;
+            pos.y += step.y;
+        }
+    }
+    return shadow;
 }
 
 void main() {
@@ -77,11 +120,18 @@ void main() {
         
         if (dist < lRad) {
             float falloff = 1.0 - smoothstep(0.0, lRad, dist);
-            // Simple N dot L for point lights: Assume normal facing away from point?
-            // For walls, we use the face normal.
             vec2 dirToLight = normalize(lPos - v_worldPos);
             float dotPL = max(0.1, dot(v_faceNormal, dirToLight));
-            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * dotPL * 1.5;
+            
+            float shadow = 0.0;
+            if (u_lights[i].posRad.w > 1.5) {
+                // Raymarch to check if this specific wall face is shadowed
+                // We use a slight offset from v_worldPos to avoid self-shadowing acne
+                vec2 rayOrigin = v_worldPos + v_faceNormal * 0.5;
+                shadow = getShadow(rayOrigin, -dirToLight, u_shadowRange * 32.0, u_structureMap, u_worldPixels);
+            }
+            
+            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * dotPL * 1.5 * (1.0 - shadow);
         }
     }
 

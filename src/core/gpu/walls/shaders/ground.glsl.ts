@@ -41,6 +41,7 @@ uniform float u_moonIntensity;
 uniform vec3 u_moonDir;
 
 uniform float u_textureScale;
+uniform float u_shadowRange; // Max distance in tiles
 
 in vec2 v_worldPos; 
 out vec4 outColor;
@@ -139,7 +140,16 @@ void main() {
         
         if (dist < lRad) {
             float falloff = 1.0 - smoothstep(0.0, lRad, dist);
-            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 1.5;
+            float shadow = 0.0;
+            
+            // Check if shadow logic is requested (posRad.w >= 1.5 means Active + Shadows)
+            if (u_lights[i].posRad.w > 1.5) {
+                vec2 dirToLight = normalize(lPos - worldPos);
+                // getShadow ray direction is TOWARDS the light
+                shadow = getShadow(worldPos, -dirToLight, u_shadowRange * u_tileSize, u_structureMap, u_worldPixels);
+            }
+            
+            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 1.5 * (1.0 - shadow);
         }
     }
     

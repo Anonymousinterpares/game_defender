@@ -30,7 +30,8 @@ export class GPULightBuffer {
             this.data[offset] = l.x;
             this.data[offset + 1] = l.y;
             this.data[offset + 2] = l.radius;
-            this.data[offset + 3] = l.active ? 1.0 : 0.0;
+            // 0: Inactive, 1: Active, 2: Active + Shadows
+            this.data[offset + 3] = l.active ? (l.castsShadows ? 2.0 : 1.0) : 0.0;
 
             // Parse color
             const color = this.parseColor(l.color);
