@@ -181,9 +181,12 @@ export class GPURenderer {
     public renderFX(cameraX: number, cameraY: number, width: number, height: number): void {
         if (!this.active) return;
         const gl = this.context.getGL();
-        // Do NOT clear here! We want to draw particles on top of what's already in the FBO if any, 
-        // but since we composite Environment first, the FBO might be cleared or we might use a separate pass.
-        // For simplicity, we just render FX now.
+
+        // IMPORTANT: Clear the buffer for the FX pass so it only contains transparent FX
+        // Otherwise the second compositeToContext will blit the environment again, covering entities.
+        gl.viewport(0, 0, width, height);
+        this.context.clear();
+
         if (this.fluidSimulation) this.renderFluid(cameraX, cameraY, width, height);
         if (this.particleSystem) {
             gl.enable(gl.BLEND);
@@ -216,7 +219,12 @@ export class GPURenderer {
 
     public compositeToContext(ctx: CanvasRenderingContext2D): void {
         if (!this.active) return;
+
+        ctx.save();
+        // Reset transform to identity to draw in Screen Space
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.drawImage(this.context.getCanvas(), 0, 0, ctx.canvas.width, ctx.canvas.height);
+        ctx.restore();
     }
 
     public isActive(): boolean { return this.active; }
