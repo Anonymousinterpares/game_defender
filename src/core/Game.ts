@@ -27,6 +27,13 @@ export class Game {
     // Create UI Layer
     const uiLayer = document.createElement('div');
     uiLayer.id = 'ui-layer';
+    uiLayer.style.position = 'absolute';
+    uiLayer.style.top = '0';
+    uiLayer.style.left = '0';
+    uiLayer.style.width = '100%';
+    uiLayer.style.height = '100%';
+    uiLayer.style.pointerEvents = 'none'; // Allow clicks to pass through, but buttons should re-enable it
+    uiLayer.style.zIndex = '1000'; // FORCE ON TOP
     container.appendChild(uiLayer);
 
     // Init Managers
@@ -47,7 +54,7 @@ export class Game {
     // For now, full screen canvas, but game logical view might be different.
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
-    
+
     // Update config if needed or notify scenes
     // ConfigManager.getInstance().set('World', 'screenWidth', this.canvas.width);
   }
@@ -59,9 +66,9 @@ export class Game {
     this.frameCount++;
     this.fpsUpdateTimer += deltaTime;
     if (this.fpsUpdateTimer >= 0.5) {
-        this.fps = Math.round(this.frameCount / this.fpsUpdateTimer);
-        this.frameCount = 0;
-        this.fpsUpdateTimer = 0;
+      this.fps = Math.round(this.frameCount / this.fpsUpdateTimer);
+      this.frameCount = 0;
+      this.fpsUpdateTimer = 0;
     }
 
     this.update(deltaTime);
@@ -84,21 +91,21 @@ export class Game {
 
     // Render FPS if enabled
     if (ConfigManager.getInstance().get<boolean>('Debug', 'FpsShow')) {
-        this.ctx.fillStyle = '#0f0';
-        this.ctx.font = 'bold 14px "Share Tech Mono", monospace';
-        this.ctx.textAlign = 'left';
-        this.ctx.fillText(`FPS: ${this.fps}`, 10, this.canvas.height - 10);
+      this.ctx.fillStyle = '#0f0';
+      this.ctx.font = 'bold 14px "Share Tech Mono", monospace';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(`FPS: ${this.fps}`, 10, this.canvas.height - 10);
 
-        // Latency Meter
-        const showLat = ConfigManager.getInstance().get<boolean>('Debug', 'showLatency');
-        const mm = (window as any).MultiplayerManagerInstance; // Using global instance which is already established
-        const isMultiplayer = mm && mm.getConnectedPeersCount() > 0;
+      // Latency Meter
+      const showLat = ConfigManager.getInstance().get<boolean>('Debug', 'showLatency');
+      const mm = (window as any).MultiplayerManagerInstance; // Using global instance which is already established
+      const isMultiplayer = mm && mm.getConnectedPeersCount() > 0;
 
-        if (showLat && isMultiplayer) {
-            const ping = mm.getPing();
-            this.ctx.fillStyle = ping < 100 ? '#0f0' : (ping < 250 ? '#ff0' : '#f00');
-            this.ctx.fillText(`LATENCY: ${ping}ms`, 10, this.canvas.height - 30);
-        }
+      if (showLat && isMultiplayer) {
+        const ping = mm.getPing();
+        this.ctx.fillStyle = ping < 100 ? '#0f0' : (ping < 250 ? '#ff0' : '#f00');
+        this.ctx.fillText(`LATENCY: ${ping}ms`, 10, this.canvas.height - 30);
+      }
     }
   }
 }

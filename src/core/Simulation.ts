@@ -55,6 +55,16 @@ export class Simulation implements WeaponParent, CombatParent {
     public remotePlayers: RemotePlayer[] = [];
     public projectiles: Projectile[] = [];
 
+    public cleanup(): void {
+        this.projectiles = [];
+        this.remotePlayers = [];
+        // Reset heat map state if needed, though world rebuilds usually handle it. 
+        // Explicit clear is safer.
+        if (this.heatMap) this.heatMap.clear();
+        this.entityManager.clear();
+        this.spatialGrid.clear();
+    }
+
     // Compatibility getters for systems not yet fully ECS-ified
     public get enemies(): any[] {
         const ids = this.entityManager.query(['tag']).filter(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'enemy');

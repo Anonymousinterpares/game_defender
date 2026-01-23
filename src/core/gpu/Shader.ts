@@ -78,4 +78,14 @@ export class Shader {
         const loc = this.getUniformLocation(name);
         if (loc) this.gl.uniform4f(loc, x, y, z, w);
     }
+
+    public setUniform3f(name: string, x: number, y: number, z: number): void {
+        const loc = this.getUniformLocation(name);
+        if (loc) this.gl.uniform3f(loc, x, y, z);
+    }
+
+    public setUniformMatrix4fv(name: string, data: Float32Array | number[]): void {
+        const loc = this.getUniformLocation(name);
+        if (loc) this.gl.uniformMatrix4fv(loc, false, data);
+    }
 }

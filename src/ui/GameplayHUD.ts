@@ -45,6 +45,7 @@ export class GameplayHUD {
         this.backButton.style.position = 'absolute';
         this.backButton.style.top = '10px';
         this.backButton.style.right = '10px';
+        this.backButton.style.pointerEvents = 'auto'; // FIX: Make interactive
         this.backButton.addEventListener('click', () => {
             EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
             this.parent.sceneManager.switchScene('menu');
@@ -62,6 +63,7 @@ export class GameplayHUD {
             this.settingsButton.style.position = 'absolute';
             this.settingsButton.style.top = '50px'; // Below MENU button (10px + 40px approx)
             this.settingsButton.style.right = '10px';
+            this.settingsButton.style.pointerEvents = 'auto'; // FIX: Make interactive
             this.settingsButton.addEventListener('click', () => {
                 EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
                 this.settingsOverlay?.toggle();
@@ -75,6 +77,7 @@ export class GameplayHUD {
         this.muteButton.style.position = 'absolute';
         this.muteButton.style.top = '10px';
         this.muteButton.style.right = '100px';
+        this.muteButton.style.pointerEvents = 'auto'; // FIX: Make interactive
         this.muteButton.addEventListener('click', () => {
             EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
             SoundManager.getInstance().toggleMute();
@@ -120,6 +123,7 @@ export class GameplayHUD {
         this.dockButton.style.position = 'absolute';
         this.dockButton.style.top = '10px';
         this.dockButton.style.right = '280px';
+        this.dockButton.style.pointerEvents = 'auto'; // FIX: Make interactive
         this.dockButton.addEventListener('click', () => {
             EventBus.getInstance().emit(GameEvent.UI_CLICK, {});
             this.toggleDock();

@@ -29,6 +29,10 @@ export class HeatMap {
         return this.state.activeTiles;
     }
 
+    public clear(): void {
+        this.state.clear();
+    }
+
     // --- Public API Coordination ---
 
     public setWorldRef(world: any): void {

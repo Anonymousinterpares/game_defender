@@ -58,6 +58,24 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     public get weaponReloading() { return this.simulation.weaponReloading; }
     public get weaponReloadTimer() { return this.simulation.weaponReloadTimer; }
 
+    public onExit(): void {
+        this.inputManager.reset();
+        this.simulation.cleanup();
+        this.hud.cleanup();
+        ParticleSystem.getInstance().clear();
+        this.gpuRenderer.clear();
+        SoundManager.getInstance().reset();
+
+        if (this.radar) { this.radar.destroy(); this.radar = null; }
+        this.lightingRenderer.clearCache();
+        FloorDecalManager.getInstance().clear();
+        SoundManager.getInstance().stopLoopSpatial('shoot_laser');
+        SoundManager.getInstance().stopLoopSpatial('shoot_ray');
+        SoundManager.getInstance().stopLoopSpatial('hit_laser');
+        SoundManager.getInstance().stopLoopSpatial('hit_ray');
+        ParticleSystem.getInstance().setGPUSystem(null);
+    }
+
     private isDevMode: boolean = false;
     private lightUpdateCounter: number = 0;
 
@@ -117,19 +135,6 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         sm.setWorld(this.simulation.world);
     }
 
-    onExit(): void {
-        if (this.radar) { this.radar.destroy(); this.radar = null; }
-        this.hud.cleanup();
-        this.lightingRenderer.clearCache();
-        FloorDecalManager.getInstance().clear();
-        SoundManager.getInstance().stopLoopSpatial('shoot_laser');
-        SoundManager.getInstance().stopLoopSpatial('shoot_ray');
-        SoundManager.getInstance().stopLoopSpatial('hit_laser');
-        SoundManager.getInstance().stopLoopSpatial('hit_ray');
-        // GPURenderer is a persistent singleton, no need to dispose it here.
-        // We just deactivate active gameplay tracking.
-        ParticleSystem.getInstance().setGPUSystem(null);
-    }
 
     update(dt: number): void {
         PerfMonitor.getInstance().begin('update_total');
@@ -264,14 +269,21 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         const centerX = this.cameraX + viewW / 2;
         const centerY = this.cameraY + viewH / 2;
 
-        // 1. Render Ground
+        // 1. GPU Environment (Ground + Walls) - Draws OPAQUE background first
         const gpuActive = this.gpuRenderer.isActive();
-        this.worldRenderer.render(ctx, this.cameraX, this.cameraY, gpuActive);
-        FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY, this.world.getWidthPixels(), this.world.getHeightPixels());
-        if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY, gpuActive);
+        if (gpuActive) {
+            this.gpuRenderer.renderEnvironment(this.cameraX, this.cameraY, viewW, viewH);
+            this.gpuRenderer.compositeToContext(ctx);
+        }
 
-        // 2. Render Wall Sides (Bottom to Top)
-        this.worldRenderer.renderSides(ctx, this.cameraX, this.cameraY, gpuActive);
+        // 2. CPU Fallback (if GPU inactive)
+        if (!gpuActive) {
+            this.worldRenderer.render(ctx, this.cameraX, this.cameraY, gpuActive);
+            FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY, this.world.getWidthPixels(), this.world.getHeightPixels());
+            if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY, gpuActive);
+            // Render Wall Sides (Bottom to Top)
+            this.worldRenderer.renderSides(ctx, this.cameraX, this.cameraY, gpuActive);
+        }
 
         // 3. COLLECT & SORT FOREGROUND (Entities + Wall Tops)
         const alpha = this.simulation.physicsSystem.alpha;
@@ -320,6 +332,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
 
         this.simulation.pluginManager.render(ctx);
 
+        // 5. POST-LIGHTING OVERLAYS
         PerfMonitor.getInstance().begin('render_particles');
         ParticleSystem.getInstance().render(ctx, this.cameraX, this.cameraY, this.simulation.physicsSystem.alpha);
         PerfMonitor.getInstance().end('render_particles');
@@ -337,10 +350,12 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         this.lightingRenderer.render(ctx);
         PerfMonitor.getInstance().end('render_lighting');
 
-        PerfMonitor.getInstance().begin('render_gpu');
-        this.gpuRenderer.render(this.cameraX, this.cameraY, viewW, viewH);
+        PerfMonitor.getInstance().begin('render_gpu_fx');
+        // Render FX objects (Particles + Fluids) to the GPU buffer
+        this.gpuRenderer.renderFX(this.cameraX, this.cameraY, viewW, viewH);
+        // Composite to main context (Additive/Alpha)
         this.gpuRenderer.compositeToContext(ctx);
-        PerfMonitor.getInstance().end('render_gpu');
+        PerfMonitor.getInstance().end('render_gpu_fx');
 
         if (this.player) {
             const mm = (window as any).MultiplayerManagerInstance || null;
