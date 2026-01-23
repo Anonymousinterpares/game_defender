@@ -265,12 +265,13 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         const centerY = this.cameraY + viewH / 2;
 
         // 1. Render Ground
-        this.worldRenderer.render(ctx, this.cameraX, this.cameraY);
+        const gpuActive = this.gpuRenderer.isActive();
+        this.worldRenderer.render(ctx, this.cameraX, this.cameraY, gpuActive);
         FloorDecalManager.getInstance().render(ctx, this.cameraX, this.cameraY, this.world.getWidthPixels(), this.world.getHeightPixels());
-        if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY);
+        if (this.heatMap) this.heatMap.render(ctx, this.cameraX, this.cameraY, gpuActive);
 
         // 2. Render Wall Sides (Bottom to Top)
-        this.worldRenderer.renderSides(ctx, this.cameraX, this.cameraY);
+        this.worldRenderer.renderSides(ctx, this.cameraX, this.cameraY, gpuActive);
 
         // 3. COLLECT & SORT FOREGROUND (Entities + Wall Tops)
         const alpha = this.simulation.physicsSystem.alpha;
@@ -293,7 +294,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
                 renderables.push({
                     y: (ty + 1) * tileSize, // Base Y of the wall
                     render: (c: CanvasRenderingContext2D) => {
-                        this.worldRenderer.renderWallTopOnly(c, tx, ty, material, centerX, centerY);
+                        this.worldRenderer.renderWallTopOnly(c, tx, ty, material, centerX, centerY, gpuActive);
                     }
                 });
             }

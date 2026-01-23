@@ -329,6 +329,12 @@ export class HeatMapSimulator {
         }
         if (fData[idx] === 0) {
             fData[idx] = 0.1;
+            // Notify via the HeatMap facade if linked
+            if ((this as any).facade && (this as any).facade.onIgnite) {
+                const worldX = tx * 32 + (idx % state.subDiv + 0.5) * (32 / state.subDiv);
+                const worldY = ty * 32 + (Math.floor(idx / state.subDiv) + 0.5) * (32 / state.subDiv);
+                (this as any).facade.onIgnite(worldX, worldY, 15); // Small radius for sub-tile
+            }
         }
         state.activeTiles.add(key);
     }

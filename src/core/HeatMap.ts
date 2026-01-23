@@ -15,9 +15,13 @@ export class HeatMap {
     private widthTiles: number = 0;
     private heightTiles: number = 0;
 
+    public onHeatAdded?: (x: number, y: number, amount: number, radius: number) => void;
+    public onIgnite?: (x: number, y: number, radius: number) => void;
+
     constructor(private tileSize: number) {
         this.state = new HeatMapState();
         this.simulator = new HeatMapSimulator();
+        (this.simulator as any).facade = this;
         this.renderer = new HeatMapRenderer();
     }
 
@@ -145,6 +149,7 @@ export class HeatMap {
                 this.applyHeatToTile(tx + rx, ty + ry, worldX, worldY, amount, radius);
             }
         }
+        if (this.onHeatAdded) this.onHeatAdded(worldX, worldY, amount, radius);
     }
 
     private applyHeatToTile(tx: number, ty: number, hitX: number, hitY: number, amount: number, radius: number): void {
@@ -193,6 +198,7 @@ export class HeatMap {
                 this.igniteInTile(tx + rx, ty + ry, worldX, worldY, radius);
             }
         }
+        if (this.onIgnite) this.onIgnite(worldX, worldY, radius);
     }
 
     private igniteInTile(tx: number, ty: number, hitX: number, hitY: number, radius: number): void {
@@ -300,8 +306,8 @@ export class HeatMap {
         this.simulator.update(this.state, dt, this.widthTiles, this.heightTiles, this.tileSize, this.worldRef);
     }
 
-    public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
-        this.renderer.render(this.state, ctx, cameraX, cameraY, this.tileSize);
+    public render(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, gpuActive: boolean = false): void {
+        this.renderer.render(this.state, ctx, cameraX, cameraY, this.tileSize, gpuActive);
     }
 
     public getHeatColor(intensity: number): string {

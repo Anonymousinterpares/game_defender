@@ -6,6 +6,8 @@ import { GPUParticleSystem } from "./particles/GPUParticleSystem";
 import { FluidSimulation } from "./FluidSimulation";
 import { ParticleSystem } from "../ParticleSystem";
 import { FluidShader } from "./FluidShader";
+import { GPUHeatSystem } from "./heatmap/GPUHeatSystem";
+import { GPUWallRenderer } from "./walls/GPUWallRenderer";
 
 export class GPURenderer {
     private static _instance: GPURenderer | null = null;
@@ -30,6 +32,8 @@ export class GPURenderer {
     private quadBuffer: WebGLBuffer | null = null;
     private particleSystem: GPUParticleSystem;
     private fluidSimulation: FluidSimulation;
+    private heatSystem: GPUHeatSystem;
+    private wallRenderer: GPUWallRenderer;
     private worldMapTexture: WebGLTexture | null = null;
     private lastMeshVersion: number = -1;
     private lastEntityPositions: Map<number, { x: number, y: number }> = new Map();
@@ -42,6 +46,8 @@ export class GPURenderer {
         this.context = new GPUContext();
         this.particleSystem = new GPUParticleSystem();
         this.fluidSimulation = new FluidSimulation();
+        this.heatSystem = new GPUHeatSystem();
+        this.wallRenderer = new GPUWallRenderer();
 
         // Register callback ONCE for the life of the app
         const ps = ParticleSystem.getInstance();
@@ -94,6 +100,16 @@ export class GPURenderer {
             console.log("[GPU] Initializing Fluid Solver (256x256)...");
             this.fluidSimulation.init(gl, 256, 256);
         }
+
+        if (this.heatSystem && !this.heatSystem.isInitialized) {
+            console.log("[GPU] Initializing Heat System (512x512)...");
+            this.heatSystem.init(gl, 512, 512);
+        }
+
+        if (this.wallRenderer && !this.wallRenderer['initialized']) {
+            console.log("[GPU] Initializing Wall Renderer...");
+            this.wallRenderer.init(gl);
+        }
     }
 
     private handleSmokeSpawned = (x: number, y: number, color: string) => {
@@ -144,6 +160,21 @@ export class GPURenderer {
 
     public setWorld(world: World): void {
         this.world = world;
+
+        // Link HeatMap events to GPU simulation
+        const hm = world.getHeatMap();
+        if (hm) {
+            hm.onHeatAdded = (x: number, y: number, amount: number, radius: number) => {
+                if (this.active && this.heatSystem) {
+                    this.heatSystem.splatHeat(x, y, radius, amount, world.getWidthPixels(), world.getHeightPixels());
+                }
+            };
+            hm.onIgnite = (x: number, y: number, radius: number) => {
+                if (this.active && this.heatSystem) {
+                    this.heatSystem.splatHeat(x, y, radius, 0.5, world.getWidthPixels(), world.getHeightPixels());
+                }
+            };
+        }
     }
 
     private updateWorldTexture(): void {
@@ -192,6 +223,7 @@ export class GPURenderer {
     public clear(): void {
         if (this.particleSystem) this.particleSystem.clear();
         if (this.fluidSimulation) this.fluidSimulation.clear();
+        if (this.heatSystem) this.heatSystem.clear();
     }
 
     public update(dt: number, entities: { x: number, y: number }[] = []): void {
@@ -226,6 +258,10 @@ export class GPURenderer {
             }
             this.fluidSimulation.update(dt, wpW, wpH);
         }
+
+        if (this.heatSystem) {
+            this.heatSystem.update(dt);
+        }
     }
 
     public render(cameraX: number, cameraY: number, width: number, height: number): void {
@@ -243,17 +279,10 @@ export class GPURenderer {
         gl.bindVertexArray(null);
         this.context.clear();
 
-        // 1. Render World
-        const shader = this.worldShader;
-        shader.use();
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
-        const posLoc = shader.getAttribLocation("a_position");
-        gl.enableVertexAttribArray(posLoc);
-        gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-        shader.setUniform2f("u_resolution", gl.canvas.width, gl.canvas.height);
-        shader.setUniform2f("u_camera", cameraX, cameraY);
-        shader.setUniform1f("u_tileSize", this.world?.getTileSize() || 32);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        // 1. Render World (Ground + Walls)
+        if (this.world) {
+            this.wallRenderer.render(this.world, cameraX, cameraY, width, height, this.heatSystem);
+        }
 
         // 2. Render Fluid Field
         if (this.fluidSimulation) {
@@ -313,6 +342,41 @@ export class GPURenderer {
         if (!this.active) return;
         const gpuCanvas = this.context.getCanvas();
         ctx.drawImage(gpuCanvas, 0, 0, ctx.canvas.width, ctx.canvas.height);
+    }
+
+    public renderHeat(cameraX: number, cameraY: number, screenW: number, screenH: number): void {
+        if (!this.active || !this.heatSystem || !this.world) return;
+
+        const gl = this.context.getGL();
+        const tex = this.heatSystem.getHeatTexture();
+        if (!tex) return;
+
+        const shaderManager = this.heatSystem.getShaderManager();
+        if (!shaderManager) return;
+
+        const shader = shaderManager.renderShader;
+        shader.use();
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
+        const posLoc = shader.getAttribLocation("a_position");
+        gl.enableVertexAttribArray(posLoc);
+        gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        shader.setUniform1i("u_heatTex", 0);
+
+        shader.setUniform2f("u_camera", cameraX, cameraY);
+        shader.setUniform2f("u_resolution", screenW, screenH);
+        shader.setUniform2f("u_worldPixels", this.world.getWidthPixels(), this.world.getHeightPixels());
+
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.disable(gl.BLEND);
+
+        gl.bindVertexArray(null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
     public isActive(): boolean {

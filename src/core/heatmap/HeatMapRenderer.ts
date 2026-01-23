@@ -53,7 +53,10 @@ export class HeatMapRenderer {
         }
     }
 
-    public render(state: HeatMapState, ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, tileSize: number): void {
+    public render(state: HeatMapState, ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, tileSize: number, gpuActive: boolean = false): void {
+        // Skip CPU rendering if GPU mode is handling heat visuals
+        if (gpuActive) return;
+
         const viewW = ctx.canvas.width;
         const viewH = ctx.canvas.height;
         const time = performance.now() * 0.001;
