@@ -1,5 +1,6 @@
 import { World } from "../../World";
 import { MaterialType } from "../../HeatMap";
+import { ConfigManager } from "../../../config/MasterConfig";
 
 export class WallMeshBuilder {
     private positions: Float32Array = new Float32Array(0);
@@ -9,11 +10,18 @@ export class WallMeshBuilder {
     private vertexCount: number = 0;
 
     private readonly subDiv = 10;
-    private wallHeight: number = -32; // Default, will be updated from config if possible
+    private wallHeight: number = -32;
 
-    constructor() { }
+    constructor() {
+        this.updateConfig();
+    }
+
+    public updateConfig(): void {
+        this.wallHeight = -ConfigManager.getInstance().get<number>('World', 'wallHeight');
+    }
 
     public build(world: World): void {
+        this.updateConfig();
         const width = world.getWidth();
         const height = world.getHeight();
         const ts = world.getTileSize();

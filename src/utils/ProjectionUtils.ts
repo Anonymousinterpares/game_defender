@@ -1,9 +1,13 @@
+import { ConfigManager } from '../config/MasterConfig';
+
 export class ProjectionUtils {
     /**
      * Strength of the parallax effect. 
      * Higher values mean more leaning.
      */
-    private static readonly PERSPECTIVE_STRENGTH = 0.0015;
+    public static get PERSPECTIVE_STRENGTH(): number {
+        return ConfigManager.getInstance().get<number>('Visuals', 'perspectiveStrength') ?? 0.0015;
+    }
 
     /**
      * Projects a 3D world point into 2D screen space with perspective lean.

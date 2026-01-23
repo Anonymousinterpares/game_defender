@@ -127,7 +127,8 @@ export const MasterConfig: GameConfigSchema = {
     fogOfWar: { value: false, type: 'boolean', description: 'Enable Fog of War' },
     segmentVisibilityRadius: { value: 5.0, type: 'number', min: 1, max: 20, step: 0.5, description: 'Visibility around segments' },
     coneAngle: { value: 60, type: 'number', min: 10, max: 180, step: 5, description: 'Vision Cone Angle (Degrees)' },
-    coneDistance: { value: 5.0, type: 'number', min: 5, max: 100, step: 1, description: 'Vision Cone Distance' }
+    coneDistance: { value: 5.0, type: 'number', min: 5, max: 100, step: 1, description: 'Vision Cone Distance' },
+    perspectiveStrength: { value: 0.0015, type: 'number', min: 0.0, max: 0.01, step: 0.0001, description: 'Perspective Leaning Strength' }
   },
   Audio: {
     masterVolume: { value: 0.2, type: 'number', min: 0, max: 1, step: 0.05, description: 'Master Volume' },

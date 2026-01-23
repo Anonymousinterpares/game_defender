@@ -50,6 +50,10 @@ export class GPUWallRenderer {
         this.initialized = true;
     }
 
+    public updateConfig(): void {
+        this.meshBuilder.updateConfig();
+    }
+
     private loadGroundTexture(): void {
         if (!this.gl) return;
         const gl = this.gl;
@@ -107,7 +111,9 @@ export class GPUWallRenderer {
 
             this.shader.setUniformMatrix4fv("u_viewProj", m);
             this.shader.setUniform2f("u_cameraCenter", cameraX + screenW / 2, cameraY + screenH / 2);
-            this.shader.setUniform1f("u_perspectiveStrength", 0.0015);
+
+            const strength = ConfigManager.getInstance().get<number>('Visuals', 'perspectiveStrength') || 0.0015;
+            this.shader.setUniform1f("u_perspectiveStrength", strength);
             this.shader.setUniform2f("u_worldPixels", world.getWidthPixels(), world.getHeightPixels());
 
             const light = timeState.isDaylight ? timeState.sun : timeState.moon;

@@ -117,9 +117,12 @@ export class GPURenderer {
     public updateConfig(): void {
         const wasActive = this.active;
         this.active = ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled') || false;
-        if (this.active && !wasActive) {
-            this.context.init();
-            this.initResources();
+        if (this.active) {
+            this.wallRenderer.updateConfig();
+            if (!wasActive) {
+                this.context.init();
+                this.initResources();
+            }
         }
     }
 
@@ -172,7 +175,8 @@ export class GPURenderer {
         if (!this.active || !this.world) return;
         this.context.resize(width, height);
         const gl = this.context.getGL();
-        gl.viewport(0, 0, width, height);
+        const canvas = this.context.getCanvas();
+        gl.viewport(0, 0, canvas.width, canvas.height);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         this.context.clear();
         this.wallRenderer.render(this.world, cameraX, cameraY, width, height, this.heatSystem);
@@ -181,10 +185,11 @@ export class GPURenderer {
     public renderFX(cameraX: number, cameraY: number, width: number, height: number): void {
         if (!this.active) return;
         const gl = this.context.getGL();
+        const canvas = this.context.getCanvas();
 
         // IMPORTANT: Clear the buffer for the FX pass so it only contains transparent FX
         // Otherwise the second compositeToContext will blit the environment again, covering entities.
-        gl.viewport(0, 0, width, height);
+        gl.viewport(0, 0, canvas.width, canvas.height);
         this.context.clear();
 
         if (this.fluidSimulation) this.renderFluid(cameraX, cameraY, width, height);
