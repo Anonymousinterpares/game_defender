@@ -43,6 +43,7 @@ vec3 getHeatColor(float t) {
 
 // Raymarching DDA shadow function
 float getShadow(vec2 startPos, vec2 dir, float maxDist, sampler2D structMap, vec2 worldPixels) {
+    if (length(dir) < 0.001) return 0.0;
     vec2 rayDir = -normalize(dir.xy); 
     vec2 structSize = vec2(textureSize(structMap, 0));
     vec2 pos = (startPos / worldPixels) * structSize;
@@ -94,20 +95,20 @@ void main() {
     else if (v_mat == 5.0) baseColor = vec3(0.1, 0.1, 0.1); 
 
     // 2. Multi-Light Calculation
-    vec3 lightAcc = u_ambientColor;
+    vec3 lightAcc = u_ambientColor * 1.5;
     
     // Directional Lights (Sun + Moon)
     // Top Face Logic
     if (v_z < -0.1) {
-        lightAcc += u_sunColor * u_sunIntensity * 0.8;
-        lightAcc += u_moonColor * u_moonIntensity * 0.8;
+        lightAcc += u_sunColor * u_sunIntensity * 1.0;
+        lightAcc += u_moonColor * u_moonIntensity * 1.2;
     } else {
         // Side Face Logic
         float dotSun = max(0.0, -dot(v_faceNormal, u_sunDir.xy));
-        lightAcc += u_sunColor * u_sunIntensity * dotSun * 0.9;
+        lightAcc += u_sunColor * u_sunIntensity * dotSun * 1.2;
         
         float dotMoon = max(0.0, -dot(v_faceNormal, u_moonDir.xy));
-        lightAcc += u_moonColor * u_moonIntensity * dotMoon * 0.9;
+        lightAcc += u_moonColor * u_moonIntensity * dotMoon * 1.5;
     }
     
     // Point Lights
@@ -119,19 +120,23 @@ void main() {
         float dist = distance(v_worldPos, lPos);
         
         if (dist < lRad) {
-            float falloff = 1.0 - smoothstep(0.0, lRad, dist);
+            // Physical Falloff
+            float d = dist / lRad;
+            float denom = 1.0 + (dist * dist) * 0.0001;
+            float window = (1.0 - d * d);
+            float falloff = (1.0 / denom) * window * window;
+
             vec2 dirToLight = normalize(lPos - v_worldPos);
             float dotPL = max(0.1, dot(v_faceNormal, dirToLight));
             
             float shadow = 0.0;
             if (u_lights[i].posRad.w > 1.5) {
                 // Raymarch to check if this specific wall face is shadowed
-                // We use a slight offset from v_worldPos to avoid self-shadowing acne
                 vec2 rayOrigin = v_worldPos + v_faceNormal * 0.5;
                 shadow = getShadow(rayOrigin, -dirToLight, u_shadowRange * 32.0, u_structureMap, u_worldPixels);
             }
             
-            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * dotPL * 1.5 * (1.0 - shadow);
+            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * dotPL * 5.0 * (1.0 - shadow);
         }
     }
 

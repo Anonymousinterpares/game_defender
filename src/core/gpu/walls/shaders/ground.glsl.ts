@@ -54,6 +54,7 @@ vec3 getHeatColor(float t) {
 
 // Unified Shadow Function (DDA Algorithm)
 float getShadow(vec2 startPos, vec2 dir, float maxDist, sampler2D structMap, vec2 worldPixels) {
+    if (length(dir) < 0.001) return 0.0; // Vertical light casts no 2D shadow
     vec2 rayDir = -normalize(dir.xy); // Ray goes TOWARDS the light
     
     // DDA Initialization
@@ -116,7 +117,7 @@ void main() {
     vec3 texColor = texture(u_groundTexture, textureUV).rgb;
     
     // 2. Multi-Light Calculation
-    vec3 lightAcc = u_ambientColor;
+    vec3 lightAcc = u_ambientColor * 1.5;
 
     // Sun
     if (u_sunIntensity > 0.01) {
@@ -127,7 +128,7 @@ void main() {
     // Moon
     if (u_moonIntensity > 0.01) {
         float shadow = getShadow(worldPos, u_moonDir.xy, 120.0, u_structureMap, u_worldPixels);
-        lightAcc += u_moonColor * u_moonIntensity * 0.5 * (1.0 - shadow);
+        lightAcc += u_moonColor * u_moonIntensity * 1.2 * (1.0 - shadow);
     }
     
     // Point Lights from UBO
@@ -139,7 +140,15 @@ void main() {
         float dist = distance(worldPos, lPos);
         
         if (dist < lRad) {
-            float falloff = 1.0 - smoothstep(0.0, lRad, dist);
+            // Physical Falloff: Inverse Square Law with range windowing
+            // I = Intensity / (1 + dist^2) * Window
+            float d = dist / lRad; // Normalized distance 0..1
+            // UE4 style falloff: (saturate(1 - d^4))^2 / (d^2 + 1)
+            // Simplified for 2D aesthetic: 
+            float denom = 1.0 + (dist * dist) * 0.0001; // Scale factor to prevent too sharp drop at center
+            float window = (1.0 - d * d); // Quadratic window to 0
+            float falloff = (1.0 / denom) * window * window; 
+            
             float shadow = 0.0;
             
             // Check if shadow logic is requested (posRad.w >= 1.5 means Active + Shadows)
@@ -149,7 +158,7 @@ void main() {
                 shadow = getShadow(worldPos, -dirToLight, u_shadowRange * u_tileSize, u_structureMap, u_worldPixels);
             }
             
-            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 1.5 * (1.0 - shadow);
+            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 5.0 * (1.0 - shadow); // Increased multiplier for punchy center
         }
     }
     

@@ -274,6 +274,10 @@ export class GPUWallRenderer {
             gl.bindTexture(gl.TEXTURE_2D, this.structureTexture);
             shader.setUniform1i("u_structureMap", 3);
             shader.setUniform2f("u_structureSize", this.structureW, this.structureH);
+        } else {
+            // Unbind to prevent stale texture reading
+            gl.activeTexture(gl.TEXTURE3);
+            gl.bindTexture(gl.TEXTURE_2D, null);
         }
 
         gl.drawArrays(gl.TRIANGLES, 0, 6);

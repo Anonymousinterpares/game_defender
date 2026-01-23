@@ -182,7 +182,7 @@ export const MasterConfig: GameConfigSchema = {
       value: {
         muzzle: { color: '#ffcc66', intensity: 1.2, radius: 180, ttl: 0.06 },
         impact: { color: '#ffffff', intensity: 1.5, radius: 120, ttl: 1.0 },
-        explosion: { color: '#ff7700', intensity: 6.0, radius: 600, ttl: 0.6 }
+        explosion: { color: '#ff7700', intensity: 6.0, radius: 1300, ttl: 0.6 }
       },
       type: 'object',
       description: 'Settings for short-lived light sources (Muzzle flash, Impacts, Explosions)'
