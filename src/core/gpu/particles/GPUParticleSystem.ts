@@ -240,6 +240,7 @@ export class GPUParticleSystem {
         this.renderShader!.use();
         this.renderShader!.setUniform2f("u_camera", camX, camY);
         this.renderShader!.setUniform2f("u_resolution", screenW, screenH);
+        this.renderShader!.setUniform2f("u_worldSize", this.worldW * this.tileSize, this.worldH * this.tileSize);
         this.renderShader!.setUniform1f("u_time", performance.now() * 0.001);
 
         gl.bindVertexArray(renderVAO);

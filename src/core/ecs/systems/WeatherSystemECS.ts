@@ -80,7 +80,11 @@ export class WeatherSystemECS implements System {
 
     public update(dt: number, entityManager: EntityManager): void {
         const weather = WeatherManager.getInstance().getWeatherState();
-        const ppm = ConfigManager.getInstance().getPixelsPerMeter();
+        const cm = ConfigManager.getInstance();
+        const ppm = cm.getPixelsPerMeter();
+        const tileSize = cm.get<number>('World', 'tileSize');
+        const worldW = cm.get<number>('World', 'width') * tileSize;
+        const worldH = cm.get<number>('World', 'height') * tileSize;
 
         // Update Repulsion Zones
         this.repulsionZones = this.repulsionZones.filter(zone => {
@@ -101,6 +105,8 @@ export class WeatherSystemECS implements System {
         const minY = this.cameraY - margin;
         const maxY = this.cameraY + this.viewHeight + margin;
 
+        const metersPerTile = cm.get<number>('World', 'metersPerTile');
+
         this.particles.forEach(p => {
             if (isRain) {
                 p.vz = -10 * ppm; // ~10 m/s fall
@@ -113,7 +119,6 @@ export class WeatherSystemECS implements System {
                 p.vy = (p.vy * 0.95) + windY * 0.05;
             }
 
-            const metersPerTile = ConfigManager.getInstance().get<number>('World', 'metersPerTile');
             // Fix: Scale speed by metersPerTile so rain looks fast even when zoomed out
             const fallSpeed = isRain ? 10 * ppm * metersPerTile : 1.5 * ppm * metersPerTile;
 
@@ -149,8 +154,8 @@ export class WeatherSystemECS implements System {
 
                 // After 0.4 seconds of being repulsed, "land" the particle
                 if (p.repulsionLife >= 0.4) {
-                    // Spawn splash for rain at current position
-                    if (isRain) {
+                    // Spawn splash for rain at current position (if inside world)
+                    if (isRain && p.x >= 0 && p.x <= worldW && p.y >= 0 && p.y <= worldH) {
                         this.splashQueue.push({
                             x: p.x,
                             y: p.y,
@@ -161,8 +166,9 @@ export class WeatherSystemECS implements System {
                     // Reset particle
                     p.z = 400 + Math.random() * 200;
                     p.life = Math.random();
-                    p.x = minX + Math.random() * (maxX - minX);
-                    p.y = minY + Math.random() * (maxY - minY);
+                    // Respawn within camera viewport but CLAMPED to world bounds
+                    p.x = Math.max(0, Math.min(worldW, minX + Math.random() * (maxX - minX)));
+                    p.y = Math.max(0, Math.min(worldH, minY + Math.random() * (maxY - minY)));
                     p.wasRepulsed = false;
                     p.repulsionLife = 0;
                     p.vx = 0;
@@ -182,23 +188,29 @@ export class WeatherSystemECS implements System {
             p.y += (fallSpeed + verticalShift) * dt;
             p.z += p.vz * dt;
 
-            // Reset Z
-            if (p.z <= 0) {
+            // Reset Z or World Bounds Escape
+            const isOutOfBounds = p.x < -margin || p.x > worldW + margin || p.y < -margin || p.y > worldH + margin;
+
+            if (p.z <= 0 || isOutOfBounds) {
                 p.z = 400 + Math.random() * 200;
                 p.life = Math.random();
-                // Randomize position slightly upon respawn to avoid patterns
-                p.x = minX + Math.random() * (maxX - minX);
-                p.y = minY + Math.random() * (maxY - minY);
+                // Respawn within camera viewport but CLAMPED to world bounds
+                p.x = Math.max(0, Math.min(worldW, minX + Math.random() * (maxX - minX)));
+                p.y = Math.max(0, Math.min(worldH, minY + Math.random() * (maxY - minY)));
                 p.wasRepulsed = false;
                 p.repulsionLife = 0;
             }
 
-            // World Wrapping (Toroidal around camera)
+            // World Wrapping (Toroidal around camera) but always respect world limits
             if (p.x < minX) p.x += (maxX - minX);
             else if (p.x > maxX) p.x -= (maxX - minX);
 
             if (p.y < minY) p.y += (maxY - minY);
             else if (p.y > maxY) p.y -= (maxY - minY);
+
+            // Final safety clamp to world borders
+            p.x = Math.max(-10, Math.min(worldW + 10, p.x));
+            p.y = Math.max(-10, Math.min(worldH + 10, p.y));
         });
     }
 

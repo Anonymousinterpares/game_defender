@@ -15,6 +15,7 @@ export class WorldShader extends Shader {
             uniform vec2 u_resolution;
             uniform vec2 u_camera;
             uniform float u_tileSize;
+            uniform vec2 u_mapSize;
             out vec4 outColor;
 
             void main() {
@@ -23,6 +24,13 @@ export class WorldShader extends Shader {
                 // Our camera space is top-down (0,0 is top-left)
                 vec2 screenPos = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
                 vec2 worldPos = screenPos + u_camera;
+                
+                // Boundary Check: Discard fragments outside the world
+                // Note: We use u_mapSize * u_tileSize since u_worldPixels isn't a uniform here yet
+                vec2 worldLimit = u_mapSize * u_tileSize;
+                if (worldPos.x < 0.0 || worldPos.x > worldLimit.x || worldPos.y < 0.0 || worldPos.y > worldLimit.y) {
+                    discard;
+                }
                 
                 // Simple grid pattern based on world position
                 vec2 grid = mod(worldPos, u_tileSize);

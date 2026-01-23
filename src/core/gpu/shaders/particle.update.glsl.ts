@@ -166,6 +166,12 @@ void main() {
         posVel.y += posVel.w * u_dt;
     }
 
+    // World Boundary Check (Kill particles that escape the map)
+    if (posVel.x < 0.0 || posVel.x > u_worldSize.x || posVel.y < 0.0 || posVel.y > u_worldSize.y) {
+        life = 0.0;
+        flags = 0.0;
+    }
+
     // Decay Life
     life -= u_dt;
     if (life <= 0.0) {

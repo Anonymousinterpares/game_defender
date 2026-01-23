@@ -408,26 +408,38 @@ export class WorldRenderer {
             b = Math.floor(b + (230 - b) * currentSnow);
         }
 
-        ctx.fillStyle = `rgb(${Math.floor(r)},${Math.floor(g)},${Math.floor(b)})`;
-        ctx.fillRect(cameraX, cameraY, viewWidth, viewHeight);
+        const worldW = this.world.getWidthPixels();
+        const worldH = this.world.getHeightPixels();
 
-        // Grid (Local view)
+        ctx.fillStyle = `rgb(${Math.floor(r)},${Math.floor(g)},${Math.floor(b)})`;
+
+        // Fill ground color only within world bounds
+        const drawX = Math.max(cameraX, 0);
+        const drawY = Math.max(cameraY, 0);
+        const drawW = Math.min(cameraX + viewWidth, worldW) - drawX;
+        const drawH = Math.min(cameraY + viewHeight, worldH) - drawY;
+
+        if (drawW > 0 && drawH > 0) {
+            ctx.fillRect(drawX, drawY, drawW, drawH);
+        }
+
+        // Grid (Local view) - Also clamp to world bounds
         ctx.beginPath();
         ctx.strokeStyle = currentSnow > 0.5 ? 'rgba(255,255,255,0.1)' : '#222222';
         ctx.lineWidth = 1;
 
-        const startX = Math.floor(cameraX / this.tileSize) * this.tileSize;
-        const endX = cameraX + viewWidth;
-        const startY = Math.floor(cameraY / this.tileSize) * this.tileSize;
-        const endY = cameraY + viewHeight;
+        const startX = Math.max(Math.floor(cameraX / this.tileSize) * this.tileSize, 0);
+        const endX = Math.min(cameraX + viewWidth, worldW);
+        const startY = Math.max(Math.floor(cameraY / this.tileSize) * this.tileSize, 0);
+        const endY = Math.min(cameraY + viewHeight, worldH);
 
         for (let x = startX; x <= endX; x += this.tileSize) {
-            ctx.moveTo(x, cameraY);
-            ctx.lineTo(x, endY);
+            ctx.moveTo(x, drawY);
+            ctx.lineTo(x, drawY + drawH);
         }
         for (let y = startY; y <= endY; y += this.tileSize) {
-            ctx.moveTo(cameraX, y);
-            ctx.lineTo(endX, y);
+            ctx.moveTo(drawX, y);
+            ctx.lineTo(drawX + drawW, y);
         }
         ctx.stroke();
 

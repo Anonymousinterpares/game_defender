@@ -30,6 +30,11 @@ vec3 getHeatColor(float t) {
 }
 
 void main() {
+    // 0. Boundary Check
+    if (v_worldPos.x < 0.0 || v_worldPos.x > u_worldPixels.x || v_worldPos.y < 0.0 || v_worldPos.y > u_worldPixels.y) {
+        discard;
+    }
+
     // 1. Material Base Color
     vec3 baseColor = vec3(0.5);
     if (v_mat == 1.0) baseColor = vec3(0.4, 0.2, 0.1); // Wood

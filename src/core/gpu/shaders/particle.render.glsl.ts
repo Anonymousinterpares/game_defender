@@ -5,6 +5,7 @@ layout(location = 2) in vec2 a_quadPos;     // Vertex Data (Quad corners -1..1)
 
 uniform vec2 u_camera;
 uniform vec2 u_resolution;
+uniform vec2 u_worldSize;
 
 out vec4 v_color;
 out float v_lifeRatio;
@@ -60,6 +61,13 @@ void main() {
     v_color = baseColor;
 
     vec2 worldPos = a_posVel.xy + a_quadPos * size;
+    
+    // Boundary Check: Clip particles outside world
+    if (worldPos.x < 0.0 || worldPos.x > u_worldSize.x || worldPos.y < 0.0 || worldPos.y > u_worldSize.y) {
+        gl_Position = vec4(-2.0, -2.0, 0.0, 1.0);
+        return;
+    }
+
     vec2 screenPos = worldPos - u_camera;
     
     // Convert to Clip Space (-1 to 1)

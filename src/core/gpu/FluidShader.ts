@@ -35,6 +35,11 @@ const FLUID_RENDER_FRAG = `#version 300 es
         // worldPos.y = camera.y + (1.0 - v_uv.y) * resolution.y (since screen Y is 0 at top in Canvas2D)
         vec2 worldPos = u_camera + vec2(v_uv.x * u_resolution.x, (1.0 - v_uv.y) * u_resolution.y);
         
+        // Boundary Check: Discard fragments outside the world
+        if (worldPos.x < 0.0 || worldPos.x > u_worldPixels.x || worldPos.y < 0.0 || worldPos.y > u_worldPixels.y) {
+            discard;
+        }
+        
         // Map to Grid UV (0..1 across entire world)
         // Grid UV.y = 1.0 - (worldY / worldH) to match WebGL FBO space
         vec2 gridUV = vec2(worldPos.x / u_worldPixels.x, 1.0 - (worldPos.y / u_worldPixels.y));

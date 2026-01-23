@@ -44,6 +44,11 @@ void main() {
     vec2 screenUV = v_worldPos * 0.5 + 0.5;
     vec2 worldPos = u_camera + vec2(screenUV.x * u_resolution.x, (1.0 - screenUV.y) * u_resolution.y);
     
+    // Boundary Check: Discard fragments outside the world
+    if (worldPos.x < 0.0 || worldPos.x > u_worldPixels.x || worldPos.y < 0.0 || worldPos.y > u_worldPixels.y) {
+        discard;
+    }
+    
     // 2. Sample Ground Texture
     // Tile the texture every u_textureScale tiles
     float textureTileSize = u_tileSize * u_textureScale;
