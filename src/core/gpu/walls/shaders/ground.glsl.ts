@@ -160,11 +160,16 @@ float getEntityShadow(vec2 worldPos, vec2 lightPos, float lightRad, vec2 lightDi
         float projection = dot(entToPixel, dir);
         
         if (projection > 0.0) {
+            // Apply maximum shadow distance for directional lights (Sun/Moon)
+            if (isDirectional && projection > 300.0) continue;
+            
             vec2 closestPoint = entPos + dir * projection;
             float distToRay = distance(worldPos, closestPoint);
             
             if (distToRay < entRad) {
-                shadow = max(shadow, 1.0 - smoothstep(entRad * 0.8, entRad, distToRay));
+                // Softness increases with distance for directional shadows
+                float softness = isDirectional ? smoothstep(entRad, 0.0, distToRay) * (1.0 - projection / 300.0) : 1.0 - smoothstep(entRad * 0.8, entRad, distToRay);
+                shadow = max(shadow, softness);
             }
         }
     }
