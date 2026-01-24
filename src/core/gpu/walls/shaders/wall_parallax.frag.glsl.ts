@@ -176,8 +176,8 @@ void main() {
     
     // Side faces don't cast directional shadows on themselves as easily
     if (v_z < -0.1) {
-        sunSDF = getSDFShadow(v_worldPos, u_sunDir.xy, 300.0, u_sdfTexture, u_worldPixels);
-        moonSDF = getSDFShadow(v_worldPos, u_moonDir.xy, 250.0, u_sdfTexture, u_worldPixels);
+        sunSDF = getSDFShadow(v_worldPos, u_sunDir.xy, 150.0, u_sdfTexture, u_worldPixels);
+        moonSDF = getSDFShadow(v_worldPos, u_moonDir.xy, 120.0, u_sdfTexture, u_worldPixels);
         
         float sunEShadow = getEntityShadow(v_worldPos, vec2(0.0), 0.0, u_sunDir.xy, true);
         lightAcc += u_sunColor * u_sunIntensity * 1.0 * min(sunSDF, 1.0 - sunEShadow);

@@ -188,11 +188,11 @@ void main() {
     vec3 lightAcc = u_ambientColor * 1.5;
 
     // Static Wall Shadows (SDF) + Directional Lights
-    float sunSDF = getSDFShadow(worldPos, u_sunDir.xy, 300.0, u_sdfTexture, u_worldPixels);
+    float sunSDF = getSDFShadow(worldPos, u_sunDir.xy, 150.0, u_sdfTexture, u_worldPixels);
     float sunEnt = getEntityShadow(worldPos, vec2(0.0), 0.0, u_sunDir.xy, true);
     lightAcc += u_sunColor * u_sunIntensity * 0.7 * min(sunSDF, 1.0 - sunEnt);
     
-    float moonSDF = getSDFShadow(worldPos, u_moonDir.xy, 250.0, u_sdfTexture, u_worldPixels);
+    float moonSDF = getSDFShadow(worldPos, u_moonDir.xy, 120.0, u_sdfTexture, u_worldPixels);
     float moonEnt = getEntityShadow(worldPos, vec2(0.0), 0.0, u_moonDir.xy, true);
     lightAcc += u_moonColor * u_moonIntensity * 1.2 * min(moonSDF, 1.0 - moonEnt);
     
