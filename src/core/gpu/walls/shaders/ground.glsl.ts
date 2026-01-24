@@ -24,12 +24,22 @@ layout(std140) uniform LightBlock {
     Light u_lights[32];
 };
 
+struct Entity {
+    vec4 posRad; // x, y, radius, active
+};
+
+layout(std140) uniform EntityBlock {
+    Entity u_entities[32];
+};
+
 uniform sampler2D u_heatTexture;
 uniform sampler2D u_groundTexture;
 uniform sampler2D u_worldMap; 
-uniform sampler2D u_structureMap; // High-res structure data
+uniform sampler2D u_structureMap; 
+uniform sampler2D u_sdfTexture;    // New
+uniform sampler2D u_emissiveTexture; // New
 uniform vec2 u_worldPixels;
-uniform vec2 u_structureSize; // Typically Width*10, Height*10
+uniform vec2 u_structureSize;
 uniform vec2 u_camera;
 uniform vec2 u_resolution;
 uniform float u_tileSize;
@@ -44,7 +54,7 @@ uniform float u_moonIntensity;
 uniform vec3 u_moonDir;
 
 uniform float u_textureScale;
-uniform float u_shadowRange; // Max distance in tiles
+uniform float u_shadowRange; 
 
 in vec2 v_worldPos; 
 in float v_time;
@@ -71,41 +81,91 @@ float noise(vec2 p) {
                mix(hash12(i + vec2(0.0,1.0)), hash12(i + vec2(1.0,1.0)), u.x), u.y);
 }
 
-// Unified Shadow Function (DDA Algorithm)
-float getShadow(vec2 startPos, vec2 dir, float maxDist, sampler2D structMap, vec2 worldPixels) {
-    if (length(dir) < 0.001) return 0.0;
-    vec2 rayDir = -normalize(dir.xy); 
-    vec2 structSize = vec2(textureSize(structMap, 0));
-    vec2 pos = (startPos / worldPixels) * structSize;
-    vec2 step = sign(rayDir);
-    vec2 deltaDist = abs(1.0 / rayDir);
-    vec2 sideDist;
+// Improved SDF Shadow (Raymarched via Sphere Tracing)
+float getSDFShadow(vec2 startPos, vec2 dir, float maxDist, sampler2D sdfMap, vec2 worldPixels) {
+    vec2 rayDir = normalize(-dir.xy);
+    float t = 5.0; // Start slightly offset to avoid self-occlusion
+    float shadow = 1.0;
     
-    if (rayDir.x < 0.0) sideDist.x = (pos.x - floor(pos.x)) * deltaDist.x;
-    else sideDist.x = (floor(pos.x) + 1.0 - pos.x) * deltaDist.x;
-    
-    if (rayDir.y < 0.0) sideDist.y = (pos.y - floor(pos.y)) * deltaDist.y;
-    else sideDist.y = (floor(pos.y) + 1.0 - pos.y) * deltaDist.y;
-    
-    float distTraveled = 0.0;
-    float shadow = 0.0;
-    
-    for(int i = 0; i < 80; i++) {
-        if (distTraveled > (maxDist / worldPixels.x) * structSize.x) break;
-        vec2 sampleUV = (floor(pos) + 0.5) / structSize;
-        float val = texture(structMap, sampleUV).r;
-        if (val > 0.4) {
-            shadow = smoothstep(0.4, 0.6, val);
-            break;
+    for (int i = 0; i < 32; i++) {
+        vec2 currPos = startPos + rayDir * t;
+        vec2 uv = currPos / worldPixels;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
+        
+        float d = texture(sdfMap, uv).r;
+        if (d < 1.0) {
+            return 0.0;
         }
-        if (sideDist.x < sideDist.y) {
-            distTraveled = sideDist.x;
-            sideDist.x += deltaDist.x;
-            pos.x += step.x;
+        
+        t += d;
+        if (t > maxDist) break;
+    }
+    return 1.0;
+}
+
+// Stochastic Emissive Pathtracing (Indirect Light)
+vec3 sampleEmissivePathtraced(vec2 worldPos, sampler2D sdfMap, sampler2D emissiveMap, vec2 worldPixels) {
+    vec3 indirect = vec3(0.0);
+    int samples = 8;
+    float seed = hash12(worldPos + v_time);
+    
+    for (int i = 0; i < samples; i++) {
+        float angle = (float(i) + seed) * (6.28318 / float(samples));
+        vec2 rayDir = vec2(cos(angle), sin(angle));
+        float t = 2.0;
+        
+        // Raymarch against SDF
+        for (int j = 0; j < 16; j++) {
+            vec2 currPos = worldPos + rayDir * t;
+            vec2 uv = currPos / worldPixels;
+            if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
+            
+            float d = texture(sdfMap, uv).r;
+            if (d < 2.0) {
+                // We "hit" something. Sample the emissive map near the hit point.
+                // We offset slightly back to sample the surface.
+                vec2 hitUV = (worldPos + rayDir * (t + 1.0)) / worldPixels;
+                indirect += texture(emissiveMap, hitUV).rgb * (1.0 / (1.0 + t * t * 0.0001));
+                break;
+            }
+            t += d;
+            if (t > 300.0) break;
+        }
+    }
+    return indirect / float(samples);
+}
+
+// Analytical Entity Shadow (Circle Projection) - Kept for entities as they are dynamic
+float getEntityShadow(vec2 worldPos, vec2 lightPos, float lightRad, vec2 lightDir, bool isDirectional) {
+    float shadow = 0.0;
+    for (int i = 0; i < 32; i++) {
+        if (u_entities[i].posRad.w < 0.5) continue;
+        
+        vec2 entPos = u_entities[i].posRad.xy;
+        float entRad = u_entities[i].posRad.z;
+        
+        vec2 dir;
+        float distToLight;
+        
+        if (isDirectional) {
+            dir = -normalize(lightDir);
+            distToLight = 99999.0;
         } else {
-            distTraveled = sideDist.y;
-            sideDist.y += deltaDist.y;
-            pos.y += step.y;
+            dir = normalize(worldPos - lightPos);
+            distToLight = distance(lightPos, worldPos);
+            if (distance(lightPos, entPos) > distToLight) continue;
+        }
+        
+        vec2 entToPixel = worldPos - entPos;
+        float projection = dot(entToPixel, dir);
+        
+        if (projection > 0.0) {
+            vec2 closestPoint = entPos + dir * projection;
+            float distToRay = distance(worldPos, closestPoint);
+            
+            if (distToRay < entRad) {
+                shadow = max(shadow, 1.0 - smoothstep(entRad * 0.8, entRad, distToRay));
+            }
         }
     }
     return shadow;
@@ -127,19 +187,20 @@ void main() {
     // 2. Multi-Light Calculation
     vec3 lightAcc = u_ambientColor * 1.5;
 
-    // Sun
-    if (u_sunIntensity > 0.01) {
-        float shadow = getShadow(worldPos, u_sunDir.xy, 150.0, u_structureMap, u_worldPixels);
-        lightAcc += u_sunColor * u_sunIntensity * 0.7 * (1.0 - shadow);
-    }
+    // Static Wall Shadows (SDF) + Directional Lights
+    float sunSDF = getSDFShadow(worldPos, u_sunDir.xy, 300.0, u_sdfTexture, u_worldPixels);
+    float sunEnt = getEntityShadow(worldPos, vec2(0.0), 0.0, u_sunDir.xy, true);
+    lightAcc += u_sunColor * u_sunIntensity * 0.7 * min(sunSDF, 1.0 - sunEnt);
     
-    // Moon
-    if (u_moonIntensity > 0.01) {
-        float shadow = getShadow(worldPos, u_moonDir.xy, 120.0, u_structureMap, u_worldPixels);
-        lightAcc += u_moonColor * u_moonIntensity * 1.2 * (1.0 - shadow);
-    }
+    float moonSDF = getSDFShadow(worldPos, u_moonDir.xy, 250.0, u_sdfTexture, u_worldPixels);
+    float moonEnt = getEntityShadow(worldPos, vec2(0.0), 0.0, u_moonDir.xy, true);
+    lightAcc += u_moonColor * u_moonIntensity * 1.2 * min(moonSDF, 1.0 - moonEnt);
     
-    // Point Lights
+    // Unified Pathtraced Lighting (Fire + Point Lights)
+    lightAcc += sampleEmissivePathtraced(worldPos, u_sdfTexture, u_emissiveTexture, u_worldPixels) * 10.0;
+
+    // Remaining Dynamic Point Lights 
+    // (We still use them for small objects/bullets that aren't in the map)
     for (int i = 0; i < 32; i++) {
         if (u_lights[i].posRad.w < 0.5) continue;
         
@@ -153,13 +214,14 @@ void main() {
             float window = (1.0 - d * d);
             float falloff = (1.0 / denom) * window * window; 
             
-            float shadow = 0.0;
+            float shadow = 1.0;
             if (u_lights[i].posRad.w > 1.5) {
                 vec2 dirToLight = normalize(lPos - worldPos);
-                shadow = getShadow(worldPos, -dirToLight, u_shadowRange * u_tileSize, u_structureMap, u_worldPixels);
+                shadow = getSDFShadow(worldPos, -dirToLight, u_shadowRange * u_tileSize, u_sdfTexture, u_worldPixels);
             }
             
-            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 5.0 * (1.0 - shadow);
+            float eShadow = getEntityShadow(worldPos, lPos, lRad, vec2(0.0), false);
+            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 5.0 * shadow * (1.0 - eShadow);
         }
     }
     

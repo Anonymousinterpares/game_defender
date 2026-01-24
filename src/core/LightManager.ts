@@ -144,9 +144,9 @@ export class LightManager {
             existing.color = light.color;
             existing.intensity = light.intensity;
             existing.active = true;
-            existing.castsShadows = false;
+            existing.castsShadows = light.castsShadows;
         } else {
-            this.lights.set(light.id, { ...light, type: 'transient', ttl: 0.05, decay: false, castsShadows: false, active: true });
+            this.lights.set(light.id, { ...light, type: 'transient', ttl: 0.05, decay: false, castsShadows: light.castsShadows, active: true });
         }
     }
 

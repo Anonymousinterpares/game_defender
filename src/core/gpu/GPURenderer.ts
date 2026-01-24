@@ -9,7 +9,9 @@ import { FluidShader } from "./FluidShader";
 import { GPUHeatSystem } from "./heatmap/GPUHeatSystem";
 import { GPUWallRenderer } from "./walls/GPUWallRenderer";
 import { GPULightBuffer } from "./GPULightBuffer";
+import { GPUEntityBuffer } from "./GPUEntityBuffer";
 import { LightManager } from "../LightManager";
+import { GPULightingSystem } from "./lighting/GPULightingSystem";
 
 export class GPURenderer {
     private static _instance: GPURenderer | null = null;
@@ -36,12 +38,18 @@ export class GPURenderer {
     private heatSystem: GPUHeatSystem;
     private wallRenderer: GPUWallRenderer;
     private lightBuffer: GPULightBuffer;
+    private entityBuffer: GPUEntityBuffer;
+    private lightingSystem: GPULightingSystem;
     private worldMapTexture: WebGLTexture | null = null;
     private lastMeshVersion: number = -1;
     private lastEntityPositions: Map<number, { x: number, y: number }> = new Map();
 
     public getParticleSystem(): GPUParticleSystem {
         return this.particleSystem;
+    }
+
+    public getLightingSystem(): GPULightingSystem {
+        return this.lightingSystem;
     }
 
     private constructor() {
@@ -51,6 +59,8 @@ export class GPURenderer {
         this.heatSystem = new GPUHeatSystem();
         this.wallRenderer = new GPUWallRenderer();
         this.lightBuffer = new GPULightBuffer(32);
+        this.entityBuffer = new GPUEntityBuffer(32);
+        this.lightingSystem = new GPULightingSystem();
 
         const ps = ParticleSystem.getInstance();
         ps.onSmokeSpawned = this.handleSmokeSpawned;
@@ -80,10 +90,15 @@ export class GPURenderer {
         }
 
         if (!this.particleSystem['initialized']) this.particleSystem.init(gl);
-        if (!this.fluidSimulation.isInitialized) this.fluidSimulation.init(gl, 256, 256);
-        if (!this.heatSystem.isInitialized) this.heatSystem.init(gl, 512, 512);
-        if (!this.wallRenderer['initialized']) this.wallRenderer.init(gl);
+        if (this.fluidSimulation && !this.fluidSimulation.isInitialized) this.fluidSimulation.init(gl, 256, 256);
+        if (this.heatSystem && !this.heatSystem.isInitialized) this.heatSystem.init(gl, 512, 512);
+        if (this.wallRenderer && !this.wallRenderer['initialized']) this.wallRenderer.init(gl);
         this.lightBuffer.init(gl);
+        this.entityBuffer.init(gl);
+        if (this.lightingSystem && !this.lightingSystem.isInitialized) {
+            // Lighting map resolution: 2048x2048 or world-relative
+            this.lightingSystem.init(gl, 1024, 1024);
+        }
     }
 
     private handleSmokeSpawned = (x: number, y: number, color: string) => {
@@ -174,6 +189,18 @@ export class GPURenderer {
         // Update Light Buffer
         const lights = LightManager.getInstance().getLights();
         this.lightBuffer.update(lights);
+
+        // Update Entity Buffer (Pass nearest entities to GPU for internal shadows)
+        this.entityBuffer.update(entities.map(e => ({ x: e.x, y: e.y, radius: (e as any).radius || 20, active: true })));
+
+        // Update Lighting System (Emissive + SDF)
+        if (this.lightingSystem && this.heatSystem && this.wallRenderer) {
+            const hTex = this.heatSystem.getHeatTexture();
+            const sTex = this.wallRenderer.getStructureTexture();
+            if (hTex && sTex) {
+                this.lightingSystem.update(hTex, sTex, this.world.getWidthPixels(), this.world.getHeightPixels(), this.lightBuffer);
+            }
+        }
     }
 
     private updateWorldTexture(): void {
@@ -200,7 +227,7 @@ export class GPURenderer {
         gl.viewport(0, 0, canvas.width, canvas.height);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         this.context.clear();
-        this.wallRenderer.render(this.world, cameraX, cameraY, width, height, this.heatSystem, this.lightBuffer, this.worldMapTexture, performance.now() * 0.001);
+        this.wallRenderer.render(this.world, cameraX, cameraY, width, height, this.heatSystem, this.lightBuffer, this.entityBuffer, this.worldMapTexture, this.lightingSystem, performance.now() * 0.001);
     }
 
     public renderFX(cameraX: number, cameraY: number, width: number, height: number): void {

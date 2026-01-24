@@ -7,6 +7,8 @@ import { GPUHeatSystem } from "../heatmap/GPUHeatSystem";
 import { WorldClock } from "../../WorldClock";
 import { ConfigManager } from "../../../config/MasterConfig";
 import { GPULightBuffer } from "../GPULightBuffer";
+import { GPUEntityBuffer } from "../GPUEntityBuffer";
+import { GPULightingSystem } from "../lighting/GPULightingSystem";
 
 export class GPUWallRenderer {
     private gl: WebGL2RenderingContext | null = null;
@@ -70,16 +72,13 @@ export class GPUWallRenderer {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-        // Initial state: 0 (empty)
         const totalSize = this.structureW * this.structureH;
         const initialData = new Uint8Array(totalSize).fill(0);
 
-        // Fill initial solid tiles (if any)
         for (let ty = 0; ty < world.getHeight(); ty++) {
             for (let tx = 0; tx < world.getWidth(); tx++) {
                 const mat = world.getTile(tx, ty);
                 if (mat !== 0) {
-                    // Full solid block
                     for (let sy = 0; sy < 10; sy++) {
                         const rowIdx = (ty * 10 + sy) * this.structureW + (tx * 10);
                         initialData.fill(255, rowIdx, rowIdx + 10);
@@ -91,12 +90,9 @@ export class GPUWallRenderer {
         gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, this.structureW, this.structureH, 0, gl.RED, gl.UNSIGNED_BYTE, initialData);
 
-        // Register listener for incremental updates
         world.onTileChange((tx, ty) => {
             this.dirtyTiles.add(`${tx},${ty}`);
         });
-
-        console.log(`[GPU Walls] Structure Map initialized: ${this.structureW}x${this.structureH}`);
     }
 
     public updateConfig(): void {
@@ -111,10 +107,8 @@ export class GPUWallRenderer {
     private loadGroundTexture(): void {
         if (!this.gl) return;
         const gl = this.gl;
-
         this.groundTexture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, this.groundTexture);
-        // Placeholder pixel until image loads
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([80, 70, 60, 255]));
 
         const image = new Image();
@@ -127,22 +121,18 @@ export class GPUWallRenderer {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
             this.groundTextureLoaded = true;
-            console.log("[GPU Walls] Ground texture loaded.");
         };
-        image.onerror = () => console.error("[GPU Walls] Failed to load ground texture.");
         image.src = `${import.meta.env.BASE_URL}textures/GROUND/Ground103_1K-JPG/Ground103_1K-JPG_Color.jpg`;
     }
 
-    public render(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, worldMap: WebGLTexture | null, time: number): void {
+    public render(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, entityBuffer: GPUEntityBuffer, worldMap: WebGLTexture | null, lightingSystem: GPULightingSystem, time: number): void {
         if (!this.initialized || !this.gl) return;
         const gl = this.gl;
         const timeState = WorldClock.getInstance().getTimeState();
 
-        this.gl.enable(gl.DEPTH_TEST);
-        this.gl.depthFunc(gl.LEQUAL);
-        this.gl.depthMask(true);
-
-        this.renderGround(world, cameraX, cameraY, screenW, screenH, heatSystem, lightBuffer, worldMap, timeState);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        gl.depthMask(true);
 
         if (this.lastWorld !== world) {
             this.lastWorld = world;
@@ -153,8 +143,7 @@ export class GPUWallRenderer {
         }
 
         this.updateStructureMap(world);
-
-        this.renderGround(world, cameraX, cameraY, screenW, screenH, heatSystem, lightBuffer, worldMap, timeState);
+        this.renderGround(world, cameraX, cameraY, screenW, screenH, heatSystem, lightBuffer, entityBuffer, worldMap, lightingSystem, timeState);
 
         if (world.getMeshVersion() !== this.lastMeshVersion) {
             this.meshBuilder.build(world);
@@ -181,13 +170,9 @@ export class GPUWallRenderer {
 
             this.shader.setUniformMatrix4fv("u_viewProj", m);
             this.shader.setUniform2f("u_cameraCenter", cameraX + screenW / 2, cameraY + screenH / 2);
-
-            const strength = ConfigManager.getInstance().get<number>('Visuals', 'perspectiveStrength') || 0.0015;
-            this.shader.setUniform1f("u_perspectiveStrength", strength);
+            this.shader.setUniform1f("u_perspectiveStrength", ConfigManager.getInstance().get<number>('Visuals', 'perspectiveStrength') || 0.0015);
             this.shader.setUniform2f("u_worldPixels", world.getWidthPixels(), world.getHeightPixels());
-
-            const shadowRange = ConfigManager.getInstance().get<number>('Lighting', 'explosionShadowRangeTiles') || 40.0;
-            this.shader.setUniform1f("u_shadowRange", shadowRange);
+            this.shader.setUniform1f("u_shadowRange", ConfigManager.getInstance().get<number>('Lighting', 'explosionShadowRangeTiles') || 40.0);
             this.shader.setUniform2f("u_structureSize", this.structureW, this.structureH);
             this.shader.setUniform1f("u_time", time);
             this.shader.setUniform1f("u_tileSize", world.getTileSize());
@@ -196,14 +181,13 @@ export class GPUWallRenderer {
             this.shader.setUniform3f("u_sunDir", sun.direction.x, sun.direction.y, 1.0);
             this.shader.setUniform3f("u_sunColor", ...this.parseColor(sun.color));
             this.shader.setUniform1f("u_sunIntensity", sun.active ? sun.intensity : 0.0);
-
             this.shader.setUniform3f("u_moonDir", moon.direction.x, moon.direction.y, 1.0);
             this.shader.setUniform3f("u_moonColor", ...this.parseColor(moon.color));
             this.shader.setUniform1f("u_moonIntensity", moon.active ? moon.intensity : 0.0);
-
             this.shader.setUniform3f("u_ambientColor", ...this.parseColor(timeState.baseAmbient));
 
             lightBuffer.bind(this.shader.getProgram(), "LightBlock", 0);
+            entityBuffer.bind(this.shader.getProgram(), "EntityBlock", 1);
 
             const heatTex = heatSystem.getHeatTexture();
             if (heatTex) {
@@ -218,13 +202,23 @@ export class GPUWallRenderer {
                 this.shader.setUniform1i("u_structureMap", 1);
             }
 
+            if (lightingSystem && lightingSystem.isInitialized) {
+                gl.activeTexture(gl.TEXTURE4);
+                gl.bindTexture(gl.TEXTURE_2D, lightingSystem.getSDFTexture());
+                this.shader.setUniform1i("u_sdfTexture", 4);
+
+                gl.activeTexture(gl.TEXTURE5);
+                gl.bindTexture(gl.TEXTURE_2D, lightingSystem.getEmissiveTexture());
+                this.shader.setUniform1i("u_emissiveTexture", 5);
+            }
+
             gl.drawArrays(gl.TRIANGLES, 0, this.meshBuilder.getVertexCount());
         }
 
         this.cleanupWebGLState();
     }
 
-    private renderGround(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, worldMap: WebGLTexture | null, timeState: any): void {
+    private renderGround(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, entityBuffer: GPUEntityBuffer, worldMap: WebGLTexture | null, lightingSystem: GPULightingSystem, timeState: any): void {
         if (!this.gl || !this.groundShader) return;
         const gl = this.gl;
         const shader = this.groundShader;
@@ -238,26 +232,22 @@ export class GPUWallRenderer {
         shader.setUniform2f("u_resolution", screenW, screenH);
         shader.setUniform2f("u_worldPixels", world.getWidthPixels(), world.getHeightPixels());
         shader.setUniform1f("u_tileSize", world.getTileSize());
-        shader.setUniform1f("u_textureScale", 10.0); // Tile texture every 10 tiles
+        shader.setUniform1f("u_textureScale", 10.0);
         shader.setUniform1f("u_time", performance.now() * 0.001);
-
-        const shadowRange = ConfigManager.getInstance().get<number>('Lighting', 'explosionShadowRangeTiles') || 40.0;
-        shader.setUniform1f("u_shadowRange", shadowRange);
+        shader.setUniform1f("u_shadowRange", ConfigManager.getInstance().get<number>('Lighting', 'explosionShadowRangeTiles') || 40.0);
 
         const { sun, moon } = timeState;
         shader.setUniform1f("u_sunIntensity", sun.active ? sun.intensity : 0.0);
         shader.setUniform3f("u_sunColor", ...this.parseColor(sun.color));
         shader.setUniform3f("u_sunDir", sun.direction.x, sun.direction.y, 1.0);
-
         shader.setUniform1f("u_moonIntensity", moon.active ? moon.intensity : 0.0);
         shader.setUniform3f("u_moonColor", ...this.parseColor(moon.color));
         shader.setUniform3f("u_moonDir", moon.direction.x, moon.direction.y, 1.0);
-
         shader.setUniform3f("u_ambientColor", ...this.parseColor(timeState.baseAmbient));
 
         lightBuffer.bind(shader.getProgram(), "LightBlock", 0);
+        entityBuffer.bind(shader.getProgram(), "EntityBlock", 1);
 
-        // Texture Units
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.groundTexture);
         shader.setUniform1i("u_groundTexture", 0);
@@ -280,10 +270,16 @@ export class GPUWallRenderer {
             gl.bindTexture(gl.TEXTURE_2D, this.structureTexture);
             shader.setUniform1i("u_structureMap", 3);
             shader.setUniform2f("u_structureSize", this.structureW, this.structureH);
-        } else {
-            // Unbind to prevent stale texture reading
-            gl.activeTexture(gl.TEXTURE3);
-            gl.bindTexture(gl.TEXTURE_2D, null);
+        }
+
+        if (lightingSystem && lightingSystem.isInitialized) {
+            gl.activeTexture(gl.TEXTURE4);
+            gl.bindTexture(gl.TEXTURE_2D, lightingSystem.getSDFTexture());
+            shader.setUniform1i("u_sdfTexture", 4);
+
+            gl.activeTexture(gl.TEXTURE5);
+            gl.bindTexture(gl.TEXTURE_2D, lightingSystem.getEmissiveTexture());
+            shader.setUniform1i("u_emissiveTexture", 5);
         }
 
         gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -299,26 +295,17 @@ export class GPUWallRenderer {
         gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
         this.dirtyTiles.forEach(key => {
-            const parts = key.split(',');
-            const tx = parseInt(parts[0]);
-            const ty = parseInt(parts[1]);
+            const [tx, ty] = key.split(',').map(Number);
             const material = world.getTile(tx, ty);
             const hpData = hm.getTileHP(tx, ty);
-
             const tileData = new Uint8Array(10 * 10);
-            if (material === 0) {
-                tileData.fill(0);
-            } else if (!hpData) {
-                tileData.fill(255);
-            } else {
-                for (let i = 0; i < 100; i++) {
-                    tileData[i] = hpData[i] > 0 ? 255 : 0;
-                }
+            if (material === 0) tileData.fill(0);
+            else if (!hpData) tileData.fill(255);
+            else {
+                for (let i = 0; i < 100; i++) tileData[i] = hpData[i] > 0 ? 255 : 0;
             }
-
             gl.texSubImage2D(gl.TEXTURE_2D, 0, tx * 10, ty * 10, 10, 10, gl.RED, gl.UNSIGNED_BYTE, tileData);
         });
-
         this.dirtyTiles.clear();
     }
 
@@ -339,37 +326,27 @@ export class GPUWallRenderer {
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
         gl.disable(gl.DEPTH_TEST);
         gl.depthMask(true);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, null);
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, null);
+        for (let i = 0; i < 8; i++) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, null); }
     }
 
+    public getStructureTexture(): WebGLTexture | null { return this.structureTexture; }
+
     private updateBuffers(): void {
-        if (!this.gl) return;
+        if (!this.gl || !this.vao) return;
         const gl = this.gl;
         gl.bindVertexArray(this.vao);
-
         gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, this.meshBuilder.getPositions(), gl.STATIC_DRAW);
-        gl.enableVertexAttribArray(0);
-        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-
+        gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, this.meshBuilder.getUVs(), gl.STATIC_DRAW);
-        gl.enableVertexAttribArray(1);
-        gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
-
+        gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, this.matBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, this.meshBuilder.getMaterials(), gl.STATIC_DRAW);
-        gl.enableVertexAttribArray(2);
-        gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
-
+        gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, this.normBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, this.meshBuilder.getNormals(), gl.STATIC_DRAW);
-        gl.enableVertexAttribArray(3);
-        gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
-
+        gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
         gl.bindVertexArray(null);
     }
 }

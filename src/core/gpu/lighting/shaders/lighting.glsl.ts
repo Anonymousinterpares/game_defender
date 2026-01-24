@@ -1,0 +1,137 @@
+export const LIGHTING_VERT = `#version 300 es
+layout(location = 0) in vec2 a_position;
+out vec2 v_uv;
+void main() {
+    v_uv = a_position * 0.5 + 0.5;
+    gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+
+export const EMISSIVE_PASS_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D u_heatTexture;
+uniform sampler2D u_structureMap;
+uniform vec2 u_worldPixels;
+in vec2 v_uv;
+out vec4 outColor;
+
+struct Light {
+    vec4 posRad; // x, y, radius, active
+    vec4 colInt; // r, g, b, intensity
+};
+
+layout(std140) uniform LightBlock {
+    Light u_lights[32];
+};
+
+vec3 getHeatColor(float t) {
+    if (t < 0.2) return mix(vec3(0.0), vec3(0.5, 0.0, 0.0), t / 0.2);
+    if (t < 0.4) return mix(vec3(0.5, 0.0, 0.0), vec3(1.0, 0.2, 0.0), (t - 0.2) / 0.2);
+    if (t < 0.7) return mix(vec3(1.0, 0.2, 0.0), vec3(1.0, 0.8, 0.2), (t - 0.4) / 0.3);
+    return mix(vec3(1.0, 0.8, 0.2), vec3(4.0, 4.0, 4.0), (t - 0.7) / 0.3);
+}
+
+void main() {
+    vec2 worldPos = v_uv * u_worldPixels;
+    vec3 emissive = vec3(0.0);
+
+    // 1. Heat/Fire Emissive
+    float heat = texture(u_heatTexture, vec2(v_uv.x, 1.0 - v_uv.y)).r;
+    if (heat > 0.05) {
+        emissive += getHeatColor(heat) * 2.0;
+    }
+
+    // 2. Point Lights (Simplified circles in the map)
+    for (int i = 0; i < 32; i++) {
+        if (u_lights[i].posRad.w < 0.5) continue;
+        vec2 lPos = u_lights[i].posRad.xy;
+        float lRad = u_lights[i].posRad.z;
+        float d = distance(worldPos, lPos);
+        if (d < lRad * 0.1) { // Only draw a small emissive core
+            float falloff = 1.0 - smoothstep(0.0, lRad * 0.1, d);
+            emissive += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 5.0;
+        }
+    }
+
+    outColor = vec4(emissive, 1.0);
+}
+`;
+
+export const OCCLUDER_PASS_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D u_structureMap;
+uniform sampler2D u_worldMap;
+in vec2 v_uv;
+out vec4 outColor;
+
+void main() {
+    float wall = texture(u_structureMap, v_uv).r;
+    // 1.0 = Occulder, 0.0 = Free space
+    outColor = vec4(vec3(wall > 0.5 ? 1.0 : 0.0), 1.0);
+}
+`;
+
+export const JFA_INIT_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D u_occluderMap;
+uniform vec2 u_resolution;
+in vec2 v_uv;
+out vec4 outColor;
+
+void main() {
+    float occ = texture(u_occluderMap, v_uv).r;
+    if (occ > 0.5) {
+        outColor = vec4(gl_FragCoord.xy, 0.0, 1.0);
+    } else {
+        outColor = vec4(-10000.0, -10000.0, 0.0, 1.0);
+    }
+}
+`;
+
+export const JFA_STEP_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D u_source;
+uniform float u_step;
+uniform vec2 u_resolution;
+in vec2 v_uv;
+out vec4 outColor;
+
+void main() {
+    float minDist = 1e10;
+    vec2 bestCoord = vec2(-10000.0);
+    
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 offset = vec2(float(x), float(y)) * u_step;
+            vec2 sampUV = v_uv + offset / u_resolution;
+            if (sampUV.x < 0.0 || sampUV.x > 1.0 || sampUV.y < 0.0 || sampUV.y > 1.0) continue;
+            
+            vec2 res = texture(u_source, sampUV).xy;
+            if (res.x > -5000.0) {
+                float d = distance(res, gl_FragCoord.xy);
+                if (d < minDist) {
+                    minDist = d;
+                    bestCoord = res;
+                }
+            }
+        }
+    }
+    
+    outColor = vec4(bestCoord, 0.0, 1.0);
+}
+`;
+
+export const SDF_FINAL_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D u_jfa;
+uniform vec2 u_resolution;
+in vec2 v_uv;
+out vec4 outColor;
+
+void main() {
+    vec2 bestCoord = texture(u_jfa, v_uv).xy;
+    float dist = distance(bestCoord, gl_FragCoord.xy);
+    // Output distance normalized to some range, or raw pixels (requires highp)
+    outColor = vec4(dist, 0.0, 0.0, 1.0);
+}
+`;
