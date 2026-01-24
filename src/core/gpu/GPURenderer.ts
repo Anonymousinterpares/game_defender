@@ -146,12 +146,15 @@ export class GPURenderer {
         if (this.wallRenderer) this.wallRenderer.clear();
     }
 
-    public update(dt: number, entities: { x: number, y: number }[] = []): void {
+    public update(dt: number, entities: { x: number, y: number, z?: number }[] = [], cameraX: number = 0, cameraY: number = 0, width: number = 800, height: number = 600): void {
         if (!this.active || !this.particleSystem || !this.world) return;
         this.updateWorldTexture();
         if (this.worldMapTexture) this.particleSystem.setWorldMap(this.worldMapTexture, this.world.getWidth(), this.world.getHeight(), this.world.getTileSize());
         this.particleSystem.setEntities(entities);
-        this.particleSystem.update(dt, performance.now() * 0.001, 0, 0);
+
+        const centerX = cameraX + width / 2;
+        const centerY = cameraY + height / 2;
+        this.particleSystem.update(dt, performance.now() * 0.001, centerX, centerY);
 
         if (this.fluidSimulation) {
             const ppm = ConfigManager.getInstance().getPixelsPerMeter();

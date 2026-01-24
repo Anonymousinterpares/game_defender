@@ -52,7 +52,7 @@ export class GPUParticleSystem {
         this.gl = gl;
 
         // 1. Compile Shaders
-        this.updateShader = new Shader(gl, PARTICLE_UPDATE_VERT, PARTICLE_UPDATE_FRAG, ['v_posVel', 'v_props']);
+        this.updateShader = new Shader(gl, PARTICLE_UPDATE_VERT, PARTICLE_UPDATE_FRAG, ['v_posLife', 'v_velMaxLife', 'v_props']);
         this.renderShader = new Shader(gl, PARTICLE_RENDER_VERT, PARTICLE_RENDER_FRAG);
 
         // 2. Setup Quad Buffer
@@ -69,7 +69,8 @@ export class GPUParticleSystem {
         gl.bufferData(gl.ARRAY_BUFFER, quadVerts, gl.STATIC_DRAW);
 
         // 3. Setup Particle Buffers and VAOs
-        const initialData = new Float32Array(MAX_PARTICLES * 8);
+        // 12 floats per particle (48 bytes)
+        const initialData = new Float32Array(MAX_PARTICLES * 12);
 
         for (let i = 0; i < 2; i++) {
             const vbo = gl.createBuffer();
@@ -79,42 +80,49 @@ export class GPUParticleSystem {
             gl.bufferData(gl.ARRAY_BUFFER, initialData, gl.DYNAMIC_COPY);
             this.buffers.push(vbo);
 
-            // A. UPDATE VAO (Divisor 0 - processes each particle individually)
+            // A. UPDATE VAO
             const uVao = gl.createVertexArray();
             if (!uVao) throw new Error("Failed to create Update VAO");
             gl.bindVertexArray(uVao);
             gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
 
-            gl.enableVertexAttribArray(0); // a_posVel
-            gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 32, 0);
+            gl.enableVertexAttribArray(0); // a_posLife (x, y, z, life)
+            gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 48, 0);
             gl.vertexAttribDivisor(0, 0);
 
-            gl.enableVertexAttribArray(1); // a_props
-            gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 32, 16);
+            gl.enableVertexAttribArray(1); // a_velMaxLife (vx, vy, vz, maxLife)
+            gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 48, 16);
             gl.vertexAttribDivisor(1, 0);
+
+            gl.enableVertexAttribArray(2); // a_props (type, flags, variation, unused)
+            gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 48, 32);
+            gl.vertexAttribDivisor(2, 0);
 
             this.updateVaos.push(uVao);
 
-            // B. RENDER VAO (Divisor 1 - for instanced rendering)
+            // B. RENDER VAO
             const rVao = gl.createVertexArray();
             if (!rVao) throw new Error("Failed to create Render VAO");
             gl.bindVertexArray(rVao);
 
-            // Instanced Particle Data
             gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
             gl.enableVertexAttribArray(0);
-            gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 32, 0);
-            gl.vertexAttribDivisor(0, 1); // Advance once per instance
+            gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 48, 0);
+            gl.vertexAttribDivisor(0, 1);
 
             gl.enableVertexAttribArray(1);
-            gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 32, 16);
-            gl.vertexAttribDivisor(1, 1); // Advance once per instance
+            gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 48, 16);
+            gl.vertexAttribDivisor(1, 1);
+
+            gl.enableVertexAttribArray(2);
+            gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 48, 32);
+            gl.vertexAttribDivisor(2, 1);
 
             // Shared Quad Data
             gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
-            gl.enableVertexAttribArray(2); // a_quadPos
-            gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
-            gl.vertexAttribDivisor(2, 0); // Advance once per vertex
+            gl.enableVertexAttribArray(3); // a_quadPos
+            gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
+            gl.vertexAttribDivisor(3, 0);
 
             this.renderVaos.push(rVao);
         }
@@ -130,7 +138,7 @@ export class GPUParticleSystem {
     public clear(): void {
         if (!this.initialized) return;
         const gl = this.gl;
-        const emptyData = new Float32Array(MAX_PARTICLES * 8);
+        const emptyData = new Float32Array(MAX_PARTICLES * 12);
         this.buffers.forEach(vbo => {
             gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
             gl.bufferSubData(gl.ARRAY_BUFFER, 0, emptyData);
@@ -146,7 +154,7 @@ export class GPUParticleSystem {
 
     private nextSpawnIdx = 0;
 
-    public uploadParticle(x: number, y: number, vx: number, vy: number, life: number, type: number, flags: number): void {
+    public uploadParticle(x: number, y: number, vx: number, vy: number, life: number, type: number, flags: number, z: number = 0, vz: number = 0): void {
         const debug = ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug');
         if (!this.initialized) {
             if (debug) console.warn("[GPU] Particle System not initialized, dropping particle");
@@ -154,18 +162,17 @@ export class GPUParticleSystem {
         }
         const gl = this.gl;
 
-        if (debug && type >= 4.0) {
-            console.log(`[GPU] Particle Upload: type=${type.toFixed(1)}, pos=(${x.toFixed(1)}, ${y.toFixed(1)}), idx=${this.nextSpawnIdx}`);
-        }
+        const variation = Math.random();
 
         const data = new Float32Array([
-            x, y, vx, vy,
-            life, life, type, flags
+            x, y, z, life,
+            vx, vy, vz, life, // life used as maxLife
+            type, flags, variation, 0 // props
         ]);
 
         // Upload to the current SOURCE buffer
         gl.bindBuffer(gl.ARRAY_BUFFER, this.buffers[this.tfIndex]);
-        gl.bufferSubData(gl.ARRAY_BUFFER, this.nextSpawnIdx * 32, data);
+        gl.bufferSubData(gl.ARRAY_BUFFER, this.nextSpawnIdx * 48, data);
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
         this.nextSpawnIdx = (this.nextSpawnIdx + 1) % MAX_PARTICLES;
@@ -199,6 +206,9 @@ export class GPUParticleSystem {
         this.updateShader!.setUniform1f("u_gravity", gravity * ppm);
         this.updateShader!.setUniform1f("u_ppm", ppm);
         this.updateShader!.setUniform2fv("u_entities", this.entities);
+        // Add perspective strength for project calculation in update (if needed for collision)
+        this.updateShader!.setUniform1f("u_perspectiveStrength", config.get<number>('Visuals', 'perspectiveStrength') || 0.0015);
+        this.updateShader!.setUniform2f("u_cameraCenter", _wx, _wy); // We use _wx, _wy passed from GPURenderer which is cameraCenter
 
         // Use actual world dimensions in pixels for boundary checks
         const worldPixelW = this.worldW * this.tileSize;
@@ -239,9 +249,11 @@ export class GPUParticleSystem {
 
         this.renderShader!.use();
         this.renderShader!.setUniform2f("u_camera", camX, camY);
+        this.renderShader!.setUniform2f("u_cameraCenter", camX + screenW / 2, camY + screenH / 2);
         this.renderShader!.setUniform2f("u_resolution", screenW, screenH);
         this.renderShader!.setUniform2f("u_worldSize", this.worldW * this.tileSize, this.worldH * this.tileSize);
         this.renderShader!.setUniform1f("u_time", performance.now() * 0.001);
+        this.renderShader!.setUniform1f("u_perspectiveStrength", ConfigManager.getInstance().get<number>('Visuals', 'perspectiveStrength') || 0.0015);
 
         gl.bindVertexArray(renderVAO);
 

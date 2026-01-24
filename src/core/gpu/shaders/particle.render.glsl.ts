@@ -1,40 +1,38 @@
 export const PARTICLE_RENDER_VERT = `#version 300 es
-layout(location = 0) in vec4 a_posVel;      // Instance Data
-layout(location = 1) in vec4 a_props;       // Instance Data
-layout(location = 2) in vec2 a_quadPos;     // Vertex Data (Quad corners -1..1)
+layout(location = 0) in vec4 a_posLife;      // x, y, z, life
+layout(location = 1) in vec4 a_velMaxLife;   // vx, vy, vz, maxLife
+layout(location = 2) in vec4 a_props;       // type, flags, variation, extra
+layout(location = 3) in vec2 a_quadPos;     
 
 uniform vec2 u_camera;
+uniform vec2 u_cameraCenter;
 uniform vec2 u_resolution;
 uniform vec2 u_worldSize;
+uniform float u_time;
+uniform float u_perspectiveStrength;
 
 out vec4 v_color;
 out float v_lifeRatio;
 out float v_type;
 out vec2 v_uv;
 
-// Constants
-#define TYPE_STANDARD 0.0
-#define TYPE_SHOCKWAVE 1.0
-#define TYPE_FLASH 2.0
-#define TYPE_MOLTEN 3.0
 #define TYPE_SMOKE 4.0
 #define TYPE_FIRE 5.0
+#define TYPE_MOLTEN 3.0
 
 void main() {
-    float life = a_props.x;
-    float maxLife = a_props.y;
-    float typeWithVar = a_props.z;
-    float flags = a_props.w;
+    float life = a_posLife.w;
+    float maxLife = a_velMaxLife.w;
+    float type = a_props.x;
+    float flags = a_props.y;
+    float variation = a_props.z;
 
-    float type = floor(typeWithVar);
-    float variation = fract(typeWithVar); // 0.0 (white), 0.5 (gray), 1.0 (black)
-
-    v_type = typeWithVar; // Pass full value to fragment
+    v_type = type + variation; 
     v_lifeRatio = life / maxLife;
     v_uv = a_quadPos;
 
     if (life <= 0.0 || flags < 1.0) {
-        gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); // Clip
+        gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); 
         return;
     }
 
@@ -42,22 +40,15 @@ void main() {
     vec4 baseColor = vec4(1.0);
 
     if (abs(type - TYPE_SMOKE) < 0.1) {
-        // --- VOLUMETRIC SMOKE SIZE ---
-        // Start small, expand significantly
         size = 12.0 + (1.0 - v_lifeRatio) * 60.0; 
-        
-        // Color based on variation
-        float gray = 0.6 - (variation * 0.5); // 0.6 to 0.1
+        float gray = 0.6 - (variation * 0.5); 
         baseColor = vec4(vec3(gray), 1.0);
     } else if (abs(type - TYPE_MOLTEN) < 0.1) {
-        size = 40.0; // Increased from 4.0 to match CPU glow radius
-        // Hot orange/yellow to red
-        // CPU uses white -> yellow -> red -> dark
+        size = 40.0; 
         baseColor = vec4(1.0, 0.5 + v_lifeRatio * 0.5, 0.0, 1.0);
     } else if (abs(type - TYPE_FIRE) < 0.1) {
-        // Fire: Medium size, narrows over life
         size = 15.0 * (0.5 + v_lifeRatio * 0.5);
-        baseColor = vec4(1.0, 0.8, 0.2, 1.0); // Bright yellowish
+        baseColor = vec4(1.0, 0.8, 0.2, 1.0); 
     } else {
         size = 3.0;
         baseColor = vec4(1.0, 1.0, 1.0, 1.0);
@@ -65,17 +56,21 @@ void main() {
 
     v_color = baseColor;
 
-    vec2 worldPos = a_posVel.xy + a_quadPos * size;
+    // --- PSEUDO 3D PERSPECTIVE PROJECTION ---
+    vec3 worldPos = a_posLife.xyz;
     
-    // Boundary Check: Clip particles outside world
-    if (worldPos.x < 0.0 || worldPos.x > u_worldSize.x || worldPos.y < 0.0 || worldPos.y > u_worldSize.y) {
-        gl_Position = vec4(-2.0, -2.0, 0.0, 1.0);
-        return;
-    }
+    // Parallax Lean
+    vec2 delta = worldPos.xy - u_cameraCenter;
+    float h = -worldPos.z; // negative for UP
+    vec2 leanOffset = delta * h * u_perspectiveStrength;
+    
+    vec2 projectedXY = worldPos.xy + leanOffset;
+    float projectedY = projectedXY.y + worldPos.z; // Vertical shift from height
+    
+    // Quad expansion in Screen Space
+    vec2 finalWorldPos = vec2(projectedXY.x, projectedY) + a_quadPos * size;
 
-    vec2 screenPos = worldPos - u_camera;
-    
-    // Convert to Clip Space (-1 to 1)
+    vec2 screenPos = finalWorldPos - u_camera;
     float clipX = (screenPos.x / u_resolution.x) * 2.0 - 1.0;
     float clipY = 1.0 - (screenPos.y / u_resolution.y) * 2.0;
 

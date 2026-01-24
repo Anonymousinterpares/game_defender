@@ -9,6 +9,7 @@ import { ProjectileType } from "../components/ProjectileComponent";
 import { DropType } from "../components/DropComponent";
 import { AssetRegistry } from "../../AssetRegistry";
 import { ProjectionUtils } from "../../../utils/ProjectionUtils";
+import { ConfigManager } from "../../../config/MasterConfig";
 
 export class RenderSystem implements System {
     public readonly id = 'render';
@@ -49,7 +50,7 @@ export class RenderSystem implements System {
             const offset = ProjectionUtils.getProjectedOffset(ix, iy, iz, centerX, centerY);
             const renderX = ix + offset.x;
             const renderY = iy + iz + offset.y;
-            
+
             const scale = health?.visualScale ?? render.visualScale;
             const damageFlash = health?.damageFlash ?? render.damageFlash;
 
@@ -75,8 +76,9 @@ export class RenderSystem implements System {
                     }
                     ctx.restore();
 
-                    // Render Fire Effect on top
-                    if (fire?.isOnFire) {
+                    // Render Fire Effect on top - Only if GPU is NOT handling it
+                    const gpuEnabled = ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled');
+                    if (fire?.isOnFire && !gpuEnabled) {
                         this.drawFire(ctx, renderX, renderY, render.radius, id);
                     }
                     ctx.restore();
@@ -108,12 +110,12 @@ export class RenderSystem implements System {
         ctx.save();
         ctx.translate(x, y);
         ctx.scale(shadowScale, shadowScale * 0.6); // Flattened ellipse
-        
+
         ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
         ctx.beginPath();
         ctx.arc(0, 0, radius, 0, Math.PI * 2);
         ctx.fill();
-        
+
         ctx.restore();
     }
 
@@ -550,7 +552,7 @@ export class RenderSystem implements System {
             const transform = entityManager.getComponent<TransformComponent>(id, 'transform')!;
             const render = entityManager.getComponent<RenderComponent>(id, 'render')!;
 
-            if (render.renderType === 'custom') continue; 
+            if (render.renderType === 'custom') continue;
 
             // Interpolation
             const ix = transform.prevX + (transform.x - transform.prevX) * alpha;

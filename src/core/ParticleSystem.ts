@@ -207,14 +207,25 @@ export class ParticleSystem {
         }
         return this.emitter.spawnParticle(x, y, color, vx, vy, life);
     }
-    public spawnSmoke(x: number, y: number, vx: number, vy: number, life: number, size: number, color: string): number {
+    public spawnSmoke(x: number, y: number, vx: number, vy: number, life: number, size: number, color: string, z: number = 0, vz: number = 0): number {
         const gpuEnabled = ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled');
 
         if (gpuEnabled) {
             if (this.onSmokeSpawned) {
+                // Pass color to handler, but also upload actual particle if needed
+                // Currently handleSmokeSpawned in GPURenderer only does fluid splat
+                // I should ALSO spawn a smoke puff particle if I want volumetric blobs
                 this.onSmokeSpawned(x, y, color);
             }
-            return -1; // Handled by GPU Fluid Simulation
+
+            // Spawn high-density smoke particle
+            if (this.gpuSystem) {
+                // variation based on color
+                const colorVar = color === '#000' ? 0.9 : 0.4;
+                this.gpuSystem.uploadParticle(x, y, vx, vy, life, 4, 1, z, vz);
+            }
+
+            return -1;
         }
 
         return this.emitter.spawnSmoke(x, y, vx, vy, life, size, color);
@@ -248,7 +259,7 @@ export class ParticleSystem {
         return events;
     }
 
-    public update(dt: number, world: World | null, player: ParticleTarget | null, enemies: ParticleTarget[]): void {
+    public update(dt: number, world: World | null, player: ParticleTarget | null, enemies: ParticleTarget[], cameraCenterX: number = 0, cameraCenterY: number = 0): void {
         if (ConfigManager.getInstance().get<boolean>('Visuals', 'enableSmoke') && world) {
             this.smokeInterval += dt;
             if (this.smokeInterval > 0.05) { // 20 times per second
@@ -261,6 +272,7 @@ export class ParticleSystem {
             if (this.fireInterval > 0.033) { // 30 times per second
                 this.fireInterval = 0;
                 this.emitEntityFire(player, enemies);
+                this.emitEnvironmentFire(world);
             }
         }
 
@@ -284,6 +296,12 @@ export class ParticleSystem {
                     }
                 });
             }
+        } else {
+            // ... (CPU Fallback clipped for space, will handle if needed)
+        }
+
+        if (this.gpuSystem) {
+            this.gpuSystem.update(dt, performance.now() * 0.001, cameraCenterX, cameraCenterY);
         } else {
             // Fallback: Run logic on main thread using shared ParticleSimulation
             if (world) {
@@ -343,6 +361,7 @@ export class ParticleSystem {
         if (!heatMap) return;
         const activeTiles = heatMap.activeTiles;
         const tileSize = world.getTileSize();
+        const wallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32;
 
         activeTiles.forEach((key: string) => {
             const summary = heatMap.getTileSummary(key);
@@ -352,7 +371,10 @@ export class ParticleSystem {
             const centerX = tx * tileSize + tileSize / 2;
             const centerY = ty * tileSize + tileSize / 2;
 
-            // 1. DENSE FIRE SMOKE (Major Tile Level)
+            const isWall = world.getTile(tx, ty) !== 0;
+            const baseZ = isWall ? -wallHeight : 0;
+
+            // 1. DENSE FIRE SMOKE
             if (summary.burningCount > 0) {
                 const fireIntensity = summary.burningCount / 100;
                 const ppm = ConfigManager.getInstance().getPixelsPerMeter();
@@ -365,21 +387,22 @@ export class ParticleSystem {
                         const size = (tileSize * 2.5) + (fireIntensity * tileSize * 2.5);
 
                         const vx = (Math.random() - 0.5) * 5 * ppm;
-                        const vy = (-5 - Math.random() * 8) * ppm;
+                        const vy = (Math.random() - 0.5) * 5 * ppm;
+                        const vz = -20 - Math.random() * 30;
 
-                        // STRICT SEPARATION: calls local logic which checks GPU flag
-                        this.spawnSmoke(centerX + offset, centerY + offset, vx, vy, life, size, '#000');
+                        this.spawnSmoke(centerX + offset, centerY + offset, vx, vy, life, size, '#000', baseZ, vz);
                     }
                 }
             }
 
-            // 2. RESIDUE HEAT SMOKE (Smaller/Lighter)
+            // 2. RESIDUE HEAT SMOKE
             if (summary.maxHeat > 0.4 && Math.random() < summary.avgHeat * 0.4) {
                 const ppm = ConfigManager.getInstance().getPixelsPerMeter();
                 const vx = (Math.random() - 0.5) * 2 * ppm;
-                const vy = (-2 - Math.random() * 3) * ppm;
+                const vy = (Math.random() - 0.5) * 2 * ppm;
+                const vz = -10 - Math.random() * 10;
 
-                this.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, vx, vy, 2.0, tileSize * 1.2, '#666');
+                this.spawnSmoke(centerX + (Math.random() - 0.5) * tileSize, centerY + (Math.random() - 0.5) * tileSize, vx, vy, 2.0, tileSize * 1.2, '#666', baseZ, vz);
             }
         });
     }
@@ -404,30 +427,84 @@ export class ParticleSystem {
 
         targets.forEach(t => {
             if (t.active && (t as any).isOnFire) {
-                // Determine how many particles to spawn based on size
                 const count = Math.ceil(t.radius / 5);
                 for (let i = 0; i < count; i++) {
                     const offset = (Math.random() - 0.5) * t.radius * 2.0;
                     const wx = t.x + offset;
                     const wy = t.y + (Math.random() - 0.5) * t.radius;
+
                     const vx = (Math.random() - 0.5) * 40;
-                    const vy = -40 - Math.random() * 60;
+                    const vy = (Math.random() - 0.5) * 40;
                     const life = 0.5 + Math.random() * 0.5;
 
-                    this.spawnFireParticle(wx, wy, vx, vy, life);
+                    // Use actual height for entity: start at feet and rise? 
+                    // No, fire usually covers the whole body.
+                    const z = (t as any).z || 0;
+                    const localZ = z - Math.random() * t.radius;
+                    const vz = -40 - Math.random() * 60; // Upward rise
+
+                    this.spawnFireParticle(wx, wy, vx, vy, life, localZ, vz);
                 }
             }
         });
     }
 
-    public spawnFireParticle(x: number, y: number, vx: number, vy: number, life: number): void {
+    public spawnFireParticle(x: number, y: number, vx: number, vy: number, life: number, z: number = 0, vz: number = 0): void {
         if (this.gpuSystem && ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled')) {
-            // FIRE = 5, FLAG_ACTIVE = 1
-            this.gpuSystem.uploadParticle(x, y, vx, vy, life, 5, 1);
+            // TYPE_FIRE = 5, FLAG_ACTIVE = 1
+            this.gpuSystem.uploadParticle(x, y, vx, vy, life, 5, 1, z, vz);
         } else {
-            // Fallback to CPU flame particle if exists
-            this.spawnParticle(x, y, '#ff9900', vx, vy, life, 2); // 2 is FLAG_IS_FLAME
+            this.spawnParticle(x, y, '#ff9900', vx, vy, life, 2);
         }
+    }
+
+    private emitEnvironmentFire(world: World): void {
+        const heatMap = world.getHeatMap();
+        if (!heatMap) return;
+        const activeTiles = heatMap.activeTiles;
+        const tileSize = world.getTileSize();
+        const wallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32;
+
+        activeTiles.forEach((key: string) => {
+            const summary = heatMap.getTileSummary(key);
+            if (!summary || summary.burningCount === 0) return;
+
+            const [tx, ty] = key.split(',').map(Number);
+            // Check if it's a solid tile (Wall)
+            const tileMat = world.getTile(tx, ty);
+            const isWall = tileMat !== 0; // MaterialType.NONE is 0
+
+            // Density based on how many sub-tiles are burning
+            const intensity = summary.burningCount / 100;
+            const count = Math.ceil(intensity * 4); // 1-4 per frame
+
+            for (let i = 0; i < count; i++) {
+                const ox = (Math.random() - 0.5) * tileSize;
+                const oy = (Math.random() - 0.5) * tileSize;
+
+                let z = 0;
+                let vz = -40 - Math.random() * 60; // Initial rise
+
+                if (isWall) {
+                    // Fire "ON TOP" of walls: 
+                    // Start at the top cap (-wallHeight) or slightly below it to look like it's coming from the top face
+                    z = -(wallHeight - 2 + Math.random() * 5);
+                } else {
+                    // Ground fire
+                    z = 0;
+                }
+
+                this.spawnFireParticle(
+                    tx * tileSize + tileSize / 2 + ox,
+                    ty * tileSize + tileSize / 2 + oy,
+                    (Math.random() - 0.5) * 10,
+                    (Math.random() - 0.5) * 10,
+                    0.4 + Math.random() * 0.4,
+                    z,
+                    vz
+                );
+            }
+        });
     }
 
     public clear(): void {
