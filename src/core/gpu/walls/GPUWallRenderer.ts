@@ -133,7 +133,7 @@ export class GPUWallRenderer {
         image.src = `${import.meta.env.BASE_URL}textures/GROUND/Ground103_1K-JPG/Ground103_1K-JPG_Color.jpg`;
     }
 
-    public render(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, worldMap: WebGLTexture | null): void {
+    public render(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, worldMap: WebGLTexture | null, time: number): void {
         if (!this.initialized || !this.gl) return;
         const gl = this.gl;
         const timeState = WorldClock.getInstance().getTimeState();
@@ -189,6 +189,7 @@ export class GPUWallRenderer {
             const shadowRange = ConfigManager.getInstance().get<number>('Lighting', 'explosionShadowRangeTiles') || 40.0;
             this.shader.setUniform1f("u_shadowRange", shadowRange);
             this.shader.setUniform2f("u_structureSize", this.structureW, this.structureH);
+            this.shader.setUniform1f("u_time", time);
             this.shader.setUniform1f("u_tileSize", world.getTileSize());
 
             const { sun, moon } = timeState;
@@ -238,6 +239,7 @@ export class GPUWallRenderer {
         shader.setUniform2f("u_worldPixels", world.getWidthPixels(), world.getHeightPixels());
         shader.setUniform1f("u_tileSize", world.getTileSize());
         shader.setUniform1f("u_textureScale", 10.0); // Tile texture every 10 tiles
+        shader.setUniform1f("u_time", performance.now() * 0.001);
 
         const shadowRange = ConfigManager.getInstance().get<number>('Lighting', 'explosionShadowRangeTiles') || 40.0;
         shader.setUniform1f("u_shadowRange", shadowRange);

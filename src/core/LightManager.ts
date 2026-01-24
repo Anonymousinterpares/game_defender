@@ -153,18 +153,19 @@ export class LightManager {
     public updateFireLights(fireClusters: { x: number, y: number, intensity: number, color?: string }[]): void {
         this.clearType('fire');
         const defaultColor = ConfigManager.getInstance().get<string>('Lighting', 'fireLightColor') || '#ff6600';
-        const baseRadius = ConfigManager.getInstance().get<number>('Lighting', 'fireLightRadius') || 250;
+        const baseRadius = ConfigManager.getInstance().get<number>('Lighting', 'fireLightRadius') || 350;
+        const baseIntensity = ConfigManager.getInstance().get<number>('Lighting', 'fireLightIntensity') || 1.6;
 
         fireClusters.forEach((cluster, index) => {
             this.addConstantLight({ // Reusing logic for consistency
                 id: `fire_cluster_${index}`,
                 x: cluster.x,
                 y: cluster.y,
-                radius: baseRadius * (0.5 + cluster.intensity * 0.5),
+                radius: baseRadius * (0.6 + cluster.intensity * 0.4),
                 color: cluster.color || defaultColor,
-                intensity: Math.min(1.5, cluster.intensity),
+                intensity: baseIntensity * Math.min(1.5, cluster.intensity),
                 type: 'fire',
-                castsShadows: false
+                castsShadows: true
             });
         });
     }

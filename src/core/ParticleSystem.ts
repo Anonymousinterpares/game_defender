@@ -256,6 +256,12 @@ export class ParticleSystem {
                 this.emitHeatSmoke(world);
                 this.emitEntitySmoke(player, enemies);
             }
+
+            this.fireInterval += dt;
+            if (this.fireInterval > 0.033) { // 30 times per second
+                this.fireInterval = 0;
+                this.emitEntityFire(player, enemies);
+            }
         }
 
         // 1. Spawning
@@ -330,6 +336,7 @@ export class ParticleSystem {
     }
 
     private smokeInterval: number = 0;
+    private fireInterval: number = 0;
 
     private emitHeatSmoke(world: World): void {
         const heatMap = world.getHeatMap();
@@ -389,6 +396,38 @@ export class ParticleSystem {
                 }
             }
         });
+    }
+
+    private emitEntityFire(player: ParticleTarget | null, enemies: ParticleTarget[]): void {
+        const targets = player ? [player, ...enemies] : enemies;
+        const gpuActive = ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled');
+
+        targets.forEach(t => {
+            if (t.active && (t as any).isOnFire) {
+                // Determine how many particles to spawn based on size
+                const count = Math.ceil(t.radius / 5);
+                for (let i = 0; i < count; i++) {
+                    const offset = (Math.random() - 0.5) * t.radius * 2.0;
+                    const wx = t.x + offset;
+                    const wy = t.y + (Math.random() - 0.5) * t.radius;
+                    const vx = (Math.random() - 0.5) * 40;
+                    const vy = -40 - Math.random() * 60;
+                    const life = 0.5 + Math.random() * 0.5;
+
+                    this.spawnFireParticle(wx, wy, vx, vy, life);
+                }
+            }
+        });
+    }
+
+    public spawnFireParticle(x: number, y: number, vx: number, vy: number, life: number): void {
+        if (this.gpuSystem && ConfigManager.getInstance().get<boolean>('Visuals', 'gpuEnabled')) {
+            // FIRE = 5, FLAG_ACTIVE = 1
+            this.gpuSystem.uploadParticle(x, y, vx, vy, life, 5, 1);
+        } else {
+            // Fallback to CPU flame particle if exists
+            this.spawnParticle(x, y, '#ff9900', vx, vy, life, 2); // 2 is FLAG_IS_FLAME
+        }
     }
 
     public clear(): void {

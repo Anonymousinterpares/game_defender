@@ -286,10 +286,8 @@ export class FluidSimulation {
         if (debug) console.log(`[GPU] Fluid Splat UV: (${uvX.toFixed(3)}, ${uvY.toFixed(3)})`);
 
         this.splatShader!.setUniform2f("u_point", uvX, uvY);
-        // Phase 2: Physics-based radius (replace magic number 500.0)
-        const gridRadius = (radius / (worldW / this.width)) * 1.5;
-        this.splatShader!.setUniform1f("u_radius", gridRadius);
-        this.splatShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
+        this.splatShader!.setUniform1f("u_radius", radius); // Now in pixels
+        this.splatShader!.setUniform2f("u_worldPixels", worldW, worldH);
         this.splatShader!.setUniform1i("u_source", 0);
         this.splatShader!.setUniform4f("u_color", r, g, b, 1.0);
 
@@ -329,14 +327,11 @@ export class FluidSimulation {
         this.splatShader!.use();
 
         this.splatShader!.setUniform2f("u_point", uvX, uvY);
-        // Phase 2: Physics-based radius (replace magic number 500.0)
-        const gridRadius = (radius / (worldW / this.width)) * 1.5;
-        this.splatShader!.setUniform1f("u_radius", gridRadius);
-        this.splatShader!.setUniform2f("u_texelSize", 1 / this.width, 1 / this.height);
+        this.splatShader!.setUniform1f("u_radius", radius);
+        this.splatShader!.setUniform2f("u_worldPixels", worldW, worldH);
         this.splatShader!.setUniform1i("u_source", 0);
-        // Phase 2: Add velocity scale factor (was too weak after normalization)
-        const velScale = 2.0;
-        this.splatShader!.setUniform4f("u_color", (vx / worldW) * velScale, (-vy / worldH) * velScale, 0.0, 1.0);
+        // VELOCITY MUST BE IN UV UNITS PER SECOND for the advection shader
+        this.splatShader!.setUniform4f("u_color", vx / worldW, -vy / worldH, 0.0, 1.0);
 
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.velocityFBOs[srcIdx].tex);
         this.renderQuad();

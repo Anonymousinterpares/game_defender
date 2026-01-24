@@ -186,7 +186,7 @@ export class HeatMap {
                 data[i] = Math.min(1.0, data[i] + (1 - dist / radius) * amount);
                 this.simulator.applyScorch(this.state, tx, ty, i, this.worldRef);
                 if (data[i] > 0.6 && mData && MATERIAL_PROPS[mData[i] as MaterialType].flammable) {
-                    this.simulator.ignite(this.state, tx, ty, i);
+                    this.simulator.ignite(this.state, tx, ty, i, this.tileSize);
                 }
             }
         }
@@ -225,7 +225,7 @@ export class HeatMap {
             const dist = Math.sqrt(dx * dx + dy * dy);
 
             if (dist < radius && this.isSubTileSurface(tx, ty, i)) {
-                this.simulator.ignite(this.state, tx, ty, i);
+                this.simulator.ignite(this.state, tx, ty, i, this.tileSize);
                 this.simulator.applyScorch(this.state, tx, ty, i, this.worldRef);
             }
         }

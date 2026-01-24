@@ -27,6 +27,7 @@ out vec4 v_props;
 #define TYPE_FLASH 2.0
 #define TYPE_MOLTEN 3.0
 #define TYPE_SMOKE 4.0
+#define TYPE_FIRE 5.0
 
 // Simple Psuedo Random
 float rand(vec2 co){
@@ -96,6 +97,20 @@ void main() {
         float drag = 0.5; // Matched to CPU
         posVel.z += (u_wind.x + turbX - posVel.z * drag) * u_dt;
         posVel.w += (u_wind.y + driftY + turbY - posVel.w * drag) * u_dt;
+    } else if (abs(type - TYPE_FIRE) < 0.1) {
+        // Fire Physics: Fast Rising + Random Wiggle
+        float driftY = -4.0 * u_ppm; // Rise faster than smoke
+        
+        float id = float(gl_VertexID);
+        float t = u_time * 5.0;
+        
+        // High frequency wiggle
+        float wiggleX = sin(id * 2.1 + t) * 2.0 * u_ppm;
+        float wiggleY = cos(id * 1.5 + t) * 1.0 * u_ppm;
+        
+        float drag = 1.0;
+        posVel.z += (u_wind.x * 0.5 + wiggleX - posVel.z * drag) * u_dt;
+        posVel.w += (u_wind.y * 0.5 + driftY + wiggleY - posVel.w * drag) * u_dt;
     } else {
         // Standard / Molten Physics
         if (!isGrounded) {

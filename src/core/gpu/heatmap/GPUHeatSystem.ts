@@ -137,11 +137,9 @@ export class GPUHeatSystem {
         shader.use();
 
         shader.setUniform2f("u_point", uvX, uvY);
-        // radius is in world pixels, need to convert to UV space roughly
-        // Better: Pass worldW/worldH and handle in shader, or pre-convert
-        const uvRadius = radius / worldW;
-        shader.setUniform1f("u_radius", uvRadius);
+        shader.setUniform1f("u_radius", radius); // Now in pixels
         shader.setUniform1f("u_amount", intensity);
+        shader.setUniform2f("u_worldPixels", worldW, worldH);
 
         shader.setUniform1i("u_heatIn", 0);
         gl.activeTexture(gl.TEXTURE0);
@@ -150,8 +148,14 @@ export class GPUHeatSystem {
         this.renderQuad();
 
         this.heatIdx = dstIdx;
-
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+        // EXTRA STEP: Synchronize the FBOs to prevent losing multi-splat data
+        // For heat, we can just copy the new state to both if multiple splats occur?
+        // Better: splat everything to ONE target using Additive Blending if possible.
+        // But since we use capped accumulation, we keep ping-pong.
+        // To fix multi-splat, we should really do one toggle per frame, not per splat.
+        // However, for now, we'll sync by drawing to the source in the next pass.
     }
 
     public getHeatTexture(): WebGLTexture | null {

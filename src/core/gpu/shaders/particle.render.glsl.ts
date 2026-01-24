@@ -18,6 +18,7 @@ out vec2 v_uv;
 #define TYPE_FLASH 2.0
 #define TYPE_MOLTEN 3.0
 #define TYPE_SMOKE 4.0
+#define TYPE_FIRE 5.0
 
 void main() {
     float life = a_props.x;
@@ -53,6 +54,10 @@ void main() {
         // Hot orange/yellow to red
         // CPU uses white -> yellow -> red -> dark
         baseColor = vec4(1.0, 0.5 + v_lifeRatio * 0.5, 0.0, 1.0);
+    } else if (abs(type - TYPE_FIRE) < 0.1) {
+        // Fire: Medium size, narrows over life
+        size = 15.0 * (0.5 + v_lifeRatio * 0.5);
+        baseColor = vec4(1.0, 0.8, 0.2, 1.0); // Bright yellowish
     } else {
         size = 3.0;
         baseColor = vec4(1.0, 1.0, 1.0, 1.0);
@@ -96,6 +101,7 @@ uniform float u_time;
 #define TYPE_FLASH 2.0
 #define TYPE_MOLTEN 3.0
 #define TYPE_SMOKE 4.0
+#define TYPE_FIRE 5.0
 
 // 2D Hash for noise
 float hash(vec2 p) {
@@ -186,6 +192,22 @@ void main() {
         // Alpha follows "heat" - cold particles are much dimmer
         float heatAlpha = mix(0.1, 1.0, smoothstep(0.0, 0.4, v_lifeRatio));
         alpha = (glowArea * 0.6 + core) * heatAlpha * flicker;
+    } else if (abs(type - TYPE_FIRE) < 0.1) {
+        // --- FLICKERING FLAME VISUALS ---
+        float flicker = noise(vec2(u_time * 25.0, v_lifeRatio * 10.0));
+        
+        // Elongated shape (teardrop-ish approximation)
+        float shape = 1.0 - smoothstep(0.0, 0.5 + flicker * 0.3, dist);
+        shape *= (1.0 - v_uv.y * 0.5); // Narrower at top
+        
+        // Color Ramp for Flames
+        vec3 color;
+        if (v_lifeRatio > 0.8)      color = mix(vec3(1.0, 0.8, 0.2), vec3(1.0, 1.0, 1.0), (v_lifeRatio - 0.8) * 5.0); // Inner white core
+        else if (v_lifeRatio > 0.4) color = mix(vec3(1.0, 0.3, 0.0), vec3(1.0, 0.8, 0.2), (v_lifeRatio - 0.4) * 2.5); // Yellow/Orange
+        else                        color = mix(vec3(0.4, 0.0, 0.0), vec3(1.0, 0.3, 0.0), v_lifeRatio * 2.5);         // Red/Orange bottom
+        
+        finalColor.rgb = color * (0.8 + 0.4 * flicker);
+        alpha = shape * (0.4 + 0.6 * v_lifeRatio);
     } else {
         // Hard circle
         if (dist > 0.8) alpha = 0.0;

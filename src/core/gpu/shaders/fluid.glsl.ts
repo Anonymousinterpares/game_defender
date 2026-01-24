@@ -49,21 +49,22 @@ export const FLUID_ADVECT = `#version 300 es
 
 export const FLUID_SPLAT = `#version 300 es
     precision highp float;
-    uniform sampler2D u_source;
-    uniform vec2 u_point;
-    uniform float u_radius;
-    uniform vec4 u_color; // density, temp, variation, unused
-    uniform vec2 u_texelSize;
-    in vec2 v_uv;
-    out vec4 outColor;
+uniform sampler2D u_source;
+uniform vec2 u_point;    // UV space
+uniform float u_radius;   // Pixel space
+uniform vec4 u_color;     // density, temp, variation, unused
+uniform vec2 u_worldPixels;
+in vec2 v_uv;
+out vec4 outColor;
 
 void main() {
-        vec2 diff = (v_uv - u_point) / u_texelSize;
-        float d = dot(diff, diff);
+        // Calculate distance in world pixels
+        vec2 p1 = v_uv * u_worldPixels;
+        vec2 p2 = u_point * u_worldPixels;
+        float dSq = dot(p1 - p2, p1 - p2);
 
-        // Gaussian splat with DENSITY CAPPING
-        float scale = 1.0; 
-        float m = exp(-d / max(u_radius, 1.0));
+        // Gaussian splat with pixel radius - sharper falloff
+        float m = exp(-dSq / (0.5 * u_radius * u_radius));
         vec4 base = texture(u_source, v_uv);
 
         // Cap additive density to prevent excessive accumulation

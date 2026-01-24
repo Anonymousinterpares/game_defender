@@ -42,11 +42,11 @@ void main() {
 
 export const HEAT_SPLAT_FRAG = `#version 300 es
 precision highp float;
-
 uniform sampler2D u_heatIn;
-uniform vec2 u_point;
-uniform float u_radius;
+uniform vec2 u_point;  // UV space
+uniform float u_radius; // Pixel space
 uniform float u_amount;
+uniform vec2 u_worldPixels;
 
 in vec2 v_uv;
 out vec4 outColor;
@@ -54,7 +54,11 @@ out vec4 outColor;
 void main() {
     float center = texture(u_heatIn, v_uv).r;
     
-    float dist = distance(v_uv, u_point);
+    // Map both UVs to pixel space for distance
+    vec2 p1 = v_uv * u_worldPixels;
+    vec2 p2 = u_point * u_worldPixels;
+    
+    float dist = distance(p1, p2);
     float falloff = 1.0 - smoothstep(0.0, u_radius, dist);
     
     // Accumulate heat, capped at 1.0

@@ -92,18 +92,25 @@ export class GPURenderer {
         const densityMult = ConfigManager.getInstance().get<number>('Visuals', 'smokeDensityMultiplier') || 1.0;
         let density = 0.12 * densityMult, temp = 0.15, variation = 0.5;
 
-        if (color === '#000' || color === '#111' || color === '#222') {
-            density = 0.2 * densityMult; temp = 0.8; variation = 0.05;
+        if (color === '#000' || color === 'black') {
+            density = 1.0 * densityMult; temp = 0.98; variation = 0.005;
+        } else if (color === '#111' || color === '#222') {
+            density = 0.7 * densityMult; temp = 0.8; variation = 0.02;
         } else if (color === '#888' || color === '#666' || color === '#555') {
-            density = 0.15 * densityMult; temp = 0.3;
+            density = 0.4 * densityMult; temp = 0.4; variation = 0.5;
         }
 
         const wpW = this.world.getWidthPixels(), wpH = this.world.getHeightPixels();
-        const ppm = ConfigManager.getInstance().getPixelsPerMeter();
-        const radius = (3.0 + Math.random() * 2.0) * ppm;
+        const ts = this.world.getTileSize();
+        // Smoke puff radius: ~0.5 to 1.0 tile
+        const radius = (0.5 + Math.random() * 0.5) * ts;
 
         this.fluidSimulation.splat(x, y, radius, density, temp, variation, wpW, wpH);
-        this.fluidSimulation.splatVelocity(x, y, radius * 0.8, (Math.random() - 0.5) * 20 * ppm, (Math.random() - 0.5) * 20 * ppm, wpW, wpH);
+
+        // Random drift velocity while spawning
+        const driftX = (Math.random() - 0.5) * 50;
+        const driftY = (Math.random() - 0.5) * 50;
+        this.fluidSimulation.splatVelocity(x, y, radius * 1.2, driftX, driftY, wpW, wpH);
     };
 
     public setWorld(world: World): void {
@@ -114,7 +121,8 @@ export class GPURenderer {
                 if (this.active && this.heatSystem) this.heatSystem.splatHeat(x, y, radius, amount, world.getWidthPixels(), world.getHeightPixels());
             };
             hm.onIgnite = (x: number, y: number, radius: number) => {
-                if (this.active && this.heatSystem) this.heatSystem.splatHeat(x, y, radius, 0.5, world.getWidthPixels(), world.getHeightPixels());
+                // If it's ignition, we want FULL heat immediately
+                if (this.active && this.heatSystem) this.heatSystem.splatHeat(x, y, radius, 1.0, world.getWidthPixels(), world.getHeightPixels());
             };
         }
     }
@@ -189,7 +197,7 @@ export class GPURenderer {
         gl.viewport(0, 0, canvas.width, canvas.height);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         this.context.clear();
-        this.wallRenderer.render(this.world, cameraX, cameraY, width, height, this.heatSystem, this.lightBuffer, this.worldMapTexture);
+        this.wallRenderer.render(this.world, cameraX, cameraY, width, height, this.heatSystem, this.lightBuffer, this.worldMapTexture, performance.now() * 0.001);
     }
 
     public renderFX(cameraX: number, cameraY: number, width: number, height: number): void {
@@ -233,8 +241,10 @@ export class GPURenderer {
         this.fluidShader.setUniform2f("u_camera", cameraX, cameraY);
         this.fluidShader.setUniform2f("u_resolution", width, height);
         this.fluidShader.setUniform2f("u_worldPixels", this.world!.getWidthPixels(), this.world!.getHeightPixels());
+
+        // Fix for premultiplied alpha: Use ONE instead of SRC_ALPHA
         gl.enable(gl.BLEND);
-        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         gl.disable(gl.BLEND);
     }

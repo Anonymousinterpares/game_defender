@@ -167,6 +167,7 @@ export class Simulation implements WeaponParent, CombatParent {
 
         // ECS Init
         this.entityManager = new EntityManager();
+        (this.entityManager as any).heatMap = this.heatMap;
         this.spatialGrid = new Quadtree<Entity>({
             x: 0,
             y: 0,
@@ -279,6 +280,7 @@ export class Simulation implements WeaponParent, CombatParent {
         });
 
         this.entityManager.clear();
+        (this.entityManager as any).heatMap = this.heatMap;
         this.physicsSystem = new PhysicsSystem(this.world, this.spatialGrid);
         this.aiSystem = new AISystem(this.world);
         this.contactDamageSystem = new ContactDamageSystem();

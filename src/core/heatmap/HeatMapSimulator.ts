@@ -261,7 +261,7 @@ export class HeatMapSimulator {
                                         const nmData = state.materialData.get(nKey);
                                         if (nmData && MATERIAL_PROPS[nmData[nIdx] as MaterialType].flammable) {
                                             if (Math.random() < 0.05 * speedMult) {
-                                                this.ignite(state, nTx, nTy, nIdx);
+                                                this.ignite(state, nTx, nTy, nIdx, tileSize);
                                             }
                                         }
                                     }
@@ -320,7 +320,7 @@ export class HeatMapSimulator {
         toRemove.forEach(k => state.activeTiles.delete(k));
     }
 
-    public ignite(state: HeatMapState, tx: number, ty: number, idx: number): void {
+    public ignite(state: HeatMapState, tx: number, ty: number, idx: number, tileSize: number): void {
         const key = `${tx},${ty}`;
         let fData = state.fireData.get(key);
         if (!fData) {
@@ -331,8 +331,9 @@ export class HeatMapSimulator {
             fData[idx] = 0.1;
             // Notify via the HeatMap facade if linked
             if ((this as any).facade && (this as any).facade.onIgnite) {
-                const worldX = tx * 32 + (idx % state.subDiv + 0.5) * (32 / state.subDiv);
-                const worldY = ty * 32 + (Math.floor(idx / state.subDiv) + 0.5) * (32 / state.subDiv);
+                const subSize = tileSize / state.subDiv;
+                const worldX = tx * tileSize + (idx % state.subDiv + 0.5) * subSize;
+                const worldY = ty * tileSize + (Math.floor(idx / state.subDiv) + 0.5) * subSize;
                 (this as any).facade.onIgnite(worldX, worldY, 15); // Small radius for sub-tile
             }
         }

@@ -188,12 +188,14 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
 
         const timeState = WorldClock.getInstance().getTimeState();
         const useFog = ConfigManager.getInstance().get<boolean>('Visuals', 'fogOfWar');
+        // Always update dynamic lights (Fire, Projectiles) so they are visible in shadows/indoors during day
+        this.updateLightClusters();
+        this.updateProjectileLights();
+
         if (timeState.sun.intensity < 0.8 || useFog) {
-            this.updateLightClusters();
-            this.updateProjectileLights();
+            // Additional night-only logic if needed
         } else {
-            LightManager.getInstance().clearConstantLights();
-            LightManager.getInstance().clearType('fire');
+            // Day specific logic
         }
 
         this.gpuRenderer.updateConfig();

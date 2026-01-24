@@ -60,16 +60,17 @@ const FLUID_RENDER_FRAG = `#version 300 es
         
         float noiseDensity = density * (0.6 + n * 0.8);
 
-        // Map variation to smoke color (0.1 = dense/black, 0.9 = light/white)
-        vec3 color = mix(vec3(0.1), vec3(0.9), variation);
+        // Map variation to smoke color
+        // Low variation = Black (darker than before), High = Light grey
+        vec3 color = mix(vec3(0.02), vec3(0.15, 0.15, 0.2), variation);
         
         // Final alpha blending (Exponential Tonemapping for physical transparency)
-        // We use a curve that drops slowly at low densities to keep the "Haze" visible.
-        float alpha = 1.0 - exp(-noiseDensity * 0.4);
+        // Shift curve to be more opaque at low densities
+        float alpha = 1.0 - exp(-noiseDensity * 0.8);
         
-        // Boost noise visibility at low densities to create organic remnants
-        float hazeCleanliness = smoothstep(0.0, 0.2, density);
-        alpha *= mix(0.6 + n * 0.4, 1.0, hazeCleanliness);
+        // Boost noise visibility at low densities
+        float hazeCleanliness = smoothstep(0.0, 0.15, density);
+        alpha *= mix(0.4 + n * 0.6, 1.0, hazeCleanliness);
         
         outColor = vec4(color * alpha, alpha);
     }

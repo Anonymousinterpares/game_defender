@@ -26,6 +26,7 @@ uniform sampler2D u_structureMap;
 uniform vec2 u_structureSize;
 uniform float u_shadowRange;
 uniform float u_tileSize;
+uniform float u_time;
 
 in vec2 v_worldPos;
 in vec2 v_uv;
@@ -35,10 +36,28 @@ in float v_z;
 
 out vec4 outColor;
 
+// Pseudo-random hash
+float hash12(vec2 p) {
+	vec3 p3  = fract(vec3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+// 2D Noise
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+	vec2 u = f*f*(3.0-2.0*f);
+    return mix(mix(hash12(i + vec2(0.0,0.0)), hash12(i + vec2(1.0,0.0)), u.x),
+               mix(hash12(i + vec2(0.0,1.0)), hash12(i + vec2(1.0,1.0)), u.x), u.y);
+}
+
+// Fire Color Ramp
 vec3 getHeatColor(float t) {
-    if (t < 0.4) return vec3(0.39 + 0.61 * (t / 0.4), 0.0, 0.0);
-    else if (t < 0.8) return vec3(1.0, (t - 0.4) / 0.4, 0.0);
-    else return vec3(1.0, 1.0, (t - 0.8) / 0.2);
+    if (t < 0.1) return mix(vec3(0.0), vec3(0.6, 0.0, 0.0), t / 0.1);
+    if (t < 0.3) return mix(vec3(0.6, 0.0, 0.0), vec3(1.0, 0.4, 0.0), (t - 0.1) / 0.2);
+    if (t < 0.6) return mix(vec3(1.0, 0.4, 0.0), vec3(1.0, 0.9, 0.2), (t - 0.3) / 0.3);
+    return mix(vec3(1.0, 0.9, 0.2), vec3(2.0, 2.0, 2.0), (t - 0.6) / 0.4); // Overbright white
 }
 
 // Raymarching DDA shadow function
@@ -133,7 +152,7 @@ void main() {
             if (u_lights[i].posRad.w > 1.5) {
                 // Raymarch to check if this specific wall face is shadowed
                 vec2 rayOrigin = v_worldPos + v_faceNormal * 0.5;
-                shadow = getShadow(rayOrigin, -dirToLight, u_shadowRange * 32.0, u_structureMap, u_worldPixels);
+                shadow = getShadow(rayOrigin, -dirToLight, u_shadowRange * u_tileSize, u_structureMap, u_worldPixels);
             }
             
             lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * dotPL * 5.0 * (1.0 - shadow);
@@ -145,13 +164,49 @@ void main() {
     float edgeFactor = smoothstep(0.0, 0.05, edge); 
     vec3 litColor = baseColor * lightAcc * (0.5 + 0.5 * edgeFactor);
 
-    // Heat
-    vec2 heatUV = vec2(v_worldPos.x / u_worldPixels.x, 1.0 - (v_worldPos.y / u_worldPixels.y));
+    // Heat & Fire
+    // IMPORTANT: Shift sampling point inwards to sample the heat of the TILE ITSELF,
+    // rather than the face edge which might lie on a boundary with a cold tile.
+    vec2 heatSamplePos = v_worldPos;
+    if (length(v_faceNormal) > 0.1) {
+         // Aggressively move inside the tile (0.5 = center of edge transition)
+         heatSamplePos -= v_faceNormal * u_tileSize * 0.5;
+    }
+
+    vec2 heatUV = vec2(heatSamplePos.x / u_worldPixels.x, 1.0 - (heatSamplePos.y / u_worldPixels.y));
     float heat = texture(u_heatTexture, heatUV).r;
+    
     vec3 finalColor = litColor;
+
     if (heat > 0.01) {
-        vec3 glow = getHeatColor(heat);
-        finalColor = mix(litColor, glow, smoothstep(0.1, 0.8, heat));
+        // --- IMPROVED LICKING FLAMES ---
+        // Incorporate v_z (height) to make flames move "up" the wall surface
+        // a_position.z is negative for UP, so -v_z is 0..32
+        float wallHeightCoord = -v_z; 
+        
+        // High frequency flicker
+        float flicker = 0.8 + 0.2 * noise(vec2(u_time * 20.0, v_worldPos.x));
+        
+        // Vertical licking noise: worldPos + height + time
+        float noiseScale = 0.1;
+        float flame = noise(v_worldPos * noiseScale + vec2(0.0, -u_time * 5.0 + wallHeightCoord * 0.2));
+        float turb = noise(v_worldPos * noiseScale * 2.0 + vec2(u_time, -u_time * 8.0));
+        
+        float combinedHeat = heat * (0.7 + 0.5 * flame + 0.2 * turb) * flicker;
+        vec3 heatCol = getHeatColor(clamp(combinedHeat, 0.0, 1.0));
+        
+        // Emissive Boost: Make fire ignore day lighting more effectively
+        // by subtracting lighting/ambient where heat is high
+        float intenseFire = smoothstep(0.4, 0.9, heat);
+        
+        if (heat < 0.3) {
+             finalColor = mix(litColor, litColor * 0.15, smoothstep(0.0, 0.3, heat)); // Charring
+             finalColor = mix(finalColor, heatCol * 1.5, smoothstep(0.1, 0.3, heat)); 
+        } else {
+             // Intense Fire: Overpowered emissive color
+             // We use a high multiplier (2.0+) to ensure it's brighter than any sun intensity
+             finalColor = mix(litColor * 0.05, heatCol * 2.5, smoothstep(0.3, 0.7, heat));
+        }
     }
 
     outColor = vec4(finalColor, 1.0);
