@@ -7,6 +7,7 @@ layout(location = 3) in vec2 a_faceNormal; // nx, ny (facing normal)
 uniform mat4 u_viewProj;
 uniform vec2 u_cameraCenter;
 uniform float u_perspectiveStrength;
+uniform vec2 u_worldPixels;
 
 out vec2 v_worldPos;
 out vec2 v_uv;
@@ -37,6 +38,12 @@ void main() {
     // So y + z actually means moving "up" the screen.
     float projectedY = projectedPos.y + a_position.z;
 
-    gl_Position = u_viewProj * vec4(projectedPos.x, projectedY, 0.0, 1.0);
+    // Depth Sorting logic: Foreground (High Y) -> Lower NDC Z (-1 to 1)
+    // Background (Low Y) -> Higher NDC Z
+    // Our u_viewProj matrix has m[10] = -1, so gl_Position.z = -1 * input_z.
+    // To get gl_Position.z in [-1, 1], we map Y to [-1, 1].
+    float normalizedY = (a_position.y / u_worldPixels.y) * 2.0 - 1.0;
+
+    gl_Position = u_viewProj * vec4(projectedPos.x, projectedY, normalizedY, 1.0);
 }
 `;

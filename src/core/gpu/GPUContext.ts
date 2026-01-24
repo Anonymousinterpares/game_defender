@@ -15,7 +15,7 @@ export class GPUContext {
             alpha: true,
             antialias: true,
             premultipliedAlpha: true,
-            depth: false,
+            depth: true,
             stencil: false,
             preserveDrawingBuffer: true
         });
@@ -60,9 +60,14 @@ export class GPUContext {
         return this.gl;
     }
 
-    public clear(): void {
+    public clear(clearDepth: boolean = true): void {
         this.gl.clearColor(0, 0, 0, 0);
-        this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+        if (clearDepth) {
+            this.gl.clearDepth(1.0);
+            this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
+        } else {
+            this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+        }
     }
 
     public dispose(): void {

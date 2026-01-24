@@ -138,6 +138,10 @@ export class GPUWallRenderer {
         const gl = this.gl;
         const timeState = WorldClock.getInstance().getTimeState();
 
+        this.gl.enable(gl.DEPTH_TEST);
+        this.gl.depthFunc(gl.LEQUAL);
+        this.gl.depthMask(true);
+
         this.renderGround(world, cameraX, cameraY, screenW, screenH, heatSystem, lightBuffer, worldMap, timeState);
 
         if (this.lastWorld !== world) {
@@ -331,6 +335,8 @@ export class GPUWallRenderer {
         const gl = this.gl;
         gl.bindVertexArray(null);
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        gl.disable(gl.DEPTH_TEST);
+        gl.depthMask(true);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, null);
         gl.activeTexture(gl.TEXTURE1);

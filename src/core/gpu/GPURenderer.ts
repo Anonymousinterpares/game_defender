@@ -200,7 +200,11 @@ export class GPURenderer {
         // IMPORTANT: Clear the buffer for the FX pass so it only contains transparent FX
         // Otherwise the second compositeToContext will blit the environment again, covering entities.
         gl.viewport(0, 0, canvas.width, canvas.height);
-        this.context.clear();
+        this.context.clear(false); // Preserve depth buffer for occlusion
+
+        // FX pass: Read from depth (to be behind walls) but don't write to it (to avoid particle-on-particle clipping)
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthMask(false);
 
         if (this.fluidSimulation) this.renderFluid(cameraX, cameraY, width, height);
         if (this.particleSystem) {
@@ -209,6 +213,9 @@ export class GPURenderer {
             this.particleSystem.render(cameraX, cameraY, width, height);
             gl.disable(gl.BLEND);
         }
+
+        gl.disable(gl.DEPTH_TEST);
+        gl.depthMask(true);
     }
 
     private renderFluid(cameraX: number, cameraY: number, width: number, height: number): void {

@@ -5,7 +5,7 @@ out vec2 v_worldPos; // Pass NDC to fragment shader
 
 void main() {
     v_worldPos = a_position;
-    gl_Position = vec4(a_position, 0.0, 1.0);
+    gl_Position = vec4(a_position, 0.999, 1.0);
 }
 `;
 
