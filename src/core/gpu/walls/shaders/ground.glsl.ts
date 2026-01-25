@@ -121,11 +121,13 @@ vec3 sampleEmissivePathtraced(vec2 worldPos, sampler2D sdfMap, sampler2D emissiv
             if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
             
             float d = texture(sdfMap, uv).r;
-            if (d < 2.0) {
+            if (d < 1.0) { // Tighter threshold - only hit actual walls
                 // We "hit" something. Sample the emissive map near the hit point.
-                // We offset slightly back to sample the surface.
-                vec2 hitUV = (worldPos + rayDir * (t + 1.0)) / worldPixels;
-                indirect += texture(emissiveMap, hitUV).rgb * (1.0 / (1.0 + t * t * 0.0001));
+                // We verify if the structure map shows a wall to avoid sampling "SDF holes"
+                float structureCheck = texture(u_structureMap, uv).r;
+                if (structureCheck > 0.5) {
+                    indirect += texture(emissiveMap, uv).rgb * (1.0 / (1.0 + t * t * 0.0001));
+                }
                 break;
             }
             t += d;
@@ -248,6 +250,13 @@ void main() {
         
         finalColor = mix(litColor, litColor * 0.1, smoothstep(0.0, 0.4, heat));
         finalColor = mix(finalColor, glow, smoothstep(0.1, 0.8, heat));
+    }
+
+    // DEBUG: Visualize heat texture directly if heat is missing
+    if (heat > 0.01) { 
+        vec3 heatDebugCol = getHeatColor(clamp(heat, 0.0, 1.0));
+        outColor = vec4(heatDebugCol, 1.0); 
+        return; 
     }
 
     outColor = vec4(finalColor, 1.0);

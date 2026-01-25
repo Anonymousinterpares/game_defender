@@ -91,7 +91,7 @@ export class GPURenderer {
 
         if (!this.particleSystem['initialized']) this.particleSystem.init(gl);
         if (this.fluidSimulation && !this.fluidSimulation.isInitialized) this.fluidSimulation.init(gl, 256, 256);
-        if (this.heatSystem && !this.heatSystem.isInitialized) this.heatSystem.init(gl, 512, 512);
+        if (this.heatSystem && !this.heatSystem.isInitialized) this.heatSystem.init(gl, 1024, 1024);
         if (this.wallRenderer && !this.wallRenderer['initialized']) this.wallRenderer.init(gl);
         this.lightBuffer.init(gl);
         this.entityBuffer.init(gl);
@@ -133,11 +133,18 @@ export class GPURenderer {
         const hm = world.getHeatMap();
         if (hm) {
             hm.onHeatAdded = (x: number, y: number, amount: number, radius: number) => {
-                if (this.active && this.heatSystem) this.heatSystem.splatHeat(x, y, radius, amount, world.getWidthPixels(), world.getHeightPixels());
+                if (ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug')) {
+                    console.info(`[GPURenderer] Bridge: Heat at (${x.toFixed(0)}, ${y.toFixed(0)}) radius=${radius.toFixed(0)} amount=${amount.toFixed(2)}`);
+                }
+                if (this.active && this.heatSystem) {
+                    // Standardized order: x, y, amount, radius
+                    this.heatSystem.splatHeat(x, y, amount, radius, world.getWidthPixels(), world.getHeightPixels());
+                }
             };
             hm.onIgnite = (x: number, y: number, radius: number) => {
-                // If it's ignition, we want FULL heat immediately
-                if (this.active && this.heatSystem) this.heatSystem.splatHeat(x, y, radius, 1.0, world.getWidthPixels(), world.getHeightPixels());
+                if (this.active && this.heatSystem) {
+                    this.heatSystem.splatHeat(x, y, 1.0, radius, world.getWidthPixels(), world.getHeightPixels());
+                }
             };
         }
     }

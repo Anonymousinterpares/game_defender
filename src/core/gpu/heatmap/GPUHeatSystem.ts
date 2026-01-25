@@ -1,4 +1,5 @@
 import { HeatShaderManager } from "./HeatShaderManager";
+import { ConfigManager } from "../../../config/MasterConfig";
 
 export class GPUHeatSystem {
     private gl: WebGL2RenderingContext | null = null;
@@ -92,33 +93,39 @@ export class GPUHeatSystem {
         if (!this._initialized || !this.gl || !this.shaders) return;
         const gl = this.gl;
 
+        // 1. Flip buffers
         const srcIdx = this.heatIdx;
         const dstIdx = 1 - srcIdx;
 
         gl.viewport(0, 0, this.width, this.height);
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.heatFBOs[dstIdx].fbo);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
 
         const shader = this.shaders.updateShader;
         shader.use();
 
         shader.setUniform1f("u_dt", dt);
-        shader.setUniform1f("u_spreadRate", 0.15); // Increased slightly for faster spread
-        shader.setUniform1f("u_decayRate", 0.012); // Tuned for longer-lasting heat
+        shader.setUniform1f("u_spreadRate", 0.15);
+        shader.setUniform1f("u_decayRate", 0.2); // Balanced decay
         shader.setUniform2f("u_texelSize", 1.0 / this.width, 1.0 / this.height);
 
         shader.setUniform1i("u_heatIn", 0);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.heatFBOs[srcIdx].tex);
 
+        gl.disable(gl.BLEND);
         this.renderQuad();
 
         this.heatIdx = dstIdx;
-
-        // Cleanup
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    public splatHeat(x: number, y: number, radius: number, intensity: number, worldW: number, worldH: number): void {
+    /**
+     * Splats heat into the current FBO.
+     * x, y in world pixels. amount 0..1, radius in pixels.
+     */
+    public splatHeat(x: number, y: number, amount: number, radius: number, worldW: number, worldH: number): void {
         if (!this._initialized || !this.gl || !this.shaders) return;
         const gl = this.gl;
 
@@ -127,42 +134,37 @@ export class GPUHeatSystem {
 
         if (!Number.isFinite(uvX) || !Number.isFinite(uvY)) return;
 
-        const srcIdx = this.heatIdx;
-        const dstIdx = 1 - srcIdx;
+        // Standardized safety clamping: strict limit to 0.8 to prevent whiteout
+        const safeAmount = Math.min(0.8, Math.max(0.0, amount));
+        const safeRadius = Math.max(1.0, radius);
+
+        // Forced logs to console.error to bypass any default filters
+        if (ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug')) {
+            console.error(`[GPU Heat] SPLAT: pos=(${x.toFixed(0)}, ${y.toFixed(0)}) scale=(${worldW}x${worldH}) amount=${safeAmount.toFixed(2)} radius=${safeRadius.toFixed(0)}`);
+        }
 
         gl.viewport(0, 0, this.width, this.height);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.heatFBOs[dstIdx].fbo);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.heatFBOs[this.heatIdx].fbo);
+
+        // Blending MUST be additive for multiple events per frame
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);
 
         const shader = this.shaders.splatShader;
         shader.use();
 
+        // MATCHING SHADER UNIFORMS IN heat.glsl.ts
         shader.setUniform2f("u_point", uvX, uvY);
-        shader.setUniform1f("u_radius", radius); // Now in pixels
-        shader.setUniform1f("u_amount", intensity);
+        shader.setUniform1f("u_radius", safeRadius);
+        shader.setUniform1f("u_amount", safeAmount);
         shader.setUniform2f("u_worldPixels", worldW, worldH);
 
-        shader.setUniform1i("u_heatIn", 0);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.heatFBOs[srcIdx].tex);
-
         this.renderQuad();
-
-        this.heatIdx = dstIdx;
+        gl.disable(gl.BLEND);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-        // EXTRA STEP: Synchronize the FBOs to prevent losing multi-splat data
-        // For heat, we can just copy the new state to both if multiple splats occur?
-        // Better: splat everything to ONE target using Additive Blending if possible.
-        // But since we use capped accumulation, we keep ping-pong.
-        // To fix multi-splat, we should really do one toggle per frame, not per splat.
-        // However, for now, we'll sync by drawing to the source in the next pass.
     }
 
     public getHeatTexture(): WebGLTexture | null {
         return this._initialized ? this.heatFBOs[this.heatIdx].tex : null;
-    }
-
-    public getShaderManager(): HeatShaderManager | null {
-        return this.shaders;
     }
 }

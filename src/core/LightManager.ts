@@ -10,6 +10,8 @@ export interface LightSource {
     intensity: number;
     type: 'static' | 'transient' | 'fire';
     ttl?: number;
+    createdAt?: number; // Absolute timestamp for safety
+    maxAge?: number;    // Maximum lifespan in seconds
     decay?: boolean;
     castsShadows?: boolean;
     active?: boolean; // For pooling/reuse
@@ -40,6 +42,8 @@ export class LightManager {
         const eb = EventBus.getInstance();
 
         eb.on(GameEvent.EXPLOSION, (data) => {
+            // Force log to confirm event reception
+            console.log(`[LightManager] EVENT: EXPLOSION at ${data.x.toFixed(0)}, ${data.y.toFixed(0)}`);
             this.addTransientLight('explosion', data.x, data.y);
         });
 
@@ -67,8 +71,11 @@ export class LightManager {
             existing.intensity = light.intensity;
             existing.active = true;
             existing.castsShadows = light.castsShadows;
+            // Constant lights are refreshed every frame, so we update their timestamp
+            existing.createdAt = performance.now() * 0.001;
         } else {
             light.active = true;
+            light.createdAt = performance.now() * 0.001;
             this.lights.set(light.id, light);
         }
     }
@@ -79,6 +86,9 @@ export class LightManager {
 
         if (!settings) return;
 
+        // Force log for debugging
+        console.log(`[LightManager] Add Transient: ${type} (ttl=${settings.ttl})`);
+
         const id = `transient_${type}_${this.transientCounter++}`;
         this.addLight({
             id,
@@ -88,26 +98,48 @@ export class LightManager {
             color: settings.color,
             intensity: settings.intensity,
             type: 'transient',
-            ttl: settings.ttl,
+            ttl: settings.ttl || 0.5,
+            maxAge: (settings.ttl || 0.5) * 2.0, // Safety margin
+            createdAt: performance.now() * 0.001,
             decay: true,
-            castsShadows: type === 'explosion', // Only explosions cast shadows for performance
+            castsShadows: type === 'explosion',
             active: true
         });
     }
 
     public update(dt: number): void {
+        const now = performance.now() * 0.001;
+        const idsToRemove: string[] = [];
+
         for (const [id, light] of this.lights.entries()) {
-            if (light.type === 'transient' && light.ttl !== undefined) {
-                light.ttl -= dt;
-                if (light.ttl <= 0) {
-                    this.lights.delete(id);
+            if (light.type === 'transient') {
+                // 1. Standard TTL Decay
+                if (light.ttl !== undefined) {
+                    light.ttl -= dt;
+                    if (light.ttl <= 0) {
+                        idsToRemove.push(id);
+                        continue;
+                    }
+                }
+
+                // 2. Absolute Safety Timeout (catch-all for glitches)
+                if (light.createdAt !== undefined && light.maxAge !== undefined) {
+                    if (now - light.createdAt > light.maxAge) {
+                        console.warn(`[LightManager] FORCE REMOVING stuck light: ${id}`);
+                        idsToRemove.push(id);
+                        continue;
+                    }
                 }
             }
         }
+
+        // Batch remove to avoid iterator invalidation
+        idsToRemove.forEach(id => {
+            this.lights.delete(id);
+        });
     }
 
     public getLights(): LightSource[] {
-        // Only return active lights
         const result: LightSource[] = [];
         this.lights.forEach(l => {
             if (l.active !== false) result.push(l);
@@ -122,7 +154,7 @@ export class LightManager {
     public clearType(type: 'fire' | 'transient' | 'static'): void {
         for (const [id, light] of this.lights.entries()) {
             if (light.type === type) {
-                light.active = false; // Mark for reuse
+                light.active = false;
             }
         }
     }
@@ -130,7 +162,7 @@ export class LightManager {
     public clearConstantLights(): void {
         for (const [id, light] of this.lights.entries()) {
             if (id.startsWith('const_')) {
-                light.active = false; // Mark for reuse
+                light.active = false;
             }
         }
     }
@@ -145,8 +177,17 @@ export class LightManager {
             existing.intensity = light.intensity;
             existing.active = true;
             existing.castsShadows = light.castsShadows;
+            existing.createdAt = performance.now() * 0.001; // Keep alive
         } else {
-            this.lights.set(light.id, { ...light, type: 'transient', ttl: 0.05, decay: false, castsShadows: light.castsShadows, active: true });
+            this.lights.set(light.id, {
+                ...light,
+                type: 'transient',
+                ttl: 0.1, // Short TTL for constant lights, they must be refreshed
+                decay: false,
+                castsShadows: light.castsShadows,
+                active: true,
+                createdAt: performance.now() * 0.001
+            });
         }
     }
 
@@ -157,7 +198,7 @@ export class LightManager {
         const baseIntensity = ConfigManager.getInstance().get<number>('Lighting', 'fireLightIntensity') || 1.6;
 
         fireClusters.forEach((cluster, index) => {
-            this.addConstantLight({ // Reusing logic for consistency
+            this.addConstantLight({
                 id: `fire_cluster_${index}`,
                 x: cluster.x,
                 y: cluster.y,

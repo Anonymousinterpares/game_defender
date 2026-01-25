@@ -106,9 +106,12 @@ vec3 sampleEmissivePathtraced(vec2 worldPos, sampler2D sdfMap, sampler2D emissiv
             if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
             
             float d = texture(sdfMap, uv).r;
-            if (d < 2.0) {
-                vec2 hitUV = (worldPos + rayDir * (t + 1.0)) / worldPixels;
-                indirect += texture(emissiveMap, hitUV).rgb * (1.0 / (1.0 + t * t * 0.0001));
+            if (d < 1.0) { // Tighter threshold - only hit actual walls
+                // We verify if the structure map shows a wall to avoid sampling "SDF holes"
+                float structureCheck = texture(u_structureMap, uv).r;
+                if (structureCheck > 0.5) {
+                    indirect += texture(emissiveMap, uv).rgb * (1.0 / (1.0 + t * t * 0.0001));
+                }
                 break;
             }
             t += d;

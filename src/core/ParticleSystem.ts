@@ -302,28 +302,33 @@ export class ParticleSystem {
 
         if (this.gpuSystem) {
             this.gpuSystem.update(dt, performance.now() * 0.001, cameraCenterX, cameraCenterY);
-        } else {
-            // Fallback: Run logic on main thread using shared ParticleSimulation
-            if (world) {
-                const mm = (window as any).MultiplayerManager?.getInstance();
-                const isHost = !mm || mm.isHost;
-                const ppm = ConfigManager.getInstance().getPixelsPerMeter();
+        }
 
-                const events = ParticleSimulation.update(
-                    dt,
-                    this.data,
-                    world, // World implements WorldCollision (isWall)
-                    player,
-                    enemies,
-                    WeatherManager.getInstance().getWeatherState(),
-                    isHost,
-                    ppm
-                );
+        // ALWAYS run CPU simulation if there are active CPU particles or if we need to emit events
+        // This prevents "frozen" particles (like Flash/Shockwave which are always CPU)
+        if (world) {
+            const mm = (window as any).MultiplayerManager?.getInstance();
+            const isHost = !mm || mm.isHost;
+            const ppm = ConfigManager.getInstance().getPixelsPerMeter();
 
-                // Accumulate events
-                if (events.damageEvents.length > 0) this.pendingDamage.push(...events.damageEvents);
-                if (events.heatEvents.length > 0) this.pendingHeat.push(...events.heatEvents);
-            }
+            // Run CPU Update (ParticleSimulation.update handles checking for active flags internally)
+            // But we can optimize by checking activeCount if available, though ParticleSimulation.update does iteration.
+            // We use the shared simulation regardless of GPU presence to ensure Flash/Shockwave decay.
+
+            const events = ParticleSimulation.update(
+                dt,
+                this.data,
+                world,
+                player,
+                enemies,
+                WeatherManager.getInstance().getWeatherState(),
+                isHost,
+                ppm
+            );
+
+            // Accumulate events
+            if (events.damageEvents.length > 0) this.pendingDamage.push(...events.damageEvents);
+            if (events.heatEvents.length > 0) this.pendingHeat.push(...events.heatEvents);
         }
 
         // 3. Post-Update (Visuals & Pruning for Renderer)
