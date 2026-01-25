@@ -97,12 +97,13 @@ vec3 getHeatColor(float t) {
 }
 
 void main() {
-    // v_uv is screen 0..1 (bottom-left to top-right in standard WebGL quad)
-    // Map screen UV to World Position
+    // v_uv is screen 0..1 (bottom=0).
+    // Game Logic: Y increases Downwards. Screen (0,1) [Top] is World Camera Y.
+    // Screen (0,0) [Bottom] is World Camera Y + Resolution Y.
     vec2 worldPos = u_camera + vec2(v_uv.x * u_resolution.x, (1.0 - v_uv.y) * u_resolution.y);
     
-    // Map World Position to Heat Texture UV (0..1 across entire world)
-    vec2 gridUV = vec2(worldPos.x / u_worldPixels.x, 1.0 - (worldPos.y / u_worldPixels.y));
+    // Map World Position to Heat Texture UV (Top-Down Logical)
+    vec2 gridUV = worldPos / u_worldPixels;
     
     // Safety check: clip to world bounds
     if (gridUV.x < 0.0 || gridUV.x > 1.0 || gridUV.y < 0.0 || gridUV.y > 1.0) {

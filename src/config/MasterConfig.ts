@@ -119,6 +119,7 @@ export const MasterConfig: GameConfigSchema = {
   },
   Visuals: {
     gpuEnabled: { value: true, type: 'boolean', description: 'Enable GPU Acceleration (Phase 0)' },
+    useDeferredLighting: { value: false, type: 'boolean', description: 'Enable Phased Deferred Lighting Migration' },
     gpuResolutionScale: { value: 1.0, type: 'number', min: 0.1, max: 2.0, step: 0.1, description: 'GPU Render Resolution Scale' },
     enableSmoke: { value: true, type: 'boolean', description: 'Enable Smoke Effects (Wind Responsive)' },
     smokeDensityMultiplier: { value: 2.0, type: 'number', min: 0.1, max: 10.0, step: 0.1, description: 'Smoke Density/Opacity Multiplier' },

@@ -125,7 +125,7 @@ export class GPUWallRenderer {
         image.src = `${import.meta.env.BASE_URL}textures/GROUND/Ground103_1K-JPG/Ground103_1K-JPG_Color.jpg`;
     }
 
-    public render(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, entityBuffer: GPUEntityBuffer, worldMap: WebGLTexture | null, lightingSystem: GPULightingSystem, time: number): void {
+    public render(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, entityBuffer: GPUEntityBuffer, worldMap: WebGLTexture | null, lightingSystem: GPULightingSystem | null, time: number): void {
         if (!this.initialized || !this.gl) return;
         const gl = this.gl;
         const timeState = WorldClock.getInstance().getTimeState();
@@ -176,6 +176,7 @@ export class GPUWallRenderer {
             this.shader.setUniform2f("u_structureSize", this.structureW, this.structureH);
             this.shader.setUniform1f("u_time", time);
             this.shader.setUniform1f("u_tileSize", world.getTileSize());
+            this.shader.setUniform1f("u_useDeferred", lightingSystem ? 0.0 : 1.0);
 
             const { sun, moon } = timeState;
             this.shader.setUniform3f("u_sunDir", sun.direction.x, sun.direction.y, 1.0);
@@ -218,7 +219,7 @@ export class GPUWallRenderer {
         this.cleanupWebGLState();
     }
 
-    private renderGround(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, entityBuffer: GPUEntityBuffer, worldMap: WebGLTexture | null, lightingSystem: GPULightingSystem, timeState: any): void {
+    private renderGround(world: World, cameraX: number, cameraY: number, screenW: number, screenH: number, heatSystem: GPUHeatSystem, lightBuffer: GPULightBuffer, entityBuffer: GPUEntityBuffer, worldMap: WebGLTexture | null, lightingSystem: GPULightingSystem | null, timeState: any): void {
         if (!this.gl || !this.groundShader) return;
         const gl = this.gl;
         const shader = this.groundShader;
@@ -235,6 +236,7 @@ export class GPUWallRenderer {
         shader.setUniform1f("u_textureScale", 10.0);
         shader.setUniform1f("u_time", performance.now() * 0.001);
         shader.setUniform1f("u_shadowRange", ConfigManager.getInstance().get<number>('Lighting', 'explosionShadowRangeTiles') || 40.0);
+        shader.setUniform1f("u_useDeferred", lightingSystem ? 0.0 : 1.0);
 
         const { sun, moon } = timeState;
         shader.setUniform1f("u_sunIntensity", sun.active ? sun.intensity : 0.0);
@@ -292,7 +294,7 @@ export class GPUWallRenderer {
         gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
-    private updateStructureMap(world: World): void {
+    public updateStructureMap(world: World): void {
         if (this.dirtyTiles.size === 0 || !this.gl || !this.structureTexture) return;
         const gl = this.gl;
         const hm = world.getHeatMap();

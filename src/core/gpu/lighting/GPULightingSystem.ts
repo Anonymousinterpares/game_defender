@@ -90,10 +90,14 @@ export class GPULightingSystem {
     public update(
         heatTex: WebGLTexture,
         fluidTex: WebGLTexture | null,
-        scorchTex: WebGLTexture | null, // Added Scorch Texture
+        scorchTex: WebGLTexture | null,
         structureTex: WebGLTexture,
         worldPixelsW: number,
         worldPixelsH: number,
+        cameraX: number,
+        cameraY: number,
+        resolutionX: number,
+        resolutionY: number,
         lightBuffer: GPULightBuffer,
         entityBuffer: GPUEntityBuffer
     ): void {
@@ -131,15 +135,18 @@ export class GPULightingSystem {
         this.emissiveShader!.setUniform1i("u_heatTexture", 0);
         this.emissiveShader!.setUniform1i("u_structureMap", 1);
         this.emissiveShader!.setUniform2f("u_worldPixels", worldPixelsW, worldPixelsH);
+        this.emissiveShader!.setUniform2f("u_camera", cameraX, cameraY);
+        this.emissiveShader!.setUniform2f("u_resolution", resolutionX, resolutionY);
         lightBuffer.bind(this.emissiveShader!.getProgram(), "LightBlock", 0);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-        // 2. Occluder Pass
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.occluderFBO!.fbo);
         this.occluderShader!.use();
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, structureTex);
         this.occluderShader!.setUniform1i("u_structureMap", 0);
         this.occluderShader!.setUniform2f("u_worldPixels", worldPixelsW, worldPixelsH);
+        this.occluderShader!.setUniform2f("u_camera", cameraX, cameraY);
+        this.occluderShader!.setUniform2f("u_resolution", resolutionX, resolutionY);
         entityBuffer.bind(this.occluderShader!.getProgram(), "EntityBlock", 1);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 

@@ -1,5 +1,6 @@
 import { GPUContext } from "./GPUContext";
 import { World } from "../World";
+import { Shader } from "./Shader";
 import { ConfigManager } from "../../config/MasterConfig";
 import { WorldShader } from "./WorldShader";
 import { GPUParticleSystem } from "./particles/GPUParticleSystem";
@@ -12,6 +13,8 @@ import { GPULightBuffer } from "./GPULightBuffer";
 import { GPUEntityBuffer } from "./GPUEntityBuffer";
 import { LightManager } from "../LightManager";
 import { GPULightingSystem } from "./lighting/GPULightingSystem";
+import { GPUDeferredLighting } from "./lighting/GPUDeferredLighting";
+import { WorldClock } from "../WorldClock";
 import { ExplosionLibrary } from "../effects/ExplosionLibrary";
 import { EventBus, GameEvent } from "../EventBus";
 
@@ -42,6 +45,8 @@ export class GPURenderer {
     private lightBuffer: GPULightBuffer;
     private entityBuffer: GPUEntityBuffer;
     private lightingSystem: GPULightingSystem;
+    private deferredLighting: GPUDeferredLighting;
+    private copyShader: Shader | null = null;
     private worldMapTexture: WebGLTexture | null = null;
     private lastMeshVersion: number = -1;
     private lastEntityPositions: Map<number, { x: number, y: number }> = new Map();
@@ -75,6 +80,7 @@ export class GPURenderer {
         this.lightBuffer = new GPULightBuffer(32);
         this.entityBuffer = new GPUEntityBuffer(32);
         this.lightingSystem = new GPULightingSystem();
+        this.deferredLighting = new GPUDeferredLighting();
         this.subscribeToEvents();
 
         const ps = ParticleSystem.getInstance();
@@ -101,8 +107,29 @@ export class GPURenderer {
         if (!this.quadBuffer) {
             this.quadBuffer = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
-            const positions = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
+            const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, -1, 1, 1, -1, 1]); // Standard CCW triangles
             gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+        }
+
+        if (!this.copyShader) {
+            const vert = `#version 300 es
+                layout(location = 0) in vec2 a_position;
+                out vec2 v_uv;
+                void main() {
+                    v_uv = a_position * 0.5 + 0.5;
+                    gl_Position = vec4(a_position, 0.0, 1.0);
+                }
+            `;
+            const frag = `#version 300 es
+                precision highp float;
+                uniform sampler2D u_tex;
+                in vec2 v_uv;
+                out vec4 outColor;
+                void main() {
+                    outColor = texture(u_tex, v_uv);
+                }
+            `;
+            this.copyShader = new Shader(gl, vert, frag);
         }
 
         if (!this.particleSystem['initialized']) this.particleSystem.init(gl);
@@ -114,6 +141,9 @@ export class GPURenderer {
         if (this.lightingSystem && !this.lightingSystem.isInitialized) {
             // Lighting map resolution: 2048x2048 or world-relative
             this.lightingSystem.init(gl, 1024, 1024);
+        }
+        if (this.deferredLighting && !this.deferredLighting.isInitialized) {
+            this.deferredLighting.init(gl, 1, 1); // Size will be updated on first update()
         }
     }
 
@@ -202,21 +232,44 @@ export class GPURenderer {
         }
         if (this.heatSystem) this.heatSystem.update(dt);
 
-        // Update Light Buffer
         const lights = LightManager.getInstance().getLights();
         this.lightBuffer.update(lights);
+
+        const useDeferred = ConfigManager.getInstance().get<boolean>('Visuals', 'useDeferredLighting') || false;
+        if (useDeferred && this.deferredLighting && this.world) {
+            this.deferredLighting.resize(width, height);
+            const segments = this.world.getOcclusionSegments(cameraX, cameraY, width, height);
+            const ambient = WorldClock.getInstance().getTimeState().baseAmbient;
+            this.deferredLighting.update(cameraX, cameraY, width, height, lights, segments, ambient);
+        }
 
         // Update Entity Buffer (Pass nearest entities to GPU for internal shadows)
         this.entityBuffer.update(entities.map(e => ({ x: e.x, y: e.y, radius: (e as any).radius || 20, active: true })));
 
-        // Update Lighting System (Emissive + SDF)
-        if (this.lightingSystem && this.heatSystem && this.wallRenderer) {
+        // SKIP old lighting update if Deferred is active
+        if (!useDeferred && this.lightingSystem && this.heatSystem && this.wallRenderer) {
+            // CRITICAL: Update the structure map BEFORE the lighting pass.
+            // This ensures that if a wall was destroyed this frame, the light flash
+            // sees the "hole" and doesn't get occluded by a ghost wall.
+            this.wallRenderer.updateStructureMap(this.world);
+
             const hTex = this.heatSystem.getHeatTexture();
             const sTex = this.wallRenderer.getStructureTexture();
             if (hTex && sTex) {
-                const fTex = this.fluidSimulation ? this.fluidSimulation.getDensityTexture() : null;
-                const scTex = this.heatSystem.getScorchTexture();
-                this.lightingSystem.update(hTex, fTex, scTex, sTex, this.world.getWidthPixels(), this.world.getHeightPixels(), this.lightBuffer, this.entityBuffer);
+                this.lightingSystem.update(
+                    hTex,
+                    this.fluidSimulation ? this.fluidSimulation.getDensityTexture() : null, // Assuming fluidSystem was a typo for fluidSimulation
+                    this.heatSystem.getScorchTexture(),
+                    sTex,
+                    this.world.getWidthPixels(),
+                    this.world.getHeightPixels(),
+                    cameraX, // Using the passed cameraX
+                    cameraY, // Using the passed cameraY
+                    width,   // Using the passed width
+                    height,  // Using the passed height
+                    this.lightBuffer,
+                    this.entityBuffer
+                );
             }
         }
     }
@@ -245,7 +298,35 @@ export class GPURenderer {
         gl.viewport(0, 0, canvas.width, canvas.height);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         this.context.clear();
-        this.wallRenderer.render(this.world, cameraX, cameraY, width, height, this.heatSystem, this.lightBuffer, this.entityBuffer, this.worldMapTexture, this.lightingSystem, performance.now() * 0.001);
+
+        const useDeferred = ConfigManager.getInstance().get<boolean>('Visuals', 'useDeferredLighting') || false;
+
+        // Structure map already updated in GPURenderer.update()
+        // Pass null to lightingSystem if deferred is active to skip old raymarching
+        this.wallRenderer.render(
+            this.world,
+            cameraX,
+            cameraY,
+            width,
+            height,
+            this.heatSystem,
+            this.lightBuffer,
+            this.entityBuffer,
+            this.worldMapTexture,
+            useDeferred ? null : this.lightingSystem,
+            performance.now() * 0.001
+        );
+
+        if (useDeferred && this.deferredLighting.isInitialized) {
+            const lightTex = this.deferredLighting.getResultTexture();
+            if (lightTex) {
+                gl.enable(gl.BLEND);
+                // Standard Multiply: DST_COLOR * SRC_COLOR
+                gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+                this.renderSimpleTexture(lightTex);
+                gl.disable(gl.BLEND);
+            }
+        }
     }
 
     public renderFX(cameraX: number, cameraY: number, width: number, height: number): void {
@@ -305,6 +386,23 @@ export class GPURenderer {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.drawImage(this.context.getCanvas(), 0, 0, ctx.canvas.width, ctx.canvas.height);
         ctx.restore();
+    }
+
+    public renderSimpleTexture(tex: WebGLTexture): void {
+        const gl = this.context.getGL();
+        if (!this.copyShader || !this.quadBuffer) return;
+
+        this.copyShader.use();
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        this.copyShader.setUniform1i("u_tex", 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
+        const posLoc = this.copyShader.getAttribLocation("a_position");
+        gl.enableVertexAttribArray(posLoc);
+        gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
     public isActive(): boolean { return this.active; }

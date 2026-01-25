@@ -134,7 +134,7 @@ export class GPUHeatSystem {
         const gl = this.gl;
 
         const uvX = x / worldW;
-        const uvY = 1.0 - (y / worldH);
+        const uvY = y / worldH;
 
         if (!Number.isFinite(uvX) || !Number.isFinite(uvY)) return;
 

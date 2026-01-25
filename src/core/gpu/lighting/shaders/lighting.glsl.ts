@@ -14,6 +14,8 @@ uniform sampler2D u_fluidTexture;
 uniform sampler2D u_scorchTexture;
 uniform sampler2D u_structureMap;
 uniform vec2 u_worldPixels;
+uniform vec2 u_camera;
+uniform vec2 u_resolution;
 in vec2 v_uv;
 out vec4 outColor;
 
@@ -34,18 +36,24 @@ vec3 getHeatColor(float t) {
 }
 
 void main() {
-    vec2 worldPos = v_uv * u_worldPixels;
+    // Fragment World Position (Logical: Y increases Downwards)
+    // v_uv and Screen: (0,0) is Bottom, (0,1) is Top.
+    // Screen Top (1.0) -> Camera Y. Screen Bottom (0.0) -> Camera Y + Res Y.
+    vec2 worldPos = u_camera + vec2(v_uv.x * u_resolution.x, (1.0 - v_uv.y) * u_resolution.y);
+    
+    // World Mapping (Logical 0 is Texture UV.y=0)
+    // No flips needed for world-space texture sampling from worldPos.
+    vec2 worldUV = worldPos / u_worldPixels;
+    
     vec3 emissive = vec3(0.0);
 
-    // 1. Heat/Fire Emissive (Ground Scorch / Lava)
-    float heat = texture(u_heatTexture, vec2(v_uv.x, 1.0 - v_uv.y)).r;
-    if (heat > 0.05) {
-        emissive += getHeatColor(heat) * 2.0;
-    }
-
-    // 2. Fluid Fire Emissive (New Volumetric Fire)
+    // 1. Heat/Fire Emissive - REMOVED from pathtracer to prevent spikes.
+    // The ground visualization is handled directly in the ground shader.
+    // Permanent Scorch glow is handled in Section 4 below.
+    // 4. Scorch Faint Glow (Residual heat in charred marks)
+    float heat = texture(u_heatTexture, worldUV).r;
     // Fluid texture: R=density, G=temp, B=variation, A=unused
-    vec4 fluid = texture(u_fluidTexture, vec2(v_uv.x, 1.0 - v_uv.y));
+    vec4 fluid = texture(u_fluidTexture, worldUV);
     float temp = fluid.g;
     
     // Threshold: Only emit light if temperature is high enough (Fire)
@@ -72,20 +80,13 @@ void main() {
         emissive += fireCol * intensity;
     }
 
-    // 3. Point Lights (Simplified circles in the map)
-    for (int i = 0; i < 32; i++) {
-        if (u_lights[i].posRad.w < 0.5) continue;
-        vec2 lPos = u_lights[i].posRad.xy;
-        float lRad = u_lights[i].posRad.z;
-        float d = distance(worldPos, lPos);
-        if (d < lRad * 0.1) { // Only draw a small emissive core
-            float falloff = 1.0 - smoothstep(0.0, lRad * 0.1, d);
-            emissive += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 5.0;
-        }
-    }
+    // 3. Point Lights - REMOVED sharp cores. 
+    // Direct point lighting (including explosion flashes) is now handled 
+    // by the smooth analytic loop in ground.glsl. 
+    // We only keep the Fluid Fire (Section 2) for softened raytraced glow.
 
     // 4. Scorch Faint Glow (Residual heat in charred marks)
-    float scorch = texture(u_scorchTexture, vec2(v_uv.x, 1.0 - v_uv.y)).r;
+    float scorch = texture(u_scorchTexture, worldUV).r;
     if (scorch > 0.1) {
         // Very scattered, low radius light
         emissive += vec3(0.3, 0.05, 0.0) * scorch * 0.5;
@@ -99,6 +100,8 @@ export const OCCLUDER_PASS_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D u_structureMap;
 uniform vec2 u_worldPixels;
+uniform vec2 u_camera;
+uniform vec2 u_resolution;
 in vec2 v_uv;
 out vec4 outColor;
 
@@ -111,11 +114,14 @@ layout(std140) uniform EntityBlock {
 };
 
 void main() {
-    float wall = texture(u_structureMap, v_uv).r;
+    // Fragment World Position
+    vec2 worldPos = u_camera + vec2(v_uv.x * u_resolution.x, (1.0 - v_uv.y) * u_resolution.y);
+    vec2 worldUV = worldPos / u_worldPixels;
+    
+    float wall = texture(u_structureMap, worldUV).r;
     
     // Check if current fragment is inside an entity
     float entityOcc = 0.0;
-    vec2 worldPos = v_uv * u_worldPixels;
     
     for (int i = 0; i < 32; i++) {
         if (u_entities[i].posRad.w < 0.5) continue;

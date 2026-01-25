@@ -215,7 +215,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
             if (e.active && gpuEntities.length < 32) gpuEntities.push({ x: e.x, y: e.y });
         });
 
-        this.gpuRenderer.update(dt, gpuEntities);
+        this.gpuRenderer.update(dt, gpuEntities, this.cameraX, this.cameraY, window.innerWidth, window.innerHeight);
         PerfMonitor.getInstance().end('update_total');
     }
 
