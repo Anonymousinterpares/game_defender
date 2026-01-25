@@ -78,15 +78,21 @@ in vec2 v_uv;
 out vec4 outColor;
 
 vec3 getHeatColor(float t) {
-    if (t < 0.4) {
-        float r = 0.39 + 0.61 * (t / 0.4); // 100/255 approx 0.39
-        return vec3(r, 0.0, 0.0);
-    } else if (t < 0.8) {
-        float g = (t - 0.4) / 0.4;
-        return vec3(1.0, g, 0.0);
+    // Range 0.0 to 3.0
+    if (t < 0.5) {
+        // Dark Red to Red
+        return vec3(0.5 + t, 0.0, 0.0);
+    } else if (t < 1.5) {
+        // Red to Orange/Yellow
+        float g = (t - 0.5) / 1.0; 
+        return vec3(1.0, g * 0.8, 0.0);
+    } else if (t < 2.5) {
+        // Yellow to White-Hot
+        float b = (t - 1.5) / 1.0;
+        return vec3(1.0, 0.8 + b * 0.2, b);
     } else {
-        float b = (t - 0.8) / 0.2;
-        return vec3(1.0, 1.0, b);
+        // Pure blinding white
+        return vec3(1.0, 1.0, 1.0);
     }
 }
 
@@ -106,17 +112,19 @@ void main() {
     float heat = texture(u_heatTex, gridUV).r;
     
     // Threshold to keep edges clean and performance up
-    if (heat < 0.005) {
+    if (heat < 0.01) {
         discard;
     }
     
     vec3 color = getHeatColor(heat);
     
-    // Alpha ramp matching CPU logic: 0.4 + intensity * 0.6
-    float alpha = 0.4 + heat * 0.6;
+    // Alpha ramp:
+    // Low heat (0.1) -> Low alpha (0.3)
+    // High heat (3.0) -> High alpha (0.9)
+    float alpha = smoothstep(0.0, 2.0, heat) * 0.7 + 0.2;
     
     // Limit max alpha to avoid total opaque blocks unless very hot
-    alpha = min(alpha, 0.95);
+    alpha = min(alpha, 0.90);
 
     // Premultiply alpha for correct additive/alpha blending in GPURenderer
     outColor = vec4(color * alpha, alpha);

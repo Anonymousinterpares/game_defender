@@ -107,7 +107,7 @@ export class GPUHeatSystem {
 
         shader.setUniform1f("u_dt", dt);
         shader.setUniform1f("u_spreadRate", 0.15);
-        shader.setUniform1f("u_decayRate", 0.2); // Balanced decay
+        shader.setUniform1f("u_decayRate", 1.5); // Fast decay: 1.0 -> 0.0 in ~0.66s
         shader.setUniform2f("u_texelSize", 1.0 / this.width, 1.0 / this.height);
 
         shader.setUniform1i("u_heatIn", 0);
@@ -134,8 +134,8 @@ export class GPUHeatSystem {
 
         if (!Number.isFinite(uvX) || !Number.isFinite(uvY)) return;
 
-        // Standardized safety clamping: strict limit to 0.8 to prevent whiteout
-        const safeAmount = Math.min(0.8, Math.max(0.0, amount));
+        // Standardized safety clamping: relaxed to 3.0 to allow for "Hot Core" persistence
+        const safeAmount = Math.min(3.0, Math.max(0.0, amount));
         const safeRadius = Math.max(1.0, radius);
 
         // Forced logs to console.error to bypass any default filters

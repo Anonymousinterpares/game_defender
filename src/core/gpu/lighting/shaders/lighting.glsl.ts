@@ -60,14 +60,36 @@ void main() {
 export const OCCLUDER_PASS_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D u_structureMap;
-uniform sampler2D u_worldMap;
+uniform vec2 u_worldPixels;
 in vec2 v_uv;
 out vec4 outColor;
 
+struct Entity {
+    vec4 posRad; // x, y, radius, active
+};
+
+layout(std140) uniform EntityBlock {
+    Entity u_entities[32];
+};
+
 void main() {
     float wall = texture(u_structureMap, v_uv).r;
+    
+    // Check if current fragment is inside an entity
+    float entityOcc = 0.0;
+    vec2 worldPos = v_uv * u_worldPixels;
+    
+    for (int i = 0; i < 32; i++) {
+        if (u_entities[i].posRad.w < 0.5) continue;
+        float d = distance(worldPos, u_entities[i].posRad.xy);
+        if (d < u_entities[i].posRad.z) {
+            entityOcc = 1.0;
+            break;
+        }
+    }
+    
     // 1.0 = Occulder, 0.0 = Free space
-    outColor = vec4(vec3(wall > 0.5 ? 1.0 : 0.0), 1.0);
+    outColor = vec4(vec3(max(wall > 0.5 ? 1.0 : 0.0, entityOcc)), 1.0);
 }
 `;
 

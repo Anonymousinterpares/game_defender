@@ -62,16 +62,37 @@ const FLUID_RENDER_FRAG = `#version 300 es
 
         // Map variation to smoke color
         // Low variation = Black (darker than before), High = Light grey
-        vec3 color = mix(vec3(0.02), vec3(0.15, 0.15, 0.2), variation);
+        vec3 smokeColor = mix(vec3(0.02), vec3(0.15, 0.15, 0.2), variation);
+        
+        // Map temperature to fire color (Emissive)
+        // 0.0-1.0: Red glow, 1.0-5.0: Orange/Yellow, 5.0+: White hot
+        vec3 fireColor = vec3(0.0);
+        if (temp > 0.1) {
+            if (temp > 5.0) {
+                fireColor = mix(vec3(1.0, 0.6, 0.2), vec3(4.0, 4.0, 4.0), clamp((temp - 5.0) / 5.0, 0.0, 1.0));
+            } else if (temp > 1.0) {
+                fireColor = mix(vec3(1.0, 0.1, 0.0), vec3(1.0, 0.6, 0.2), clamp((temp - 1.0) / 4.0, 0.0, 1.0));
+            } else {
+                fireColor = mix(vec3(0.1, 0.0, 0.0), vec3(1.0, 0.1, 0.0), clamp((temp - 0.1) / 0.9, 0.0, 1.0));
+            }
+        }
+        
+        // Blend smoke and fire based on temperature
+        vec3 color = mix(smokeColor, fireColor, smoothstep(0.1, 1.0, temp));
         
         // Final alpha blending (Exponential Tonemapping for physical transparency)
         // Shift curve to be more opaque at low densities
         float alpha = 1.0 - exp(-noiseDensity * 0.8);
         
+        // Fire is less transparent (more volumetric)
+        alpha = mix(alpha, 1.0 - exp(-noiseDensity * 2.0), smoothstep(0.5, 2.0, temp));
+        
         // Boost noise visibility at low densities
         float hazeCleanliness = smoothstep(0.0, 0.15, density);
         alpha *= mix(0.4 + n * 0.6, 1.0, hazeCleanliness);
         
+        // Output with premultiplied alpha
+        // For fire, we want it to be additive if very hot
         outColor = vec4(color * alpha, alpha);
     }
 `;

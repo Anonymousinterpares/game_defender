@@ -8,6 +8,7 @@ import {
     SDF_FINAL_FRAG
 } from "./shaders/lighting.glsl";
 import { GPULightBuffer } from "../GPULightBuffer";
+import { GPUEntityBuffer } from "../GPUEntityBuffer";
 
 export class GPULightingSystem {
     private gl: WebGL2RenderingContext | null = null;
@@ -91,7 +92,8 @@ export class GPULightingSystem {
         structureTex: WebGLTexture,
         worldPixelsW: number,
         worldPixelsH: number,
-        lightBuffer: GPULightBuffer
+        lightBuffer: GPULightBuffer,
+        entityBuffer: GPUEntityBuffer
     ): void {
         if (!this._initialized || !this.gl) return;
         const gl = this.gl;
@@ -118,6 +120,8 @@ export class GPULightingSystem {
         this.occluderShader!.use();
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, structureTex);
         this.occluderShader!.setUniform1i("u_structureMap", 0);
+        this.occluderShader!.setUniform2f("u_worldPixels", worldPixelsW, worldPixelsH);
+        entityBuffer.bind(this.occluderShader!.getProgram(), "EntityBlock", 1);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // 3. JFA Init

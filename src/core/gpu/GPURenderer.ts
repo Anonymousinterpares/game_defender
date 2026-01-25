@@ -12,6 +12,7 @@ import { GPULightBuffer } from "./GPULightBuffer";
 import { GPUEntityBuffer } from "./GPUEntityBuffer";
 import { LightManager } from "../LightManager";
 import { GPULightingSystem } from "./lighting/GPULightingSystem";
+import { ExplosionLibrary } from "../effects/ExplosionLibrary";
 
 export class GPURenderer {
     private static _instance: GPURenderer | null = null;
@@ -52,6 +53,18 @@ export class GPURenderer {
         return this.lightingSystem;
     }
 
+    public getHeatSystem(): GPUHeatSystem {
+        return this.heatSystem;
+    }
+
+    public getFluidSimulation(): FluidSimulation {
+        return this.fluidSimulation;
+    }
+
+    public getWorld(): World | null {
+        return this.world;
+    }
+
     private constructor() {
         this.context = new GPUContext();
         this.particleSystem = new GPUParticleSystem();
@@ -69,6 +82,7 @@ export class GPURenderer {
 
         this.updateConfig();
     }
+
 
     private handleVelocitySplat = (x: number, y: number, vx: number, vy: number, radius: number) => {
         if (!this.active || !this.fluidSimulation || !this.world) return;
@@ -133,12 +147,21 @@ export class GPURenderer {
         const hm = world.getHeatMap();
         if (hm) {
             hm.onHeatAdded = (x: number, y: number, amount: number, radius: number) => {
-                if (ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug')) {
-                    console.info(`[GPURenderer] Bridge: Heat at (${x.toFixed(0)}, ${y.toFixed(0)}) radius=${radius.toFixed(0)} amount=${amount.toFixed(2)}`);
-                }
-                if (this.active && this.heatSystem) {
-                    // Standardized order: x, y, amount, radius
-                    this.heatSystem.splatHeat(x, y, amount, radius, world.getWidthPixels(), world.getHeightPixels());
+                if (!this.active) return;
+
+                // Heuristic: Large events are explosions, small ones are standard heat (lasers, fire)
+                // Threshold lowered to 10 to ensure Missiles (R=80) and Mines (R=128) are caught.
+                // Standard Flamethrower is usually radius < 5 (direct hit) or handled via particle system.
+                if (radius > 10) {
+                    if (ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug')) {
+                        console.info(`[GPURenderer] Spawning Standard Explosion R=${radius}`);
+                    }
+                    ExplosionLibrary.spawnStandardExplosion(x, y, radius, 'rocket');
+                } else {
+                    // Standard Heat Splat (Flamethrower, lasers)
+                    if (this.heatSystem) {
+                        this.heatSystem.splatHeat(x, y, amount, radius, world.getWidthPixels(), world.getHeightPixels());
+                    }
                 }
             };
             hm.onIgnite = (x: number, y: number, radius: number) => {
@@ -205,7 +228,7 @@ export class GPURenderer {
             const hTex = this.heatSystem.getHeatTexture();
             const sTex = this.wallRenderer.getStructureTexture();
             if (hTex && sTex) {
-                this.lightingSystem.update(hTex, sTex, this.world.getWidthPixels(), this.world.getHeightPixels(), this.lightBuffer);
+                this.lightingSystem.update(hTex, sTex, this.world.getWidthPixels(), this.world.getHeightPixels(), this.lightBuffer, this.entityBuffer);
             }
         }
     }
