@@ -195,16 +195,17 @@ void main() {
     vec3 lightAcc = u_ambientColor * 1.5;
 
     // Static Wall Shadows (SDF) + Directional Lights
+    // Static Wall Shadows (SDF) + Directional Lights
     float sunSDF = getSDFShadow(worldPos, u_sunDir.xy, 150.0, u_sdfTexture, u_worldPixels);
-    float sunEnt = getEntityShadow(worldPos, vec2(0.0), 0.0, u_sunDir.xy, true);
-    lightAcc += u_sunColor * u_sunIntensity * 0.7 * min(sunSDF, 1.0 - sunEnt);
+    lightAcc += u_sunColor * u_sunIntensity * 0.7 * min(sunSDF, 1.0);
     
     float moonSDF = getSDFShadow(worldPos, u_moonDir.xy, 120.0, u_sdfTexture, u_worldPixels);
-    float moonEnt = getEntityShadow(worldPos, vec2(0.0), 0.0, u_moonDir.xy, true);
-    lightAcc += u_moonColor * u_moonIntensity * 1.2 * min(moonSDF, 1.0 - moonEnt);
+    lightAcc += u_moonColor * u_moonIntensity * 1.2 * min(moonSDF, 1.0);
     
     // Unified Pathtraced Lighting (Fire + Point Lights)
-    lightAcc += sampleEmissivePathtraced(worldPos, u_sdfTexture, u_emissiveTexture, u_worldPixels) * 10.0;
+    // Daylight Balancing: Marginally reduce flash intensity when sun is strong
+    float emissiveMultiplier = 10.0 * (1.0 - u_sunIntensity * 0.7);
+    lightAcc += sampleEmissivePathtraced(worldPos, u_sdfTexture, u_emissiveTexture, u_worldPixels) * emissiveMultiplier;
 
     // Remaining Dynamic Point Lights 
     // (We still use them for small objects/bullets that aren't in the map)
@@ -250,13 +251,6 @@ void main() {
         
         finalColor = mix(litColor, litColor * 0.1, smoothstep(0.0, 0.4, heat));
         finalColor = mix(finalColor, glow, smoothstep(0.1, 0.8, heat));
-    }
-
-    // DEBUG: Visualize heat texture directly if heat is missing
-    if (heat > 0.01) { 
-        vec3 heatDebugCol = getHeatColor(clamp(heat, 0.0, 1.0));
-        outColor = vec4(heatDebugCol, 1.0); 
-        return; 
     }
 
     outColor = vec4(finalColor, 1.0);

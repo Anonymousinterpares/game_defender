@@ -89,6 +89,7 @@ export class GPULightingSystem {
 
     public update(
         heatTex: WebGLTexture,
+        fluidTex: WebGLTexture | null, // Added Fluid Texture
         structureTex: WebGLTexture,
         worldPixelsW: number,
         worldPixelsH: number,
@@ -109,6 +110,15 @@ export class GPULightingSystem {
         this.emissiveShader!.use();
         gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, heatTex);
         gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, structureTex);
+        if (fluidTex) {
+            gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, fluidTex);
+            this.emissiveShader!.setUniform1i("u_fluidTexture", 2);
+        } else {
+            // Bind heatTex as placeholder if no fluid (safe fallback)
+            gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, heatTex);
+            this.emissiveShader!.setUniform1i("u_fluidTexture", 0);
+        }
+
         this.emissiveShader!.setUniform1i("u_heatTexture", 0);
         this.emissiveShader!.setUniform1i("u_structureMap", 1);
         this.emissiveShader!.setUniform2f("u_worldPixels", worldPixelsW, worldPixelsH);

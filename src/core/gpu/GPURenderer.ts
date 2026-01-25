@@ -150,9 +150,8 @@ export class GPURenderer {
                 if (!this.active) return;
 
                 // Heuristic: Large events are explosions, small ones are standard heat (lasers, fire)
-                // Threshold lowered to 10 to ensure Missiles (R=80) and Mines (R=128) are caught.
-                // Standard Flamethrower is usually radius < 5 (direct hit) or handled via particle system.
-                if (radius > 10) {
+                // Threshold increased to 30 to prevent fire spread (R=15) from triggering rocket FX.
+                if (radius > 30) {
                     if (ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug')) {
                         console.info(`[GPURenderer] Spawning Standard Explosion R=${radius}`);
                     }
@@ -228,7 +227,8 @@ export class GPURenderer {
             const hTex = this.heatSystem.getHeatTexture();
             const sTex = this.wallRenderer.getStructureTexture();
             if (hTex && sTex) {
-                this.lightingSystem.update(hTex, sTex, this.world.getWidthPixels(), this.world.getHeightPixels(), this.lightBuffer, this.entityBuffer);
+                const fTex = this.fluidSimulation ? this.fluidSimulation.getDensityTexture() : null;
+                this.lightingSystem.update(hTex, fTex, sTex, this.world.getWidthPixels(), this.world.getHeightPixels(), this.lightBuffer, this.entityBuffer);
             }
         }
     }

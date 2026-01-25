@@ -10,6 +10,7 @@ void main() {
 export const EMISSIVE_PASS_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D u_heatTexture;
+uniform sampler2D u_fluidTexture;
 uniform sampler2D u_structureMap;
 uniform vec2 u_worldPixels;
 in vec2 v_uv;
@@ -35,13 +36,42 @@ void main() {
     vec2 worldPos = v_uv * u_worldPixels;
     vec3 emissive = vec3(0.0);
 
-    // 1. Heat/Fire Emissive
+    // 1. Heat/Fire Emissive (Ground Scorch / Lava)
     float heat = texture(u_heatTexture, vec2(v_uv.x, 1.0 - v_uv.y)).r;
     if (heat > 0.05) {
         emissive += getHeatColor(heat) * 2.0;
     }
 
-    // 2. Point Lights (Simplified circles in the map)
+    // 2. Fluid Fire Emissive (New Volumetric Fire)
+    // Fluid texture: R=density, G=temp, B=variation, A=unused
+    vec4 fluid = texture(u_fluidTexture, vec2(v_uv.x, 1.0 - v_uv.y));
+    float temp = fluid.g;
+    
+    // Threshold: Only emit light if temperature is high enough (Fire)
+    // Avoids "Black Smoke Emitting Light" by ensuring low-temp smoke (temp < 1.0) emits zero light
+    if (temp > 1.5) {
+        // Map temp to Fire Color: Orange -> Yellow -> White
+        vec3 fireCol = vec3(0.0);
+        float intensity = 0.0;
+        
+        if (temp < 3.0) {
+            // Orange Fire
+            fireCol = mix(vec3(1.0, 0.2, 0.0), vec3(1.0, 0.6, 0.0), (temp - 1.5) / 1.5);
+            intensity = 2.0;
+        } else if (temp < 6.0) {
+            // Yellow to White Hot
+            fireCol = mix(vec3(1.0, 0.6, 0.0), vec3(2.0, 2.0, 2.0), (temp - 3.0) / 3.0);
+            intensity = 4.0;
+        } else {
+            // Blinding
+            fireCol = vec3(3.0, 3.0, 3.0);
+            intensity = 6.0;
+        }
+        
+        emissive += fireCol * intensity;
+    }
+
+    // 3. Point Lights (Simplified circles in the map)
     for (int i = 0; i < 32; i++) {
         if (u_lights[i].posRad.w < 0.5) continue;
         vec2 lPos = u_lights[i].posRad.xy;
