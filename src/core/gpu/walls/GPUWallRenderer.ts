@@ -265,6 +265,13 @@ export class GPUWallRenderer {
             shader.setUniform1i("u_worldMap", 2);
         }
 
+        const scorchTex = heatSystem.getScorchTexture();
+        if (scorchTex) {
+            gl.activeTexture(gl.TEXTURE6);
+            gl.bindTexture(gl.TEXTURE_2D, scorchTex);
+            shader.setUniform1i("u_scorchTexture", 6);
+        }
+
         if (this.structureTexture) {
             gl.activeTexture(gl.TEXTURE3);
             gl.bindTexture(gl.TEXTURE_2D, this.structureTexture);

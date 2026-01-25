@@ -38,6 +38,8 @@ export class ExplosionLibrary {
         const fluids = renderer.getFluidSimulation();
         const particles = renderer.getParticleSystem();
         const world = renderer.getWorld();
+        const lightMgr = (window as any).LightManager?.getInstance() || null; // Fallback to window if not imported
+
         if (!world) return;
 
         const wpW = world.getWidthPixels();
@@ -82,14 +84,27 @@ export class ExplosionLibrary {
         }
 
         // 4. Ground Scorch (HeatMap)
-        // Layer A: "Flash" - Large radius, Low intensity. 
-        // Decay is 1.5/sec. For 100ms duration, we need 0.15 intensity.
         if (renderer.getHeatSystem()) {
             const hs = renderer.getHeatSystem();
-            hs?.splatHeat(x, y, 0.15, radius * 1.5, wpW, wpH);
+            // Splat permanent scorch (low intensity, high persistence)
+            // Splat transient heat (high intensity, fast decay handled on GPU)
+            hs?.splatHeat(x, y, 1.0, radius * 0.8, wpW, wpH);
+        }
 
-            // Layer B: Small Core - REMOVED as requested (was causing 10s persistent artifact)
-            // Previously: hs?.splatHeat(x, y, 2.5, radius * 0.4, wpW, wpH);
+        // 5. High-Intensity Flash (Analytic Volume)
+        // Duration: 200ms. Intensity: > Sunlight (1.5 - 3.0)
+        if (lightMgr) {
+            lightMgr.addLight({
+                id: `explosion_flash_${Date.now()}_${Math.random()}`,
+                x, y,
+                radius: radius * 3.0,
+                color: '#fff0d0', // Bright yellowish white
+                intensity: 4.0,   // Double the sunlight max
+                type: 'transient',
+                ttl: 0.2,         // 200ms
+                decay: true,
+                castsShadows: true
+            });
         }
     }
 }

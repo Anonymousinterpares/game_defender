@@ -13,6 +13,7 @@ import { GPUEntityBuffer } from "./GPUEntityBuffer";
 import { LightManager } from "../LightManager";
 import { GPULightingSystem } from "./lighting/GPULightingSystem";
 import { ExplosionLibrary } from "../effects/ExplosionLibrary";
+import { EventBus, GameEvent } from "../EventBus";
 
 export class GPURenderer {
     private static _instance: GPURenderer | null = null;
@@ -74,6 +75,7 @@ export class GPURenderer {
         this.lightBuffer = new GPULightBuffer(32);
         this.entityBuffer = new GPUEntityBuffer(32);
         this.lightingSystem = new GPULightingSystem();
+        this.subscribeToEvents();
 
         const ps = ParticleSystem.getInstance();
         ps.onSmokeSpawned = this.handleSmokeSpawned;
@@ -142,33 +144,18 @@ export class GPURenderer {
         this.fluidSimulation.splatVelocity(x, y, radius * 1.2, driftX, driftY, wpW, wpH);
     };
 
+    private subscribeToEvents(): void {
+        const eb = EventBus.getInstance();
+        eb.on(GameEvent.EXPLOSION, (data) => {
+            if (!this.active) return;
+            ExplosionLibrary.spawnStandardExplosion(data.x, data.y, data.radius, 'rocket');
+        });
+    }
+
     public setWorld(world: World): void {
         this.world = world;
-        const hm = world.getHeatMap();
-        if (hm) {
-            hm.onHeatAdded = (x: number, y: number, amount: number, radius: number) => {
-                if (!this.active) return;
-
-                // Heuristic: Large events are explosions, small ones are standard heat (lasers, fire)
-                // Threshold increased to 30 to prevent fire spread (R=15) from triggering rocket FX.
-                if (radius > 30) {
-                    if (ConfigManager.getInstance().get<boolean>('Debug', 'webgl_debug')) {
-                        console.info(`[GPURenderer] Spawning Standard Explosion R=${radius}`);
-                    }
-                    ExplosionLibrary.spawnStandardExplosion(x, y, radius, 'rocket');
-                } else {
-                    // Standard Heat Splat (Flamethrower, lasers)
-                    if (this.heatSystem) {
-                        this.heatSystem.splatHeat(x, y, amount, radius, world.getWidthPixels(), world.getHeightPixels());
-                    }
-                }
-            };
-            hm.onIgnite = (x: number, y: number, radius: number) => {
-                if (this.active && this.heatSystem) {
-                    this.heatSystem.splatHeat(x, y, 1.0, radius, world.getWidthPixels(), world.getHeightPixels());
-                }
-            };
-        }
+        // Decoupled from CPU HeatMap callbacks to prevent lingering artifacts.
+        // GPU visual state is now triggered via direct events and simulated on GPU.
     }
 
     public updateConfig(): void {
@@ -228,7 +215,8 @@ export class GPURenderer {
             const sTex = this.wallRenderer.getStructureTexture();
             if (hTex && sTex) {
                 const fTex = this.fluidSimulation ? this.fluidSimulation.getDensityTexture() : null;
-                this.lightingSystem.update(hTex, fTex, sTex, this.world.getWidthPixels(), this.world.getHeightPixels(), this.lightBuffer, this.entityBuffer);
+                const scTex = this.heatSystem.getScorchTexture();
+                this.lightingSystem.update(hTex, fTex, scTex, sTex, this.world.getWidthPixels(), this.world.getHeightPixels(), this.lightBuffer, this.entityBuffer);
             }
         }
     }

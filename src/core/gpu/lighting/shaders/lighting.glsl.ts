@@ -11,6 +11,7 @@ export const EMISSIVE_PASS_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D u_heatTexture;
 uniform sampler2D u_fluidTexture;
+uniform sampler2D u_scorchTexture;
 uniform sampler2D u_structureMap;
 uniform vec2 u_worldPixels;
 in vec2 v_uv;
@@ -81,6 +82,13 @@ void main() {
             float falloff = 1.0 - smoothstep(0.0, lRad * 0.1, d);
             emissive += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 5.0;
         }
+    }
+
+    // 4. Scorch Faint Glow (Residual heat in charred marks)
+    float scorch = texture(u_scorchTexture, vec2(v_uv.x, 1.0 - v_uv.y)).r;
+    if (scorch > 0.1) {
+        // Very scattered, low radius light
+        emissive += vec3(0.3, 0.05, 0.0) * scorch * 0.5;
     }
 
     outColor = vec4(emissive, 1.0);

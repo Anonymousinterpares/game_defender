@@ -8,6 +8,7 @@ export class GPUHeatSystem {
 
     private heatFBOs: { fbo: WebGLFramebuffer, tex: WebGLTexture }[] = [];
     private heatIdx: number = 0;
+    private scorchFBO: { fbo: WebGLFramebuffer, tex: WebGLTexture } | null = null;
 
     private shaders: HeatShaderManager | null = null;
     private quadBuffer: WebGLBuffer | null = null;
@@ -32,6 +33,7 @@ export class GPUHeatSystem {
         }
 
         this.heatFBOs = [this.createFBO(), this.createFBO()];
+        this.scorchFBO = this.createFBO(gl.R8, gl.RED, gl.UNSIGNED_BYTE);
         this.shaders = new HeatShaderManager(gl);
 
         const quad = new Float32Array([-1, -1, 1, -1, -1, 1, 1, -1, 1, 1, -1, 1]);
@@ -43,14 +45,16 @@ export class GPUHeatSystem {
         this._initialized = true;
     }
 
-    private createFBO(): { fbo: WebGLFramebuffer, tex: WebGLTexture } {
+    private createFBO(internalFormat?: number, format?: number, type?: number): { fbo: WebGLFramebuffer, tex: WebGLTexture } {
         const gl = this.gl!;
         const fbo = gl.createFramebuffer()!;
         const tex = gl.createTexture()!;
 
         gl.bindTexture(gl.TEXTURE_2D, tex);
-        // Use R16F for high precision and efficiency
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, this.width, this.height, 0, gl.RED, gl.HALF_FLOAT, null);
+        const intFmt = internalFormat || gl.R16F;
+        const fmt = format || gl.RED;
+        const typ = type || gl.HALF_FLOAT;
+        gl.texImage2D(gl.TEXTURE_2D, 0, intFmt, this.width, this.height, 0, fmt, typ, null);
 
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -161,10 +165,27 @@ export class GPUHeatSystem {
 
         this.renderQuad();
         gl.disable(gl.BLEND);
+
+        // 2. Also Splat into Scorch FBO (Additive, but capped at 1.0)
+        if (this.scorchFBO) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.scorchFBO.fbo);
+            gl.enable(gl.BLEND);
+            // Scorch is R8 (0..1), we want to accumulate "burn"
+            gl.blendFunc(gl.ONE, gl.ONE);
+
+            // Re-use same shader, output to Scorch (R8 will clamp to 1.0 automatically)
+            this.renderQuad();
+            gl.disable(gl.BLEND);
+        }
+
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
     public getHeatTexture(): WebGLTexture | null {
         return this._initialized ? this.heatFBOs[this.heatIdx].tex : null;
+    }
+
+    public getScorchTexture(): WebGLTexture | null {
+        return this._initialized ? (this.scorchFBO?.tex || null) : null;
     }
 }

@@ -36,8 +36,9 @@ uniform sampler2D u_heatTexture;
 uniform sampler2D u_groundTexture;
 uniform sampler2D u_worldMap; 
 uniform sampler2D u_structureMap; 
-uniform sampler2D u_sdfTexture;    // New
-uniform sampler2D u_emissiveTexture; // New
+uniform sampler2D u_sdfTexture;    
+uniform sampler2D u_emissiveTexture; 
+uniform sampler2D u_scorchTexture; // New permanent scorch layer
 uniform vec2 u_worldPixels;
 uniform vec2 u_structureSize;
 uniform vec2 u_camera;
@@ -61,10 +62,10 @@ in float v_time;
 out vec4 outColor;
 
 vec3 getHeatColor(float t) {
-    if (t < 0.2) return mix(vec3(0.0), vec3(0.5, 0.0, 0.0), t / 0.2);
-    if (t < 0.4) return mix(vec3(0.5, 0.0, 0.0), vec3(1.0, 0.2, 0.0), (t - 0.2) / 0.2);
-    if (t < 0.7) return mix(vec3(1.0, 0.2, 0.0), vec3(1.0, 0.8, 0.2), (t - 0.4) / 0.3);
-    return mix(vec3(1.0, 0.8, 0.2), vec3(1.0, 1.0, 1.0), (t - 0.7) / 0.3);
+    if (t < 0.15) return mix(vec3(0.1, 0.0, 0.0), vec3(0.5, 0.0, 0.0), t / 0.15); // Dark Red
+    if (t < 0.4) return mix(vec3(0.5, 0.0, 0.0), vec3(1.0, 0.2, 0.0), (t - 0.15) / 0.25); // Red to Orange
+    if (t < 0.7) return mix(vec3(1.0, 0.2, 0.0), vec3(1.0, 0.8, 0.2), (t - 0.4) / 0.3); // Orange to Yellow
+    return mix(vec3(1.0, 0.8, 0.2), vec3(2.0, 2.0, 2.0), (t - 0.7) / 0.3); // Yellow to White-Hot
 }
 
 float hash12(vec2 p) {
@@ -203,8 +204,9 @@ void main() {
     lightAcc += u_moonColor * u_moonIntensity * 1.2 * min(moonSDF, 1.0);
     
     // Unified Pathtraced Lighting (Fire + Point Lights)
-    // Daylight Balancing: Marginally reduce flash intensity when sun is strong
-    float emissiveMultiplier = 10.0 * (1.0 - u_sunIntensity * 0.7);
+    // Physical Hierarchy: Fire should be outshined by Sun during day.
+    // At noon (Sun=1.0), multiplier is 0.4. At night (Sun=0.0), multiplier is 10.0.
+    float emissiveMultiplier = mix(10.0, 0.4, u_sunIntensity);
     lightAcc += sampleEmissivePathtraced(worldPos, u_sdfTexture, u_emissiveTexture, u_worldPixels) * emissiveMultiplier;
 
     // Remaining Dynamic Point Lights 
@@ -223,13 +225,17 @@ void main() {
             float falloff = (1.0 / denom) * window * window; 
             
             float shadow = 1.0;
+            // Analytic Flash Volume / Point Light with SDF Shadows
             if (u_lights[i].posRad.w > 1.5) {
                 vec2 dirToLight = normalize(lPos - worldPos);
-                shadow = getSDFShadow(worldPos, -dirToLight, u_shadowRange * u_tileSize, u_sdfTexture, u_worldPixels);
+                shadow = getSDFShadow(worldPos, -dirToLight, lRad, u_sdfTexture, u_worldPixels);
             }
             
             float eShadow = getEntityShadow(worldPos, lPos, lRad, vec2(0.0), false);
-            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 5.0 * shadow * (1.0 - eShadow);
+            
+            // Unified Intensity Hierarchy: Flash is "brighter than sunlight"
+            // Multiply by 2.0 to ensure flash (4.0 * 2.0 = 8.0) beats Sun (0.7).
+            lightAcc += u_lights[i].colInt.rgb * u_lights[i].colInt.w * falloff * 2.0 * shadow * (1.0 - eShadow);
         }
     }
     
@@ -243,16 +249,27 @@ void main() {
     // Heat & Animated Ember Glow
     vec2 heatUV = vec2(worldPos.x / u_worldPixels.x, 1.0 - (worldPos.y / u_worldPixels.y));
     float heat = texture(u_heatTexture, heatUV).r;
+    float scorch = texture(u_scorchTexture, heatUV).r;
+    
     vec3 finalColor = litColor;
     
+    // Apply permanent scorch (darken the ground)
+    if (scorch > 0.01) {
+        finalColor = mix(finalColor, finalColor * 0.2, smoothstep(0.0, 0.6, scorch));
+    }
+
     if (heat > 0.01) {
         float flicker = 0.8 + 0.2 * noise(worldPos * 0.1 + vec2(0.0, v_time * 2.0));
         vec3 glow = getHeatColor(clamp(heat * flicker, 0.0, 1.0));
         
-        finalColor = mix(litColor, litColor * 0.1, smoothstep(0.0, 0.4, heat));
+        // Heat makes things look darker (charring) but adds glow
+        finalColor = mix(finalColor, finalColor * 0.1, smoothstep(0.0, 0.4, heat));
         finalColor = mix(finalColor, glow, smoothstep(0.1, 0.8, heat));
     }
 
+    // HDR-style tone mapping to prevent pure white washout while maintaining hierarchy
+    // finalColor = finalColor / (1.0 + finalColor); 
+    
     outColor = vec4(finalColor, 1.0);
 }
 `;
