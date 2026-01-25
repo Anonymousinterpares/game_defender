@@ -8,8 +8,10 @@ uniform mat4 u_viewProj;
 uniform vec2 u_cameraCenter;
 uniform float u_perspectiveStrength;
 uniform vec2 u_worldPixels;
+uniform float u_time;
 
 out vec2 v_worldPos;
+out float v_time;
 out vec2 v_uv;
 out float v_mat;
 out vec2 v_faceNormal;
@@ -21,6 +23,7 @@ void main() {
     v_mat = a_mat;
     v_faceNormal = a_faceNormal;
     v_z = a_position.z;
+    v_time = u_time;
 
     vec2 worldPos = a_position.xy;
     float h = -a_position.z; // Height above ground

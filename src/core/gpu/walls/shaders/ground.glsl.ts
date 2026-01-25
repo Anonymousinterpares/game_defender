@@ -60,7 +60,8 @@ uniform float u_useDeferred; // Phase 4 toggle
 
 in vec2 v_worldPos; 
 in float v_time;
-out vec4 outColor;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outNormal;
 
 vec3 getHeatColor(float t) {
     if (t < 0.15) return mix(vec3(0.1, 0.0, 0.0), vec3(0.5, 0.0, 0.0), t / 0.15); // Dark Red
@@ -259,5 +260,7 @@ void main() {
     }
     
     outColor = vec4(finalColor, 1.0);
+    // Ground is flat, normal is straight UP (0.5, 0.5, 1.0) encoded
+    outNormal = vec4(0.5, 0.5, 1.0, 1.0); 
 }
 `;

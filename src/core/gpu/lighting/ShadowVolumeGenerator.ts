@@ -91,4 +91,17 @@ export class ShadowVolumeGenerator {
             y: origin.y + dy * scale
         };
     }
+
+    /**
+     * Generates a shadow volume projected infinitely (or by range) along a direction vector.
+     */
+    public static getDirectionalShadowVolume(dir: Point, a: Point, b: Point, range: number): ShadowPolygon | null {
+        // dir should be normalized
+        const projA = { x: a.x + dir.x * range, y: a.y + dir.y * range };
+        const projB = { x: b.x + dir.x * range, y: b.y + dir.y * range };
+
+        return {
+            vertices: [a, b, projB, projA]
+        };
+    }
 }

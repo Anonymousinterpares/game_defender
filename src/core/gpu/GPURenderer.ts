@@ -239,8 +239,12 @@ export class GPURenderer {
         if (useDeferred && this.deferredLighting && this.world) {
             this.deferredLighting.resize(width, height);
             const segments = this.world.getOcclusionSegments(cameraX, cameraY, width, height);
-            const ambient = WorldClock.getInstance().getTimeState().baseAmbient;
-            this.deferredLighting.update(cameraX, cameraY, width, height, lights, segments, ambient);
+            const timeState = WorldClock.getInstance().getTimeState();
+            this.deferredLighting.update(
+                cameraX, cameraY, width, height,
+                lights, segments, timeState.baseAmbient,
+                timeState.sun, timeState.moon
+            );
         }
 
         // Update Entity Buffer (Pass nearest entities to GPU for internal shadows)
@@ -295,11 +299,18 @@ export class GPURenderer {
         this.context.resize(width, height);
         const gl = this.context.getGL();
         const canvas = this.context.getCanvas();
-        gl.viewport(0, 0, canvas.width, canvas.height);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        this.context.clear();
-
+        // The user's provided snippet for `unbindGBuffer` was syntactically incorrect
+        // if placed inside `renderEnvironment`. Assuming the intent was to modify
+        // the rendering flow for deferred lighting.
         const useDeferred = ConfigManager.getInstance().get<boolean>('Visuals', 'useDeferredLighting') || false;
+
+        if (useDeferred && this.deferredLighting.isInitialized) {
+            this.deferredLighting.bindGBuffer();
+        } else {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            this.context.clear();
+        }
 
         // Structure map already updated in GPURenderer.update()
         // Pass null to lightingSystem if deferred is active to skip old raymarching
@@ -318,10 +329,21 @@ export class GPURenderer {
         );
 
         if (useDeferred && this.deferredLighting.isInitialized) {
+            this.deferredLighting.unbindGBuffer();
+
+            // 1. Draw the Unlit World from G-Buffer to screen
+            const unlitTex = this.deferredLighting.getGBufferColorTexture();
+            if (unlitTex) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                gl.viewport(0, 0, canvas.width, canvas.height);
+                this.context.clear();
+                this.renderSimpleTexture(unlitTex);
+            }
+
+            // 2. Multiply Lighting on top
             const lightTex = this.deferredLighting.getResultTexture();
             if (lightTex) {
                 gl.enable(gl.BLEND);
-                // Standard Multiply: DST_COLOR * SRC_COLOR
                 gl.blendFunc(gl.DST_COLOR, gl.ZERO);
                 this.renderSimpleTexture(lightTex);
                 gl.disable(gl.BLEND);

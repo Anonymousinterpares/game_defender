@@ -36,16 +36,17 @@ uniform sampler2D u_emissiveTexture;
 uniform vec2 u_structureSize;
 uniform float u_shadowRange;
 uniform float u_tileSize;
-uniform float u_time;
-uniform float u_useDeferred; // Phase 4 toggle
+in vec2 v_worldPos; 
+in float v_time;
+uniform float u_useDeferred; // Phase 4: Toggle old lighting
 
-in vec2 v_worldPos;
 in vec2 v_uv;
 in float v_mat;
 in vec2 v_faceNormal;
 in float v_z;
 
-out vec4 outColor;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outNormal;
 
 // Pseudo-random hash
 float hash12(vec2 p) {
@@ -94,7 +95,7 @@ float getSDFShadow(vec2 startPos, vec2 dir, float maxDist, sampler2D sdfMap, vec
 vec3 sampleEmissivePathtraced(vec2 worldPos, sampler2D sdfMap, sampler2D emissiveMap, vec2 worldPixels) {
     vec3 indirect = vec3(0.0);
     int samples = 8;
-    float seed = hash12(worldPos + u_time);
+    float seed = hash12(worldPos + v_time);
     
     for (int i = 0; i < samples; i++) {
         float angle = (float(i) + seed) * (6.28318 / float(samples));
@@ -232,8 +233,8 @@ void main() {
     vec3 finalColor = litColor;
 
     if (heat > 0.01) {
-        float flicker = 0.8 + 0.2 * noise(vec2(u_time * 20.0, v_worldPos.x));
-        float flame = noise(v_worldPos * 0.1 + vec2(0.0, -u_time * 5.0 - v_z * 0.2));
+        float flicker = 0.8 + 0.2 * noise(vec2(v_time * 20.0, v_worldPos.x));
+        float flame = noise(v_worldPos * 0.1 + vec2(0.0, -v_time * 5.0 - v_z * 0.2));
         float combinedHeat = heat * (0.7 + 0.5 * flame) * flicker;
         vec3 heatCol = getHeatColor(clamp(combinedHeat, 0.0, 1.0));
         if (heat < 0.3) {
@@ -245,5 +246,8 @@ void main() {
     }
 
     outColor = vec4(finalColor, 1.0);
+    // Write normals to the second attachment. v_faceNormal is already in world space.
+    // We encode (-1, 1) to (0, 1) to store in the texture.
+    outNormal = vec4(v_faceNormal * 0.5 + 0.5, v_z / 100.0, 1.0);
 }
 `;
