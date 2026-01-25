@@ -234,6 +234,28 @@ void main() {
         }
     }
     
+    // Heat & Animated Ember Glow
+    vec2 heatUV = worldPos / u_worldPixels;
+    float heat = texture(u_heatTexture, heatUV).r;
+    float scorch = texture(u_scorchTexture, heatUV).r;
+
+    // Calculate heat contribution
+    float heatValue = 0.0;
+    vec3 emissiveGlow = vec3(0.0);
+    if (heat > 0.01) {
+        float flicker = 0.8 + 0.2 * noise(worldPos * 0.1 + vec2(0.0, v_time * 2.0));
+        heatValue = heat * flicker;
+        emissiveGlow = getHeatColor(clamp(heatValue, 0.0, 1.0));
+    }
+
+    if (u_useDeferred > 0.5) {
+        outColor = vec4(texColor, 1.0);
+        // Ground is flat, normal is straight UP (0.5, 0.5, 1.0) encoded, alpha is heat
+        outNormal = vec4(0.5, 0.5, 1.0, heatValue); 
+        return;
+    }
+
+    // --- OLD NON-DEFERRED LIGHTING PATH ---
     vec3 litColor = texColor * lightAcc;
     
     // Grid Overlay
@@ -241,11 +263,6 @@ void main() {
     float gridLine = step(u_tileSize - 1.0, gridPos.x) + step(u_tileSize - 1.0, gridPos.y);
     litColor = mix(litColor, litColor * 0.7, gridLine * 0.3);
 
-    // Heat & Animated Ember Glow
-    vec2 heatUV = worldPos / u_worldPixels;
-    float heat = texture(u_heatTexture, heatUV).r;
-    float scorch = texture(u_scorchTexture, heatUV).r;
-    
     vec3 finalColor = litColor;
     
     if (scorch > 0.01) {
@@ -253,14 +270,11 @@ void main() {
     }
 
     if (heat > 0.01) {
-        float flicker = 0.8 + 0.2 * noise(worldPos * 0.1 + vec2(0.0, v_time * 2.0));
-        vec3 glow = getHeatColor(clamp(heat * flicker, 0.0, 1.0));
         finalColor = mix(finalColor, finalColor * 0.1, smoothstep(0.0, 0.4, heat));
-        finalColor = mix(finalColor, glow, smoothstep(0.1, 0.8, heat));
+        finalColor = mix(finalColor, emissiveGlow, smoothstep(0.1, 0.8, heat));
     }
     
     outColor = vec4(finalColor, 1.0);
-    // Ground is flat, normal is straight UP (0.5, 0.5, 1.0) encoded
     outNormal = vec4(0.5, 0.5, 1.0, 1.0); 
 }
 `;

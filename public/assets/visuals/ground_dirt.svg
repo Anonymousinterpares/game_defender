@@ -1,0 +1,11 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="256" fill="#4d3a2b"/>
+  <filter id="noiseFilter">
+    <feTurbulence type="fractalNoise" baseFrequency="0.6" numOctaves="3" stitchTiles="stitch"/>
+  </filter>
+  <rect width="256" height="256" filter="url(#noiseFilter)" opacity="0.15"/>
+  <circle cx="50" cy="50" r="2" fill="#3b2d21" opacity="0.5"/>
+  <circle cx="150" cy="120" r="3" fill="#5c4a3a" opacity="0.4"/>
+  <circle cx="200" cy="80" r="1.5" fill="#2a1f18" opacity="0.6"/>
+  <circle cx="80" cy="200" r="2.5" fill="#4a3b2e" opacity="0.5"/>
+</svg>

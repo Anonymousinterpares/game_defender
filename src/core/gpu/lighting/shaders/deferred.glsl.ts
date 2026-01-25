@@ -91,6 +91,8 @@ uniform vec2 u_resolution;
 in vec2 v_uv;
 out vec4 outColor;
 
+uniform float u_lightAltitude; // 0 (horizon) to 1 (zenith)
+
 void main() {
     // Map lightDir (top-down) to bottom-up NDC screen space
     vec2 dir = normalize(vec2(u_lightDir.x, -u_lightDir.y));
@@ -101,15 +103,43 @@ void main() {
     
     // Directional shading
     float dotNL = dot(normal, -dir);
+    
+    // Altitude-based ground shading
     if (length(normal) < 0.1) {
-        dotNL = 1.0; // Sky-facing surfaces get full light
+        // Ground receives light based on altitude
+        dotNL = clamp(u_lightAltitude, 0.05, 1.0); 
     } else {
-        dotNL = max(0.1, dotNL); 
+        // Walls receive light based on 2D dot product, scaled by altitude
+        dotNL = max(0.05, dotNL) * (0.3 + 0.7 * clamp(u_lightAltitude * 2.0, 0.0, 1.0)); 
     }
     
-    // Color toning: multiply by intensity and add a touch of tinting
+    // Color toning
     vec3 color = u_lightColor * u_lightIntensity * dotNL;
     outColor = vec4(color, 1.0);
+}
+`;
+
+export const DEFERRED_EMISSIVE_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D u_normalTex; // Normal.a has heat intensity
+uniform vec2 u_resolution;
+in vec2 v_uv;
+out vec4 outColor;
+
+vec3 getHeatColor(float t) {
+    if (t < 0.1) return mix(vec3(0.0), vec3(0.6, 0.0, 0.0), t / 0.1);
+    if (t < 0.3) return mix(vec3(0.6, 0.0, 0.0), vec3(1.0, 0.4, 0.0), (t - 0.1) / 0.2);
+    if (t < 0.6) return mix(vec3(1.0, 0.4, 0.0), vec3(1.0, 0.9, 0.2), (t - 0.3) / 0.3);
+    return mix(vec3(1.0, 0.9, 0.2), vec3(2.0, 2.0, 2.0), (t - 0.6) / 0.4); 
+}
+
+void main() {
+    float heatValue = texture(u_normalTex, v_uv).a;
+    if (heatValue < 0.01) discard;
+    
+    vec3 glow = getHeatColor(clamp(heatValue, 0.0, 1.0));
+    // Boost intensity for bloom/emissive look
+    outColor = vec4(glow * 2.0, 1.0);
 }
 `;
 

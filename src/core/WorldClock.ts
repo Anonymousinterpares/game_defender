@@ -7,6 +7,7 @@ export interface LightState {
     intensity: number;
     shadowLen: number;
     active: boolean;
+    altitude: number;
 }
 
 export interface TimeState {
@@ -140,6 +141,7 @@ export class WorldClock {
             // Smooth curve for intensity
             sunIntensity = Math.min(1.0, Math.sin(progress * Math.PI) * 1.8) * weatherDim;
         }
+        const sunAltitude = isSunUp ? Math.sin((timeDecimal - sunRise) / (sunSet - sunRise) * Math.PI) : 0;
         const sunColor = this.getSunColor(timeDecimal);
 
         // --- MOON LOGIC ---
@@ -154,6 +156,8 @@ export class WorldClock {
             const weatherDim = 0.6 + (ambMult * 0.4);
             moonBaseIntensity = Math.min(1.0, Math.sin(progress * Math.PI) * 1.5) * this.moonPhase * weatherDim;
         }
+        const moonProgress = timeDecimal >= moonRise ? (timeDecimal - moonRise) / (24 - moonRise + moonSet) : (24 - moonRise + timeDecimal) / (24 - moonRise + moonSet);
+        const moonAltitude = isMoonUp ? Math.sin(moonProgress * Math.PI) : 0;
         const moonColor = ConfigManager.getInstance().get<string>('Lighting', 'moonColor') || '#aaccff';
 
         // Calculate base ambient with weather dimming
@@ -169,14 +173,16 @@ export class WorldClock {
                 color: sunColor,
                 intensity: sunIntensity,
                 shadowLen: 40 + 130 * (1.0 - Math.pow(sunIntensity, 0.4)),
-                active: isSunUp && sunIntensity > 0.01
+                active: isSunUp && sunIntensity > 0.01,
+                altitude: sunAltitude
             },
             moon: {
                 direction: { x: Math.cos(moonAngle), y: Math.sin(moonAngle) },
                 color: moonColor,
                 intensity: moonBaseIntensity * 0.5,
                 shadowLen: this.currentNightShadowLen,
-                active: isMoonUp && moonBaseIntensity > 0.01
+                active: isMoonUp && moonBaseIntensity > 0.01,
+                altitude: moonAltitude
             },
             baseAmbient: dimmedAmbient,
             moonPhase: this.moonPhase,

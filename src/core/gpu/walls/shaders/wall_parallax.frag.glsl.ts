@@ -223,31 +223,46 @@ void main() {
 
     float edge = min(min(v_uv.x, 1.0 - v_uv.x), min(v_uv.y, 1.0 - v_uv.y));
     float edgeFactor = smoothstep(0.0, 0.05, edge); 
-    vec3 litColor = baseColor * lightAcc * (0.5 + 0.5 * edgeFactor);
-
+    vec3 baseColorWithEdges = baseColor * (0.5 + 0.5 * edgeFactor);
+    
+    // Heat & Animated Ember Glow
     vec2 heatSamplePos = v_worldPos;
     if (length(v_faceNormal) > 0.1) heatSamplePos -= v_faceNormal * u_tileSize * 0.5;
     vec2 heatUV = vec2(heatSamplePos.x / u_worldPixels.x, 1.0 - (heatSamplePos.y / u_worldPixels.y));
     float heat = texture(u_heatTexture, heatUV).r;
-    
-    vec3 finalColor = litColor;
 
+    // Calculate heat contribution
+    float heatValue = 0.0;
+    vec3 emissiveGlow = vec3(0.0);
     if (heat > 0.01) {
         float flicker = 0.8 + 0.2 * noise(vec2(v_time * 20.0, v_worldPos.x));
         float flame = noise(v_worldPos * 0.1 + vec2(0.0, -v_time * 5.0 - v_z * 0.2));
         float combinedHeat = heat * (0.7 + 0.5 * flame) * flicker;
-        vec3 heatCol = getHeatColor(clamp(combinedHeat, 0.0, 1.0));
+        heatValue = combinedHeat;
+        emissiveGlow = getHeatColor(clamp(combinedHeat, 0.0, 1.0));
+    }
+
+    if (u_useDeferred > 0.5) {
+        outColor = vec4(baseColorWithEdges, 1.0);
+        // Encode normals and store heat in alpha channel
+        outNormal = vec4(v_faceNormal * 0.5 + 0.5, v_z / 100.0, heatValue);
+        return;
+    }
+
+    // --- OLD NON-DEFERRED LIGHTING PATH ---
+    vec3 litColor = baseColorWithEdges * lightAcc;
+    vec3 finalColor = litColor;
+
+    if (heat > 0.01) {
         if (heat < 0.3) {
              finalColor = mix(litColor, litColor * 0.15, smoothstep(0.0, 0.3, heat));
-             finalColor = mix(finalColor, heatCol * 1.5, smoothstep(0.1, 0.3, heat)); 
+             finalColor = mix(finalColor, emissiveGlow * 1.5, smoothstep(0.1, 0.3, heat)); 
         } else {
-             finalColor = mix(litColor * 0.05, heatCol * 2.5, smoothstep(0.3, 0.7, heat));
+             finalColor = mix(litColor * 0.05, emissiveGlow * 2.5, smoothstep(0.3, 0.7, heat));
         }
     }
 
     outColor = vec4(finalColor, 1.0);
-    // Write normals to the second attachment. v_faceNormal is already in world space.
-    // We encode (-1, 1) to (0, 1) to store in the texture.
     outNormal = vec4(v_faceNormal * 0.5 + 0.5, v_z / 100.0, 1.0);
 }
 `;

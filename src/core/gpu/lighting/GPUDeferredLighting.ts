@@ -1,5 +1,5 @@
 import { Shader } from "../Shader";
-import { DEFERRED_VERT, DEFERRED_AMBIENT_FRAG, DEFERRED_COMPOSE_FRAG, DEFERRED_LIGHT_FRAG, DEFERRED_SHADOW_VERT, DEFERRED_SHADOW_FRAG, DEFERRED_DIRECTIONAL_FRAG } from "./shaders/deferred.glsl";
+import { DEFERRED_VERT, DEFERRED_AMBIENT_FRAG, DEFERRED_COMPOSE_FRAG, DEFERRED_LIGHT_FRAG, DEFERRED_SHADOW_VERT, DEFERRED_SHADOW_FRAG, DEFERRED_DIRECTIONAL_FRAG, DEFERRED_EMISSIVE_FRAG } from "./shaders/deferred.glsl";
 import { ShadowVolumeGenerator, Point } from "./ShadowVolumeGenerator";
 import { LightSource } from "../../LightManager";
 
@@ -19,6 +19,7 @@ export class GPUDeferredLighting {
     private shadowShader: Shader | null = null;
     private composeShader: Shader | null = null;
     private directionalShader: Shader | null = null;
+    private emissiveShader: Shader | null = null;
     private shadowBuffer: WebGLBuffer | null = null;
     private quadBuffer: WebGLBuffer | null = null;
 
@@ -45,6 +46,7 @@ export class GPUDeferredLighting {
         this.shadowShader = new Shader(gl, DEFERRED_SHADOW_VERT, DEFERRED_SHADOW_FRAG);
         this.composeShader = new Shader(gl, DEFERRED_VERT, DEFERRED_COMPOSE_FRAG);
         this.directionalShader = new Shader(gl, DEFERRED_VERT, DEFERRED_DIRECTIONAL_FRAG);
+        this.emissiveShader = new Shader(gl, DEFERRED_VERT, DEFERRED_EMISSIVE_FRAG);
 
         // Quad
         const quad = new Float32Array([-1, -1, 1, -1, -1, 1, 1, -1, 1, 1, -1, 1]);
@@ -169,8 +171,8 @@ export class GPUDeferredLighting {
         lights: LightSource[],
         segments: { a: Point, b: Point }[],
         ambientColor: string,
-        sun: { active: boolean, color: string, intensity: number, direction: { x: number, y: number } },
-        moon: { active: boolean, color: string, intensity: number, direction: { x: number, y: number } }
+        sun: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number },
+        moon: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number }
     ): void {
         if (!this._initialized || !this.gl) return;
         const gl = this.gl;
@@ -258,6 +260,7 @@ export class GPUDeferredLighting {
         this.directionalShader!.setUniform3f("u_lightColor", sc[0], sc[1], sc[2]);
         this.directionalShader!.setUniform1f("u_lightIntensity", light.intensity);
         this.directionalShader!.setUniform2f("u_lightDir", light.direction.x, light.direction.y);
+        this.directionalShader!.setUniform1f("u_lightAltitude", light.altitude);
 
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.gBufferFBO!.normalTex);
@@ -290,6 +293,20 @@ export class GPUDeferredLighting {
         this.composeShader!.setUniform1i("u_accumulationTex", 0);
         this.renderQuad();
         gl.disable(gl.BLEND);
+    }
+
+    public renderEmissive(): void {
+        if (!this._initialized || !this.gl) return;
+        const gl = this.gl;
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.gBufferFBO!.normalTex);
+
+        this.emissiveShader!.use();
+        this.emissiveShader!.setUniform1i("u_normalTex", 0);
+        this.emissiveShader!.setUniform2f("u_resolution", this.width, this.height);
+
+        this.renderQuad();
     }
 
     private normalize(p: Point): Point {

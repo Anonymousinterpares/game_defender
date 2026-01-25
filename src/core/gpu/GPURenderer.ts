@@ -348,6 +348,12 @@ export class GPURenderer {
                 this.renderSimpleTexture(lightTex);
                 gl.disable(gl.BLEND);
             }
+
+            // 3. Add Emissive Glow (Fire/Heat) on top
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.ONE, gl.ONE);
+            this.deferredLighting.renderEmissive();
+            gl.disable(gl.BLEND);
         }
     }
 
