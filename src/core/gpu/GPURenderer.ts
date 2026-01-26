@@ -235,17 +235,8 @@ export class GPURenderer {
         const lights = LightManager.getInstance().getLights();
         this.lightBuffer.update(lights);
 
+        // Deferred lighting update moved to renderEnvironment() for camera sync
         const useDeferred = ConfigManager.getInstance().get<boolean>('Visuals', 'useDeferredLighting') || false;
-        if (useDeferred && this.deferredLighting && this.world) {
-            this.deferredLighting.resize(width, height);
-            const segments = this.world.getOcclusionSegments(cameraX, cameraY, width, height);
-            const timeState = WorldClock.getInstance().getTimeState();
-            this.deferredLighting.update(
-                cameraX, cameraY, width, height,
-                lights, segments, timeState.baseAmbient,
-                timeState.sun, timeState.moon
-            );
-        }
 
         // Update Entity Buffer (Pass nearest entities to GPU for internal shadows)
         this.entityBuffer.update(entities.map(e => ({ x: e.x, y: e.y, radius: (e as any).radius || 20, active: true })));
@@ -305,6 +296,7 @@ export class GPURenderer {
         const useDeferred = ConfigManager.getInstance().get<boolean>('Visuals', 'useDeferredLighting') || false;
 
         if (useDeferred && this.deferredLighting.isInitialized) {
+
             this.deferredLighting.bindGBuffer();
         } else {
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -330,6 +322,29 @@ export class GPURenderer {
 
         if (useDeferred && this.deferredLighting.isInitialized) {
             this.deferredLighting.unbindGBuffer();
+
+            // 1. Calculate the SAME viewProj matrix as wallRenderer for shadows
+            const left = cameraX, right = cameraX + width, top = cameraY, bottom = cameraY + height;
+            const viewProj = new Float32Array([
+                2 / (right - left), 0, 0, 0,
+                0, 2 / (top - bottom), 0, 0,
+                0, 0, -1, 0,
+                -(right + left) / (right - left), -(top + bottom) / (top - bottom), 0, 1
+            ]);
+
+            // 2. Perform Lighting Pass (Shadows now see the filled G-Buffer/Depth!)
+            const segments = this.world!.getOcclusionSegments(cameraX, cameraY, width, height);
+            const lights = LightManager.getInstance().getLights();
+            const timeState = WorldClock.getInstance().getTimeState();
+
+            this.deferredLighting.resize(width, height);
+            this.deferredLighting.update(
+                cameraX, cameraY, width, height,
+                lights, segments, timeState.baseAmbient,
+                timeState.sun, timeState.moon,
+                this.entityBuffer,
+                viewProj
+            );
 
             // 1. Draw the Unlit World from G-Buffer to screen
             const unlitTex = this.deferredLighting.getGBufferColorTexture();

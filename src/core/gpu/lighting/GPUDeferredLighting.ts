@@ -2,6 +2,7 @@ import { Shader } from "../Shader";
 import { DEFERRED_VERT, DEFERRED_AMBIENT_FRAG, DEFERRED_COMPOSE_FRAG, DEFERRED_LIGHT_FRAG, DEFERRED_SHADOW_VERT, DEFERRED_SHADOW_FRAG, DEFERRED_DIRECTIONAL_FRAG, DEFERRED_EMISSIVE_FRAG } from "./shaders/deferred.glsl";
 import { ShadowVolumeGenerator, Point } from "./ShadowVolumeGenerator";
 import { LightSource } from "../../LightManager";
+import { GPUEntityBuffer } from "../GPUEntityBuffer";
 
 export class GPUDeferredLighting {
     private gl: WebGL2RenderingContext | null = null;
@@ -12,7 +13,7 @@ export class GPUDeferredLighting {
     private accumulationFBO: { fbo: WebGLFramebuffer, tex: WebGLTexture } | null = null;
     private tempLightFBO: { fbo: WebGLFramebuffer, tex: WebGLTexture } | null = null;
     private bloomFBO: { fbo: WebGLFramebuffer, tex: WebGLTexture } | null = null;
-    private gBufferFBO: { fbo: WebGLFramebuffer, colorTex: WebGLTexture, normalTex: WebGLTexture } | null = null;
+    private gBufferFBO: { fbo: WebGLFramebuffer, colorTex: WebGLTexture, normalTex: WebGLTexture, depthRB: WebGLRenderbuffer } | null = null;
 
     private ambientShader: Shader | null = null;
     private lightShader: Shader | null = null;
@@ -80,6 +81,7 @@ export class GPUDeferredLighting {
             this.gl!.deleteFramebuffer(this.gBufferFBO.fbo);
             this.gl!.deleteTexture(this.gBufferFBO.colorTex);
             this.gl!.deleteTexture(this.gBufferFBO.normalTex);
+            this.gl!.deleteRenderbuffer(this.gBufferFBO.depthRB);
         }
 
         // Recreate at new size
@@ -89,7 +91,7 @@ export class GPUDeferredLighting {
         this.gBufferFBO = this.createGBuffer(this.gl!, width, height);
     }
 
-    private createGBuffer(gl: WebGL2RenderingContext, w: number, h: number): { fbo: WebGLFramebuffer, colorTex: WebGLTexture, normalTex: WebGLTexture } {
+    private createGBuffer(gl: WebGL2RenderingContext, w: number, h: number): { fbo: WebGLFramebuffer, colorTex: WebGLTexture, normalTex: WebGLTexture, depthRB: WebGLRenderbuffer } {
         const fbo = gl.createFramebuffer()!;
         gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
 
@@ -123,7 +125,7 @@ export class GPUDeferredLighting {
         }
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        return { fbo, colorTex, normalTex };
+        return { fbo, colorTex, normalTex, depthRB: rb };
     }
 
     public bindGBuffer(): void {
@@ -172,7 +174,9 @@ export class GPUDeferredLighting {
         segments: { a: Point, b: Point }[],
         ambientColor: string,
         sun: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number },
-        moon: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number }
+        moon: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number },
+        entityBuffer: GPUEntityBuffer,
+        viewProj: Float32Array
     ): void {
         if (!this._initialized || !this.gl) return;
         const gl = this.gl;
@@ -186,8 +190,8 @@ export class GPUDeferredLighting {
         this.renderQuad();
 
         // 2. Process Sun/Moon (Directional)
-        if (sun.active) this.renderDirectional(gl, sun, segments, cameraX, cameraY);
-        if (moon.active) this.renderDirectional(gl, moon, segments, cameraX, cameraY);
+        if (sun.active) this.renderDirectional(gl, sun, segments, cameraX, cameraY, width, height, entityBuffer, viewProj);
+        if (moon.active) this.renderDirectional(gl, moon, segments, cameraX, cameraY, width, height, entityBuffer, viewProj);
 
         // 3. Process each point light
         lights.forEach(light => {
@@ -197,11 +201,15 @@ export class GPUDeferredLighting {
 
             // Render light into Temp Buffer
             gl.bindFramebuffer(gl.FRAMEBUFFER, this.tempLightFBO!.fbo);
+            // Attach shared depth buffer to enable depth testing against walls
+            gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.gBufferFBO!.depthRB);
+
             gl.clearColor(0.0, 0.0, 0.0, 0.0);
-            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.clear(gl.COLOR_BUFFER_BIT); // DON'T CLEAR DEPTH, we need it for testing
 
             this.lightShader!.use();
             this.lightShader!.setUniform2f("u_resolution", this.width, this.height);
+            this.lightShader!.setUniform2f("u_camera", cameraX, cameraY);
             this.lightShader!.setUniform2f("u_lightPos", screenLPos.x, screenLPos.y);
             const lColor = this.parseColor(light.color);
             this.lightShader!.setUniform3f("u_lightColor", lColor[0], lColor[1], lColor[2]);
@@ -211,6 +219,10 @@ export class GPUDeferredLighting {
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, this.gBufferFBO!.normalTex);
             this.lightShader!.setUniform1i("u_normalTex", 0);
+
+            // Bind Entity UBO for entity shadows
+            entityBuffer.bind(this.lightShader!.getProgram(), "EntityBlock", 1);
+
             this.renderQuad();
 
             // Shadows
@@ -225,10 +237,11 @@ export class GPUDeferredLighting {
                     const dy = ((seg.a.y + seg.b.y) / 2) - light.y;
                     if (dx * dx + dy * dy > (light.radius * 1.5) * (light.radius * 1.5)) continue;
 
-                    const screenA = { x: seg.a.x - cameraX, y: seg.a.y - cameraY };
-                    const screenB = { x: seg.b.x - cameraX, y: seg.b.y - cameraY };
-                    const volume = ShadowVolumeGenerator.getShadowVolumeFromSegment(screenLPos, screenA, screenB, light.radius);
-                    if (volume) this.renderShadowPolygon(volume.vertices);
+                    const worldA = { x: seg.a.x, y: seg.a.y };
+                    const worldB = { x: seg.b.x, y: seg.b.y };
+                    const worldLPos = { x: light.x, y: light.y };
+                    const volume = ShadowVolumeGenerator.getShadowVolumeFromSegment(worldLPos, worldA, worldB, light.radius);
+                    if (volume) this.renderShadowPolygon(volume.vertices, viewProj, cameraX, cameraY);
                 }
                 gl.disable(gl.BLEND);
             }
@@ -248,14 +261,17 @@ export class GPUDeferredLighting {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    private renderDirectional(gl: WebGL2RenderingContext, light: any, segments: any[], cameraX: number, cameraY: number): void {
+    private renderDirectional(gl: WebGL2RenderingContext, light: any, segments: any[], cameraX: number, cameraY: number, width: number, height: number, entityBuffer: GPUEntityBuffer, viewProj: Float32Array): void {
         // 1. Render Directional Light into Temp
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.tempLightFBO!.fbo);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.gBufferFBO!.depthRB);
+
         gl.clearColor(0.0, 0.0, 0.0, 0.0);
         gl.clear(gl.COLOR_BUFFER_BIT);
 
         this.directionalShader!.use();
         this.directionalShader!.setUniform2f("u_resolution", this.width, this.height);
+        this.directionalShader!.setUniform2f("u_camera", cameraX, cameraY);
         const sc = this.parseColor(light.color);
         this.directionalShader!.setUniform3f("u_lightColor", sc[0], sc[1], sc[2]);
         this.directionalShader!.setUniform1f("u_lightIntensity", light.intensity);
@@ -265,6 +281,10 @@ export class GPUDeferredLighting {
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.gBufferFBO!.normalTex);
         this.directionalShader!.setUniform1i("u_normalTex", 0);
+
+        // Bind Entity UBO
+        entityBuffer.bind(this.directionalShader!.getProgram(), "EntityBlock", 1);
+
         this.renderQuad();
 
         // 2. Punch out Shadows
@@ -275,11 +295,12 @@ export class GPUDeferredLighting {
         this.shadowShader!.setUniform2f("u_resolution", this.width, this.height);
 
         const shadowExtrude = light.shadowLen || 100.0;
+
         for (const seg of segments) {
-            const screenA = { x: seg.a.x - cameraX, y: seg.a.y - cameraY };
-            const screenB = { x: seg.b.x - cameraX, y: seg.b.y - cameraY };
-            const volume = ShadowVolumeGenerator.getDirectionalShadowVolume(sDir, screenA, screenB, shadowExtrude);
-            if (volume) this.renderShadowPolygon(volume.vertices);
+            const worldA = { x: seg.a.x, y: seg.a.y };
+            const worldB = { x: seg.b.x, y: seg.b.y };
+            const volume = ShadowVolumeGenerator.getDirectionalShadowVolume(sDir, worldA, worldB, shadowExtrude);
+            if (volume) this.renderShadowPolygon(volume.vertices, viewProj, cameraX, cameraY);
         }
         gl.disable(gl.BLEND);
 
@@ -332,7 +353,7 @@ export class GPUDeferredLighting {
         return [1, 1, 1];
     }
 
-    private renderShadowPolygon(vertices: Point[]): void {
+    private renderShadowPolygon(vertices: Point[], viewProj: Float32Array, cameraX: number, cameraY: number): void {
         const gl = this.gl!;
         const data = new Float32Array(vertices.length * 2);
         for (let i = 0; i < vertices.length; i++) {
@@ -344,7 +365,24 @@ export class GPUDeferredLighting {
         gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
         gl.enableVertexAttribArray(0);
         gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+        // Depth Test against walls: Shadows only draw on ground
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthMask(false);
+        gl.depthFunc(gl.LEQUAL);
+
+        this.shadowShader!.use();
+        this.shadowShader!.setUniformMatrix4fv("u_viewProj", viewProj);
+        this.shadowShader!.setUniform2f("u_camera", cameraX, cameraY);
+        this.shadowShader!.setUniform2f("u_resolution", this.width, this.height);
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.gBufferFBO!.normalTex);
+        this.shadowShader!.setUniform1i("u_normalTex", 0);
+
         gl.drawArrays(gl.TRIANGLE_FAN, 0, vertices.length);
+        gl.disable(gl.DEPTH_TEST);
+        gl.depthMask(true);
     }
 
     private renderQuad(): void {
@@ -373,6 +411,7 @@ export class GPUDeferredLighting {
             gl.deleteFramebuffer(this.gBufferFBO.fbo);
             gl.deleteTexture(this.gBufferFBO.colorTex);
             gl.deleteTexture(this.gBufferFBO.normalTex);
+            gl.deleteRenderbuffer(this.gBufferFBO.depthRB);
         }
     }
 }

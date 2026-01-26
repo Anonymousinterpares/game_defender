@@ -1,6 +1,7 @@
 export const DEFERRED_VERT = `#version 300 es
 layout(location = 0) in vec2 a_position;
 out vec2 v_uv;
+uniform vec2 u_resolution;
 void main() {
     v_uv = a_position * 0.5 + 0.5;
     gl_Position = vec4(a_position, 0.0, 1.0);
@@ -8,23 +9,37 @@ void main() {
 `;
 
 export const DEFERRED_SHADOW_VERT = `#version 300 es
-layout(location = 0) in vec2 a_position;
+layout(location = 0) in vec2 a_position; // World Coordinates
+uniform mat4 u_viewProj;
+uniform vec2 u_camera;
 uniform vec2 u_resolution;
+out vec2 v_uv;
 
 void main() {
-    // a_position is in screen pixel coordinates (top-down)
-    // Map to bottom-up NDC: y=0 -> 1.0, y=height -> -1.0
-    float normY = 1.0 - (a_position.y / u_resolution.y);
-    float ndcX = (a_position.x / u_resolution.x) * 2.0 - 1.0;
-    float ndcY = normY * 2.0 - 1.0;
-    gl_Position = vec4(ndcX, ndcY, 0.0, 1.0);
+    // Correct UV calculation for G-Buffer sampling (World to Screen to UV)
+    vec2 screenPos = a_position - u_camera;
+    v_uv = vec2(screenPos.x / u_resolution.x, 1.0 - (screenPos.y / u_resolution.y));
+    
+    // Use the SAME viewProj as the walls for perfect bit-level alignment
+    // We use Z=0.998 to be just in front of ground but behind walls
+    // Since u_viewProj handles worldY -> NDC Z, we override Z manually
+    vec4 pos = u_viewProj * vec4(a_position, 0.0, 1.0);
+    gl_Position = vec4(pos.xy, 0.998, 1.0);
 }
 `;
 
 export const DEFERRED_SHADOW_FRAG = `#version 300 es
 precision highp float;
+uniform sampler2D u_normalTex;
+uniform vec2 u_resolution;
+in vec2 v_uv;
 out vec4 outColor;
 void main() {
+    // Sample Normal from G-Buffer
+    vec4 normData = texture(u_normalTex, v_uv);
+    // normData.z corresponds to height (v_z/100). For ground it is 1.0. For walls it is <= 0.0.
+    if (normData.z < 0.1) discard; 
+
     // Shadow volume: Output high alpha to "punch out" the light
     outColor = vec4(0.0, 0.0, 0.0, 1.0);
 }
@@ -46,9 +61,54 @@ uniform float u_lightRadius;
 uniform vec3 u_lightColor;
 uniform float u_lightIntensity;
 uniform vec2 u_resolution;
+struct Entity {
+    vec4 posRad; // x, y, radius, active
+};
+
+layout(std140) uniform EntityBlock {
+    Entity u_entities[32];
+};
+
+uniform vec2 u_camera; // camera position in world space
 uniform sampler2D u_normalTex;
 in vec2 v_uv;
 out vec4 outColor;
+
+float getEntityShadow(vec2 fragPos, vec2 lightPos, vec2 lightDir, bool isDirectional) {
+    float shadow = 0.0;
+    for (int i = 0; i < 32; i++) {
+        if (u_entities[i].posRad.w < 0.5) continue;
+        
+        vec2 entWorldPos = u_entities[i].posRad.xy;
+        // Convert entity world position to screen space
+        vec2 screenEntPos = entWorldPos - u_camera;
+        screenEntPos.y = u_resolution.y - screenEntPos.y; // flip Y for bottom-up
+        float entRad = u_entities[i].posRad.z;
+        
+        vec2 dir;
+        if (isDirectional) {
+            dir = normalize(vec2(lightDir.x, -lightDir.y)); // bottom-up direction
+        } else {
+            dir = normalize(fragPos - lightPos);
+            // If entity is further from light than pixel, it can't shadow the pixel
+            if (distance(lightPos, screenEntPos) > distance(lightPos, fragPos)) continue;
+        }
+        
+        vec2 entToPixel = fragPos - screenEntPos;
+        float projection = dot(entToPixel, dir);
+        
+        if (projection > 0.0) {
+            vec2 closestPoint = screenEntPos + dir * projection;
+            float distToRay = distance(fragPos, closestPoint);
+            
+            if (distToRay < entRad) {
+                float softness = 1.0 - smoothstep(entRad * 0.7, entRad, distToRay);
+                shadow = max(shadow, softness);
+            }
+        }
+    }
+    return shadow;
+}
 
 void main() {
     vec2 fragPos = v_uv * u_resolution;
@@ -76,7 +136,12 @@ void main() {
     float falloff = pow(clamp(1.0 - d*d, 0.0, 1.0), 2.0);
     float attenuation = 1.0 / (1.0 + dist * dist * 0.0001);
     
-    vec3 color = u_lightColor * u_lightIntensity * falloff * attenuation * dotNL;
+    float shadow = getEntityShadow(fragPos, bottomUpLightPos, vec2(0.0), false);
+    
+    // Shadow Bleeding: Shadows are not 100% pitch black
+    float shadowFactor = 1.0 - (shadow * 0.85); 
+    
+    vec3 color = u_lightColor * u_lightIntensity * falloff * attenuation * dotNL * shadowFactor;
     outColor = vec4(color, 1.0);
 }
 `;
@@ -88,8 +153,53 @@ uniform float u_lightIntensity;
 uniform vec2 u_lightDir; // Logical top-down direction
 uniform sampler2D u_normalTex;
 uniform vec2 u_resolution;
+uniform vec2 u_camera;
 in vec2 v_uv;
 out vec4 outColor;
+
+struct Entity {
+    vec4 posRad; // x, y, radius, active
+};
+
+layout(std140) uniform EntityBlock {
+    Entity u_entities[32];
+};
+
+float getEntityShadow(vec2 fragPos, vec2 lightPos, vec2 lightDir, bool isDirectional) {
+    float shadow = 0.0;
+    for (int i = 0; i < 32; i++) {
+        if (u_entities[i].posRad.w < 0.5) continue;
+        
+        vec2 entWorldPos = u_entities[i].posRad.xy;
+        // Convert entity world position to screen space
+        vec2 screenEntPos = entWorldPos - u_camera;
+        screenEntPos.y = u_resolution.y - screenEntPos.y; // flip Y for bottom-up
+        float entRad = u_entities[i].posRad.z;
+        
+        vec2 dir;
+        if (isDirectional) {
+            dir = normalize(vec2(lightDir.x, -lightDir.y)); // bottom-up direction
+        } else {
+            dir = normalize(fragPos - lightPos);
+            // If entity is further from light than pixel, it can't shadow the pixel
+            if (distance(lightPos, screenEntPos) > distance(lightPos, fragPos)) continue;
+        }
+        
+        vec2 entToPixel = fragPos - screenEntPos;
+        float projection = dot(entToPixel, dir);
+        
+        if (projection > 0.0) {
+            vec2 closestPoint = screenEntPos + dir * projection;
+            float distToRay = distance(fragPos, closestPoint);
+            
+            if (distToRay < entRad) {
+                float softness = 1.0 - smoothstep(entRad * 0.7, entRad, distToRay);
+                shadow = max(shadow, softness);
+            }
+        }
+    }
+    return shadow;
+}
 
 uniform float u_lightAltitude; // 0 (horizon) to 1 (zenith)
 
@@ -115,7 +225,15 @@ void main() {
     
     // Color toning
     vec3 color = u_lightColor * u_lightIntensity * dotNL;
-    outColor = vec4(color, 1.0);
+    
+    // Entity Shadows for directional light
+    vec2 fragPos = v_uv * u_resolution;
+    float shadow = getEntityShadow(fragPos, vec2(0.0), u_lightDir, true);
+    
+    // Shadow Bleeding
+    float shadowFactor = 1.0 - (shadow * 0.85);
+    
+    outColor = vec4(color * shadowFactor, 1.0);
 }
 `;
 
