@@ -61,8 +61,11 @@ uniform float u_lightRadius;
 uniform vec3 u_lightColor;
 uniform float u_lightIntensity;
 uniform vec2 u_resolution;
+uniform float u_wallHeight;
+uniform float u_directionalShadowLen;
+
 struct Entity {
-    vec4 posRad; // x, y, radius, active
+    vec4 posRad; // x, y, radius, height
 };
 
 layout(std140) uniform EntityBlock {
@@ -77,7 +80,8 @@ out vec4 outColor;
 float getEntityShadow(vec2 fragPos, vec2 lightPos, vec2 lightDir, bool isDirectional) {
     float shadow = 0.0;
     for (int i = 0; i < 32; i++) {
-        if (u_entities[i].posRad.w < 0.5) continue;
+        float entHeight = u_entities[i].posRad.w;
+        if (entHeight < 0.1) continue;
         
         vec2 entWorldPos = u_entities[i].posRad.xy;
         // Convert entity world position to screen space
@@ -86,24 +90,29 @@ float getEntityShadow(vec2 fragPos, vec2 lightPos, vec2 lightDir, bool isDirecti
         float entRad = u_entities[i].posRad.z;
         
         vec2 dir;
+        float effectiveShadowLen;
         if (isDirectional) {
             dir = normalize(vec2(lightDir.x, -lightDir.y)); // bottom-up direction
+            effectiveShadowLen = u_directionalShadowLen * (entHeight / u_wallHeight);
         } else {
             dir = normalize(fragPos - lightPos);
             // If entity is further from light than pixel, it can't shadow the pixel
             if (distance(lightPos, screenEntPos) > distance(lightPos, fragPos)) continue;
+            effectiveShadowLen = u_lightRadius * (entHeight / u_wallHeight);
         }
         
         vec2 entToPixel = fragPos - screenEntPos;
         float projection = dot(entToPixel, dir);
         
         if (projection > 0.0) {
+            if (projection > effectiveShadowLen) continue;
             vec2 closestPoint = screenEntPos + dir * projection;
             float distToRay = distance(fragPos, closestPoint);
             
             if (distToRay < entRad) {
-                float softness = 1.0 - smoothstep(entRad * 0.7, entRad, distToRay);
-                shadow = max(shadow, softness);
+                float softness = 1.0 - (projection / effectiveShadowLen);
+                float radiusSoftness = 1.0 - smoothstep(entRad * 0.7, entRad, distToRay);
+                shadow = max(shadow, softness * radiusSoftness);
             }
         }
     }
@@ -154,11 +163,13 @@ uniform vec2 u_lightDir; // Logical top-down direction
 uniform sampler2D u_normalTex;
 uniform vec2 u_resolution;
 uniform vec2 u_camera;
+uniform float u_wallHeight;
+uniform float u_directionalShadowLen;
 in vec2 v_uv;
 out vec4 outColor;
 
 struct Entity {
-    vec4 posRad; // x, y, radius, active
+    vec4 posRad; // x, y, radius, height
 };
 
 layout(std140) uniform EntityBlock {
@@ -168,7 +179,8 @@ layout(std140) uniform EntityBlock {
 float getEntityShadow(vec2 fragPos, vec2 lightPos, vec2 lightDir, bool isDirectional) {
     float shadow = 0.0;
     for (int i = 0; i < 32; i++) {
-        if (u_entities[i].posRad.w < 0.5) continue;
+        float entHeight = u_entities[i].posRad.w;
+        if (entHeight < 0.1) continue;
         
         vec2 entWorldPos = u_entities[i].posRad.xy;
         // Convert entity world position to screen space
@@ -177,24 +189,29 @@ float getEntityShadow(vec2 fragPos, vec2 lightPos, vec2 lightDir, bool isDirecti
         float entRad = u_entities[i].posRad.z;
         
         vec2 dir;
+        float effectiveShadowLen;
         if (isDirectional) {
             dir = normalize(vec2(lightDir.x, -lightDir.y)); // bottom-up direction
+            effectiveShadowLen = u_directionalShadowLen * (entHeight / u_wallHeight);
         } else {
             dir = normalize(fragPos - lightPos);
             // If entity is further from light than pixel, it can't shadow the pixel
             if (distance(lightPos, screenEntPos) > distance(lightPos, fragPos)) continue;
+            effectiveShadowLen = 100.0 * (entHeight / u_wallHeight); // Point light fallback
         }
         
         vec2 entToPixel = fragPos - screenEntPos;
         float projection = dot(entToPixel, dir);
         
         if (projection > 0.0) {
+            if (projection > effectiveShadowLen) continue;
             vec2 closestPoint = screenEntPos + dir * projection;
             float distToRay = distance(fragPos, closestPoint);
             
             if (distToRay < entRad) {
-                float softness = 1.0 - smoothstep(entRad * 0.7, entRad, distToRay);
-                shadow = max(shadow, softness);
+                float softness = 1.0 - (projection / effectiveShadowLen);
+                float radiusSoftness = 1.0 - smoothstep(entRad * 0.7, entRad, distToRay);
+                shadow = max(shadow, softness * radiusSoftness);
             }
         }
     }

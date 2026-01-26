@@ -166,13 +166,16 @@ export class WorldClock {
         const rgb = baseAmbientStr.match(/\d+/g)?.map(Number) || [30, 30, 30];
         const dimmedAmbient = `rgb(${Math.floor(rgb[0] * ambMult)}, ${Math.floor(rgb[1] * ambMult)}, ${Math.floor(rgb[2] * ambMult)})`;
 
+        const wallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0;
+        const hScale = wallHeight / 32.0;
+
         return {
             hour, minute, totalSeconds,
             sun: {
                 direction: { x: Math.cos(sunAngle), y: Math.sin(sunAngle) },
                 color: sunColor,
                 intensity: sunIntensity,
-                shadowLen: 40 + 130 * (1.0 - Math.pow(sunIntensity, 0.4)),
+                shadowLen: (40 + 130 * (1.0 - Math.pow(sunIntensity, 0.4))) * hScale,
                 active: isSunUp && sunIntensity > 0.01,
                 altitude: sunAltitude
             },
@@ -180,7 +183,7 @@ export class WorldClock {
                 direction: { x: Math.cos(moonAngle), y: Math.sin(moonAngle) },
                 color: moonColor,
                 intensity: moonBaseIntensity * 0.5,
-                shadowLen: this.currentNightShadowLen,
+                shadowLen: this.currentNightShadowLen * hScale,
                 active: isMoonUp && moonBaseIntensity > 0.01,
                 altitude: moonAltitude
             },

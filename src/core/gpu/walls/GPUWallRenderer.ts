@@ -27,6 +27,7 @@ export class GPUWallRenderer {
     private groundTextureLoaded: boolean = false;
 
     private lastMeshVersion: number = -1;
+    private lastWallHeight: number = -1;
     private initialized: boolean = false;
     private lastWorld: World | null = null;
 
@@ -145,9 +146,13 @@ export class GPUWallRenderer {
         this.updateStructureMap(world);
         this.renderGround(world, cameraX, cameraY, screenW, screenH, heatSystem, lightBuffer, entityBuffer, worldMap, lightingSystem, timeState);
 
-        if (world.getMeshVersion() !== this.lastMeshVersion) {
+        const currentWallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0;
+        const heightChanged = currentWallHeight !== this.lastWallHeight;
+
+        if (world.getMeshVersion() !== this.lastMeshVersion || heightChanged) {
             this.meshBuilder.build(world);
             this.lastMeshVersion = world.getMeshVersion();
+            this.lastWallHeight = currentWallHeight;
             this.updateBuffers();
         }
 
@@ -177,8 +182,12 @@ export class GPUWallRenderer {
             this.shader.setUniform1f("u_time", time);
             this.shader.setUniform1f("u_tileSize", world.getTileSize());
             this.shader.setUniform1f("u_useDeferred", lightingSystem ? 0.0 : 1.0);
+            this.shader.setUniform1f("u_wallHeight", currentWallHeight);
 
             const { sun, moon } = timeState;
+            const primaryShadowLen = sun.active ? sun.shadowLen : (moon.active ? moon.shadowLen : 100.0);
+            this.shader.setUniform1f("u_directionalShadowLen", primaryShadowLen);
+
             this.shader.setUniform3f("u_sunDir", sun.direction.x, sun.direction.y, 1.0);
             this.shader.setUniform3f("u_sunColor", ...this.parseColor(sun.color));
             this.shader.setUniform1f("u_sunIntensity", sun.active ? sun.intensity : 0.0);
@@ -238,7 +247,12 @@ export class GPUWallRenderer {
         shader.setUniform1f("u_shadowRange", ConfigManager.getInstance().get<number>('Lighting', 'explosionShadowRangeTiles') || 40.0);
         shader.setUniform1f("u_useDeferred", lightingSystem ? 0.0 : 1.0);
 
+        const currentWallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0;
+        shader.setUniform1f("u_wallHeight", currentWallHeight);
         const { sun, moon } = timeState;
+        const primaryShadowLen = sun.active ? sun.shadowLen : (moon.active ? moon.shadowLen : 100.0);
+        shader.setUniform1f("u_directionalShadowLen", primaryShadowLen);
+
         shader.setUniform1f("u_sunIntensity", sun.active ? sun.intensity : 0.0);
         shader.setUniform3f("u_sunColor", ...this.parseColor(sun.color));
         shader.setUniform3f("u_sunDir", sun.direction.x, sun.direction.y, 1.0);

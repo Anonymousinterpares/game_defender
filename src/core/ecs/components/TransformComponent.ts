@@ -7,6 +7,7 @@ export class TransformComponent implements Component {
         public y: number = 0,
         public rotation: number = 0,
         public z: number = 0,
+        public height: number = 20,
         public prevX: number = x,
         public prevY: number = y,
         public prevZ: number = z

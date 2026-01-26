@@ -201,18 +201,27 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         this.gpuRenderer.updateConfig();
 
         // Collect entities for GPU particle interaction and shadows
-        const gpuEntities: { x: number, y: number }[] = [];
+        const gpuEntities: { x: number, y: number, radius: number, height: number }[] = [];
 
         // Include Player + Segments
         if (this.player && this.player.active) {
             this.player.getAllBodies().forEach(b => {
-                if (gpuEntities.length < 32) gpuEntities.push({ x: b.x, y: b.y });
+                if (gpuEntities.length < 32) gpuEntities.push({ x: b.x, y: b.y, radius: b.radius, height: b.height });
             });
         }
 
         // Include Enemies
         this.enemies.forEach(e => {
-            if (e.active && gpuEntities.length < 32) gpuEntities.push({ x: e.x, y: e.y });
+            if (e.active && gpuEntities.length < 32) gpuEntities.push({ x: e.x, y: e.y, radius: e.radius, height: e.height });
+        });
+
+        // Include Remote Players
+        this.remotePlayers.forEach(rp => {
+            if (rp.active) {
+                rp.getAllBodies().forEach(b => {
+                    if (gpuEntities.length < 32) gpuEntities.push({ x: b.x, y: b.y, radius: b.radius, height: b.height });
+                });
+            }
         });
 
         this.gpuRenderer.update(dt, gpuEntities, this.cameraX, this.cameraY, window.innerWidth, window.innerHeight);

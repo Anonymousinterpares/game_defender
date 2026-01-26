@@ -2,7 +2,7 @@ export interface EntityData {
     x: number;
     y: number;
     radius: number;
-    active: boolean;
+    height: number;
 }
 
 export class GPUEntityBuffer {
@@ -13,7 +13,7 @@ export class GPUEntityBuffer {
 
     constructor(maxEntities: number = 32) {
         this.maxEntities = maxEntities;
-        // Each entity: x, y, radius, active (4 floats)
+        // Each entity: x, y, radius, height (4 floats)
         this.data = new Float32Array(maxEntities * 4);
     }
 
@@ -35,7 +35,7 @@ export class GPUEntityBuffer {
             this.data[offset] = e.x;
             this.data[offset + 1] = e.y;
             this.data[offset + 2] = e.radius;
-            this.data[offset + 3] = e.active ? 1.0 : 0.0;
+            this.data[offset + 3] = e.height;
         }
 
         const gl = this.gl;

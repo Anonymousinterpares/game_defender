@@ -207,7 +207,7 @@ export class GPURenderer {
         if (this.wallRenderer) this.wallRenderer.clear();
     }
 
-    public update(dt: number, entities: { x: number, y: number, z?: number }[] = [], cameraX: number = 0, cameraY: number = 0, width: number = 800, height: number = 600): void {
+    public update(dt: number, entities: { x: number, y: number, radius: number, height: number, z?: number }[] = [], cameraX: number = 0, cameraY: number = 0, width: number = 800, height: number = 600): void {
         if (!this.active || !this.particleSystem || !this.world) return;
         this.updateWorldTexture();
         if (this.worldMapTexture) this.particleSystem.setWorldMap(this.worldMapTexture, this.world.getWidth(), this.world.getHeight(), this.world.getTileSize());
@@ -239,7 +239,7 @@ export class GPURenderer {
         const useDeferred = ConfigManager.getInstance().get<boolean>('Visuals', 'useDeferredLighting') || false;
 
         // Update Entity Buffer (Pass nearest entities to GPU for internal shadows)
-        this.entityBuffer.update(entities.map(e => ({ x: e.x, y: e.y, radius: (e as any).radius || 20, active: true })));
+        this.entityBuffer.update(entities.map(e => ({ x: e.x, y: e.y, radius: e.radius, height: e.height })));
 
         // SKIP old lighting update if Deferred is active
         if (!useDeferred && this.lightingSystem && this.heatSystem && this.wallRenderer) {

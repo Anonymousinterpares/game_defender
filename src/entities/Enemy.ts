@@ -22,5 +22,5 @@ export class Enemy extends Entity {
   }
 
   // Deprecated render methods removed. Logic now in RenderSystem.
-  render(ctx: CanvasRenderingContext2D, alpha?: number): void {}
+  render(ctx: CanvasRenderingContext2D, alpha?: number): void { }
 }

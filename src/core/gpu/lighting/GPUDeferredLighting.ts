@@ -3,6 +3,7 @@ import { DEFERRED_VERT, DEFERRED_AMBIENT_FRAG, DEFERRED_COMPOSE_FRAG, DEFERRED_L
 import { ShadowVolumeGenerator, Point } from "./ShadowVolumeGenerator";
 import { LightSource } from "../../LightManager";
 import { GPUEntityBuffer } from "../GPUEntityBuffer";
+import { ConfigManager } from "../../../config/MasterConfig";
 
 export class GPUDeferredLighting {
     private gl: WebGL2RenderingContext | null = null;
@@ -215,6 +216,8 @@ export class GPUDeferredLighting {
             this.lightShader!.setUniform3f("u_lightColor", lColor[0], lColor[1], lColor[2]);
             this.lightShader!.setUniform1f("u_lightIntensity", light.intensity);
             this.lightShader!.setUniform1f("u_lightRadius", light.radius);
+            this.lightShader!.setUniform1f("u_wallHeight", ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0);
+            this.lightShader!.setUniform1f("u_directionalShadowLen", 0.0); // Not used for point lights
 
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, this.gBufferFBO!.normalTex);
@@ -277,6 +280,8 @@ export class GPUDeferredLighting {
         this.directionalShader!.setUniform1f("u_lightIntensity", light.intensity);
         this.directionalShader!.setUniform2f("u_lightDir", light.direction.x, light.direction.y);
         this.directionalShader!.setUniform1f("u_lightAltitude", light.altitude);
+        this.directionalShader!.setUniform1f("u_wallHeight", ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0);
+        this.directionalShader!.setUniform1f("u_directionalShadowLen", light.shadowLen || 100.0);
 
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.gBufferFBO!.normalTex);
