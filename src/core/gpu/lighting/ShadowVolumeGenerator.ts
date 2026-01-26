@@ -104,4 +104,70 @@ export class ShadowVolumeGenerator {
             vertices: [a, b, projB, projA]
         };
     }
+
+    /**
+     * Generates a shadow volume for a circular entity.
+     * Creates a capsule shape (rectangle with rounded end) matching CPU implementation.
+     */
+    public static getCircleShadowVolume(
+        lightDir: Point,    // Normalized direction of light travel (FROM sun TO scene)
+        center: Point,      // Entity center in world coords
+        radius: number,     // Entity radius
+        shadowLen: number   // Shadow length
+    ): ShadowPolygon | null {
+        // Calculate angle of light direction
+        const angle = Math.atan2(lightDir.y, lightDir.x);
+
+        // Calculate two tangent points perpendicular to light direction
+        // These form the "base" of the capsule at the entity edge
+        const t1x = center.x + Math.cos(angle - Math.PI / 2) * radius;
+        const t1y = center.y + Math.sin(angle - Math.PI / 2) * radius;
+        const t2x = center.x + Math.cos(angle + Math.PI / 2) * radius;
+        const t2y = center.y + Math.sin(angle + Math.PI / 2) * radius;
+
+        // Project tangent points in light direction to form rectangle body
+        const t3x = t2x + lightDir.x * shadowLen;
+        const t3y = t2y + lightDir.y * shadowLen;
+        const t4x = t1x + lightDir.x * shadowLen;
+        const t4y = t1y + lightDir.y * shadowLen;
+
+        // Create rectangle body vertices
+        const rectVertices: Point[] = [
+            { x: t1x, y: t1y },
+            { x: t2x, y: t2y },
+            { x: t3x, y: t3y },
+            { x: t4x, y: t4y }
+        ];
+
+        // Generate semicircle at the FAR end (away from entity)
+        // The semicircle connects t4 to t3, bulging OUTWARD (away from entity)
+        const numCapPoints = 8;
+        const capVertices: Point[] = [];
+
+        // Project the center to find the cap center
+        const capCenterX = center.x + lightDir.x * shadowLen;
+        const capCenterY = center.y + lightDir.y * shadowLen;
+
+        // t4 is at (angle - 90°), t3 is at (angle + 90°)
+        // To arc OUTWARD (away from entity), we go from (angle - 90°) toward angle, then to (angle + 90°)
+        // This is the FORWARD arc, not the backward one
+        for (let i = 0; i <= numCapPoints; i++) {
+            // Start at angle - 90° (t4 position), sweep through angle (pointing away), end at angle + 90° (t3)
+            const capAngle = (angle - Math.PI / 2) + (i / numCapPoints) * Math.PI;
+            capVertices.push({
+                x: capCenterX + Math.cos(capAngle) * radius,
+                y: capCenterY + Math.sin(capAngle) * radius
+            });
+        }
+
+        // Build polygon: t1 -> t4 (near to far left) -> semicircle (already includes t4 to t3) -> t2 (far to near right)
+        // Note: capVertices[0] ≈ t4, capVertices[last] ≈ t3, so we don't duplicate them
+        const allVertices: Point[] = [
+            { x: t1x, y: t1y },
+            ...capVertices,       // Includes t4 -> arc -> t3
+            { x: t2x, y: t2y }    // Back to near right corner (closes to t1)
+        ];
+
+        return { vertices: allVertices };
+    }
 }

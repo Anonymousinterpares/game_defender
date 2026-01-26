@@ -11,6 +11,7 @@ export class Enemy extends Entity {
     this.radius = 12;
     this.health = 20;
     this.maxHealth = 20;
+    this.height = 20; // Explicit height for shadow rendering
   }
 
   update(dt: number, player?: Player): void {

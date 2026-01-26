@@ -307,6 +307,21 @@ export class GPUDeferredLighting {
             const volume = ShadowVolumeGenerator.getDirectionalShadowVolume(sDir, worldA, worldB, shadowExtrude);
             if (volume) this.renderShadowPolygon(volume.vertices, viewProj, cameraX, cameraY);
         }
+
+        // Render Entity Shadows
+        const wallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0;
+        const entities = entityBuffer.getData();
+        for (const entity of entities) {
+            const entShadowLen = shadowExtrude * (entity.height / wallHeight);
+            const volume = ShadowVolumeGenerator.getCircleShadowVolume(
+                sDir,
+                { x: entity.x, y: entity.y },
+                entity.radius,
+                entShadowLen
+            );
+            if (volume) this.renderShadowPolygon(volume.vertices, viewProj, cameraX, cameraY);
+        }
+
         gl.disable(gl.BLEND);
 
         // 3. Accumulate

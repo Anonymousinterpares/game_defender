@@ -84,35 +84,42 @@ float getEntityShadow(vec2 fragPos, vec2 lightPos, vec2 lightDir, bool isDirecti
         if (entHeight < 0.1) continue;
         
         vec2 entWorldPos = u_entities[i].posRad.xy;
-        // Convert entity world position to screen space
+        // Convert entity world position to screen space (Y-down, origin top-left)
         vec2 screenEntPos = entWorldPos - u_camera;
-        screenEntPos.y = u_resolution.y - screenEntPos.y; // flip Y for bottom-up
+        // NOTE: v_uv is Y-up (0 at bottom, 1 at top), so fragPos is Y-up.
+        // We need screenEntPos to also be Y-up for consistent math.
+        screenEntPos.y = u_resolution.y - screenEntPos.y;
         float entRad = u_entities[i].posRad.z;
         
-        vec2 dir;
+        vec2 shadowDir;
         float effectiveShadowLen;
         if (isDirectional) {
-            dir = normalize(vec2(lightDir.x, -lightDir.y)); // bottom-up direction
+            // lightDir is the direction FROM the sun TO the scene (world coords, Y-down).
+            // Shadow extends AWAY from the light, i.e., in the +lightDir direction.
+            // Convert to screen-space (Y-up): flip the Y component.
+            shadowDir = normalize(vec2(lightDir.x, -lightDir.y));
             effectiveShadowLen = u_directionalShadowLen * (entHeight / u_wallHeight);
         } else {
-            dir = normalize(fragPos - lightPos);
-            // If entity is further from light than pixel, it can't shadow the pixel
+            // Point light: shadow extends away from light position
+            shadowDir = normalize(screenEntPos - lightPos);
             if (distance(lightPos, screenEntPos) > distance(lightPos, fragPos)) continue;
             effectiveShadowLen = u_lightRadius * (entHeight / u_wallHeight);
         }
         
-        vec2 entToPixel = fragPos - screenEntPos;
-        float projection = dot(entToPixel, dir);
+        // Vector from entity to fragment
+        vec2 entToFrag = fragPos - screenEntPos;
+        // Project entToFrag onto the shadow direction
+        float projection = dot(entToFrag, shadowDir);
         
-        if (projection > 0.0) {
-            if (projection > effectiveShadowLen) continue;
-            vec2 closestPoint = screenEntPos + dir * projection;
-            float distToRay = distance(fragPos, closestPoint);
+        if (projection > 0.0 && projection < effectiveShadowLen) {
+            // Find the closest point on the shadow ray to the fragment
+            vec2 pointOnRay = screenEntPos + shadowDir * projection;
+            float distToRay = distance(fragPos, pointOnRay);
             
             if (distToRay < entRad) {
-                float softness = 1.0 - (projection / effectiveShadowLen);
-                float radiusSoftness = 1.0 - smoothstep(entRad * 0.7, entRad, distToRay);
-                shadow = max(shadow, softness * radiusSoftness);
+                float distFade = 1.0 - (projection / effectiveShadowLen);
+                float radiusFade = 1.0 - smoothstep(entRad * 0.5, entRad, distToRay);
+                shadow = max(shadow, distFade * radiusFade);
             }
         }
     }
@@ -176,42 +183,42 @@ layout(std140) uniform EntityBlock {
     Entity u_entities[32];
 };
 
-float getEntityShadow(vec2 fragPos, vec2 lightPos, vec2 lightDir, bool isDirectional) {
+float getEntityShadow(vec2 fragPos, vec2 lightDir) {
     float shadow = 0.0;
     for (int i = 0; i < 32; i++) {
         float entHeight = u_entities[i].posRad.w;
         if (entHeight < 0.1) continue;
         
         vec2 entWorldPos = u_entities[i].posRad.xy;
-        // Convert entity world position to screen space
+        // Convert entity world position to screen space (Y-down, origin top-left)
         vec2 screenEntPos = entWorldPos - u_camera;
-        screenEntPos.y = u_resolution.y - screenEntPos.y; // flip Y for bottom-up
+        // NOTE: v_uv is Y-up (0 at bottom, 1 at top), so fragPos is Y-up.
+        // We need screenEntPos to also be Y-up for consistent math.
+        screenEntPos.y = u_resolution.y - screenEntPos.y;
         float entRad = u_entities[i].posRad.z;
         
-        vec2 dir;
-        float effectiveShadowLen;
-        if (isDirectional) {
-            dir = normalize(vec2(lightDir.x, -lightDir.y)); // bottom-up direction
-            effectiveShadowLen = u_directionalShadowLen * (entHeight / u_wallHeight);
-        } else {
-            dir = normalize(fragPos - lightPos);
-            // If entity is further from light than pixel, it can't shadow the pixel
-            if (distance(lightPos, screenEntPos) > distance(lightPos, fragPos)) continue;
-            effectiveShadowLen = 100.0 * (entHeight / u_wallHeight); // Point light fallback
-        }
+        // Directional light only - shadow extends in the light direction
+        // lightDir is the direction FROM the sun TO the scene (world coords, Y-down).
+        // Shadow extends AWAY from the light, i.e., in the +lightDir direction.
+        // Convert to screen-space (Y-up): flip the Y component.
+        vec2 shadowDir = normalize(vec2(lightDir.x, -lightDir.y));
+        float effectiveShadowLen = u_directionalShadowLen * (entHeight / u_wallHeight);
+
         
-        vec2 entToPixel = fragPos - screenEntPos;
-        float projection = dot(entToPixel, dir);
+        // Vector from entity to fragment
+        vec2 entToFrag = fragPos - screenEntPos;
+        // Project entToFrag onto the shadow direction
+        float projection = dot(entToFrag, shadowDir);
         
-        if (projection > 0.0) {
-            if (projection > effectiveShadowLen) continue;
-            vec2 closestPoint = screenEntPos + dir * projection;
-            float distToRay = distance(fragPos, closestPoint);
+        if (projection > 0.0 && projection < effectiveShadowLen) {
+            // Find the closest point on the shadow ray to the fragment
+            vec2 pointOnRay = screenEntPos + shadowDir * projection;
+            float distToRay = distance(fragPos, pointOnRay);
             
             if (distToRay < entRad) {
-                float softness = 1.0 - (projection / effectiveShadowLen);
-                float radiusSoftness = 1.0 - smoothstep(entRad * 0.7, entRad, distToRay);
-                shadow = max(shadow, softness * radiusSoftness);
+                float distFade = 1.0 - (projection / effectiveShadowLen);
+                float radiusFade = 1.0 - smoothstep(entRad * 0.5, entRad, distToRay);
+                shadow = max(shadow, distFade * radiusFade);
             }
         }
     }
@@ -245,7 +252,7 @@ void main() {
     
     // Entity Shadows for directional light
     vec2 fragPos = v_uv * u_resolution;
-    float shadow = getEntityShadow(fragPos, vec2(0.0), u_lightDir, true);
+    float shadow = getEntityShadow(fragPos, u_lightDir);
     
     // Shadow Bleeding
     float shadowFactor = 1.0 - (shadow * 0.85);

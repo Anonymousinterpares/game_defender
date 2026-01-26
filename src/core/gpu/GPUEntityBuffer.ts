@@ -56,4 +56,21 @@ export class GPUEntityBuffer {
 
     public getBuffer(): WebGLBuffer | null { return this.buffer; }
     public getMaxEntities(): number { return this.maxEntities; }
+
+    public getData(): EntityData[] {
+        const entities: EntityData[] = [];
+        for (let i = 0; i < this.maxEntities; i++) {
+            const offset = i * 4;
+            const height = this.data[offset + 3];
+            if (height < 0.1) continue; // Skip inactive entities
+
+            entities.push({
+                x: this.data[offset],
+                y: this.data[offset + 1],
+                radius: this.data[offset + 2],
+                height: height
+            });
+        }
+        return entities;
+    }
 }

@@ -85,6 +85,7 @@ export class Simulation implements WeaponParent, CombatParent {
                 y: transform.y,
                 rotation: transform.rotation,
                 radius: physics.radius,
+                height: transform.height,  // Required for GPU shadow rendering
                 active: health.active,
                 checkHitbox: (px: number, py: number) => {
                     const dx = transform.x - px, dy = transform.y - py;
