@@ -125,7 +125,7 @@ export class HeatMapSimulator {
                             if (wData[idx] >= MATERIAL_PROPS[mat].vaporizeTime) {
                                 if (hData) hData[idx] = 0;
                                 if (worldRef) {
-                                    worldRef.markMeshDirty();
+                                    worldRef.markMeshDirty(tx, ty);
                                     worldRef.notifyTileChange(tx, ty);
                                     worldRef.checkTileDestruction(tx, ty);
                                 }
@@ -271,7 +271,7 @@ export class HeatMapSimulator {
 
                         if (hData && hData[idx] <= 0) {
                             if (worldRef) {
-                                worldRef.markMeshDirty();
+                                worldRef.markMeshDirty(tx, ty);
                                 worldRef.notifyTileChange(tx, ty);
                                 worldRef.checkTileDestruction(tx, ty);
                             }

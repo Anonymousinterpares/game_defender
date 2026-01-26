@@ -148,12 +148,24 @@ export class GPUWallRenderer {
 
         const currentWallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0;
         const heightChanged = currentWallHeight !== this.lastWallHeight;
+        const currentVersion = world.getMeshVersion();
 
-        if (world.getMeshVersion() !== this.lastMeshVersion || heightChanged) {
-            this.meshBuilder.build(world);
-            this.lastMeshVersion = world.getMeshVersion();
+        if (currentVersion !== this.lastMeshVersion || heightChanged) {
+            // Get dirty tiles BEFORE they are cleared by getOcclusionSegments
+            const worldDirtyTiles = world.getDirtyTilesForGPU();
+            this.meshBuilder.markTilesDirty(worldDirtyTiles);
+
+            if (heightChanged) {
+                this.meshBuilder.reset(); // Force full rebuild on height change
+            }
+
+            const buffersChanged = this.meshBuilder.build(world);
+            this.lastMeshVersion = currentVersion;
             this.lastWallHeight = currentWallHeight;
-            this.updateBuffers();
+
+            if (buffersChanged) {
+                this.updateBuffers();
+            }
         }
 
         if (this.meshBuilder.getVertexCount() === 0) {
@@ -354,22 +366,83 @@ export class GPUWallRenderer {
 
     public getStructureTexture(): WebGLTexture | null { return this.structureTexture; }
 
+    private buffersInitialized: boolean = false;
+    private bufferCapacity: number = 0;
+
     private updateBuffers(): void {
         if (!this.gl || !this.vao) return;
         const gl = this.gl;
         gl.bindVertexArray(this.vao);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, this.meshBuilder.getPositions(), gl.STATIC_DRAW);
-        gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, this.meshBuilder.getUVs(), gl.STATIC_DRAW);
-        gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.matBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, this.meshBuilder.getMaterials(), gl.STATIC_DRAW);
-        gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.normBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, this.meshBuilder.getNormals(), gl.STATIC_DRAW);
-        gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
+
+        const positions = this.meshBuilder.getPositions();
+        const uvs = this.meshBuilder.getUVs();
+        const materials = this.meshBuilder.getMaterials();
+        const normals = this.meshBuilder.getNormals();
+
+        // Check if we need to reallocate buffers (first time or capacity change)
+        const neededCapacity = positions.length / 3;
+        if (!this.buffersInitialized || neededCapacity > this.bufferCapacity) {
+            // Full buffer allocation with DYNAMIC_DRAW for frequent updates
+            this.bufferCapacity = neededCapacity;
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, positions, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, uvs, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.matBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, materials, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.normBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, normals, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
+
+            this.buffersInitialized = true;
+        } else {
+            // Incremental update - only update changed regions
+            const pendingUpdates = this.meshBuilder.getPendingUpdates();
+
+            if (pendingUpdates.length === 0) {
+                // No specific updates, do full sub-data update
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuffer);
+                gl.bufferSubData(gl.ARRAY_BUFFER, 0, positions);
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
+                gl.bufferSubData(gl.ARRAY_BUFFER, 0, uvs);
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.matBuffer);
+                gl.bufferSubData(gl.ARRAY_BUFFER, 0, materials);
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.normBuffer);
+                gl.bufferSubData(gl.ARRAY_BUFFER, 0, normals);
+            } else {
+                // Update only specific regions
+                for (const update of pendingUpdates) {
+                    const { offset, count } = update;
+                    if (count <= 0) continue;
+
+                    const posStart = offset * 3;
+                    const posEnd = posStart + count * 3;
+                    const uvStart = offset * 2;
+                    const uvEnd = uvStart + count * 2;
+
+                    gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuffer);
+                    gl.bufferSubData(gl.ARRAY_BUFFER, posStart * 4, positions.subarray(posStart, posEnd));
+
+                    gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
+                    gl.bufferSubData(gl.ARRAY_BUFFER, uvStart * 4, uvs.subarray(uvStart, uvEnd));
+
+                    gl.bindBuffer(gl.ARRAY_BUFFER, this.matBuffer);
+                    gl.bufferSubData(gl.ARRAY_BUFFER, offset * 4, materials.subarray(offset, offset + count));
+
+                    gl.bindBuffer(gl.ARRAY_BUFFER, this.normBuffer);
+                    gl.bufferSubData(gl.ARRAY_BUFFER, uvStart * 4, normals.subarray(uvStart, uvEnd));
+                }
+            }
+        }
+
         gl.bindVertexArray(null);
     }
 }
+

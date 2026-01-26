@@ -296,7 +296,7 @@ export class HeatMap {
             if (dist < effectiveRadius) {
                 hData[i] = 0;
                 if (this.worldRef) {
-                    this.worldRef.markMeshDirty();
+                    this.worldRef.markMeshDirty(tx, ty);
                     this.worldRef.notifyTileChange(tx, ty);
                     this.worldRef.checkTileDestruction(tx, ty);
                 }
