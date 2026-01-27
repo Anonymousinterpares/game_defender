@@ -15,6 +15,12 @@ export interface ConfigCategory {
 
 export interface GameConfigSchema {
   [category: string]: ConfigCategory;
+  Loading: {
+    content: ConfigItem<string>;
+    fontType: ConfigItem<string>;
+    fontColor: ConfigItem<string>;
+    fontSize: ConfigItem<number>;
+  };
 }
 
 export const MasterConfig: GameConfigSchema = {
@@ -221,8 +227,13 @@ export const MasterConfig: GameConfigSchema = {
     windMaxSpeed: { value: 15.0, type: 'number', min: 0, max: 50, step: 0.1, description: 'Maximum wind speed (m/s)' }
   },
   Benchmark: {
-    showPerfMetrics: { value: false, type: 'boolean', description: 'Show Performance Graphs' },
     resolutionScale: { value: 1.0, type: 'number', min: 0.1, max: 1.0, step: 0.1, description: 'Lighting Resolution Scale' }
+  },
+  Loading: {
+    content: { value: 'LOADING...', type: 'string', description: 'Loading Text Content' },
+    fontType: { value: "'Share Tech Mono', monospace", type: 'string', description: 'Loading Font Family' },
+    fontColor: { value: '#cfaa6e', type: 'color', description: 'Loading Font Color' },
+    fontSize: { value: 24, type: 'number', min: 10, max: 72, step: 1, description: 'Loading Font Size' }
   }
 };
 

@@ -193,9 +193,10 @@ export class Simulation implements WeaponParent, CombatParent {
         const roleStr = role === SimulationRole.HOST ? 'host' : (role === SimulationRole.CLIENT ? 'client' : 'single');
         ParticleSystem.getInstance().initWorker(this.world, roleStr);
 
-        // Initialize Player at center
-        const centerX = this.world.getWidthPixels() / 2;
-        const centerY = this.world.getHeightPixels() / 2;
+        // Initialize Player at safe position
+        const spawnPos = this.getSafeSpawnPos();
+        const centerX = spawnPos.x;
+        const centerY = spawnPos.y;
 
         this.player = new Player(centerX, centerY, null as any);
         this.player.setEntityManager(this.entityManager);
@@ -304,8 +305,9 @@ export class Simulation implements WeaponParent, CombatParent {
         const roleStr = this.role === SimulationRole.HOST ? 'host' : (this.role === SimulationRole.CLIENT ? 'client' : 'single');
         ParticleSystem.getInstance().initWorker(this.world, roleStr);
 
-        const centerX = this.world.getWidthPixels() / 2;
-        const centerY = this.world.getHeightPixels() / 2;
+        const spawnPos = this.getSafeSpawnPos();
+        const centerX = spawnPos.x;
+        const centerY = spawnPos.y;
 
         this.playerEntityId = EntityFactory.createPlayer(this.entityManager, centerX, centerY);
         const ecsPlayer = this.entityManager.query(['tag']).find(id => this.entityManager.getComponent<TagComponent>(id, 'tag')?.tag === 'player');
@@ -317,6 +319,10 @@ export class Simulation implements WeaponParent, CombatParent {
         // Link segments
         let leaderId = this.player.id;
         this.player.segments.forEach(seg => {
+            // Update physical positions in Player entity as well for consistency
+            seg.x = centerX - (this.player.segments.indexOf(seg) + 1) * 35;
+            seg.y = centerY;
+
             seg.setEntityManager(this.entityManager);
             this.entityManager.addComponent(seg.id, new TransformComponent(seg.x, seg.y, seg.rotation));
             this.entityManager.addComponent(seg.id, new PhysicsComponent(0, 0, seg.radius));
@@ -326,6 +332,12 @@ export class Simulation implements WeaponParent, CombatParent {
             this.entityManager.addComponent(seg.id, new SegmentComponent(leaderId, 35));
             leaderId = seg.id;
         });
+
+        // Update player main body pos
+        this.player.x = centerX;
+        this.player.y = centerY;
+        this.player.prevX = centerX;
+        this.player.prevY = centerY;
 
         this.remotePlayers = [];
         this.projectiles = [];
@@ -475,17 +487,61 @@ export class Simulation implements WeaponParent, CombatParent {
     }
 
     public spawnDrop(): void {
-        const pos = this.getRandomValidPos();
+        const pos = this.getSafeSpawnPos();
         const type = Math.random() < 0.8 ? DropType.COIN : DropType.BOOSTER;
         EntityFactory.createDrop(this.entityManager, pos.x, pos.y, type);
     }
 
-    private getRandomValidPos(): { x: number, y: number } {
-        for (let i = 0; i < 20; i++) {
-            const rx = Math.random() * this.world.getWidthPixels(), ry = Math.random() * this.world.getHeightPixels();
-            if (!this.world.isWall(rx, ry)) return { x: rx, y: ry };
+    public getSafeSpawnPos(): { x: number, y: number } {
+        const tileSize = this.world.getTileSize();
+        const playerRadius = 15;
+        const segmentSpacing = 35;
+        const bodyLength = ConfigManager.getInstance().get<number>('Player', 'bodyLength') || 2;
+        const totalLength = (bodyLength + 1) * segmentSpacing;
+
+        // Max attempts to find a spot
+        for (let i = 0; i < 100; i++) {
+            const rx = Math.random() * (this.world.getWidthPixels() - 2 * tileSize) + tileSize;
+            const ry = Math.random() * (this.world.getHeightPixels() - 2 * tileSize) + tileSize;
+
+            // 1. Check if head is clear
+            if (PhysicsSystem.checkCircleVsTile(this.world, rx, ry, playerRadius).hit) continue;
+
+            // 2. Check clear space for body segments (horizontal line to the left)
+            let bodyClear = true;
+            for (let s = 1; s <= bodyLength; s++) {
+                const sx = rx - s * segmentSpacing;
+                if (PhysicsSystem.checkCircleVsTile(this.world, sx, ry, playerRadius).hit) {
+                    bodyClear = false;
+                    break;
+                }
+            }
+            if (!bodyClear) continue;
+
+            // 3. Parallax/Occupancy Check: Ensure we aren't too close to any INDESTRUCTIBLE wall (boundaries)
+            // or any tall cluster that might occlude spawning.
+            // We'll check a small neighborhood.
+            let neighborhoodClear = true;
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const tx = Math.floor(rx / tileSize) + dx;
+                    const ty = Math.floor(ry / tileSize) + dy;
+                    if (this.world.isWallByTile(tx, ty)) {
+                        // If center tile is a wall, it's already caught by circle check.
+                        // We also check if we are VERY close to walls.
+                    }
+                }
+            }
+
+            if (neighborhoodClear) return { x: rx, y: ry };
         }
-        return { x: 100, y: 100 };
+
+        // Fallback to center if all else fails, but try hard to avoid it
+        return { x: this.world.getWidthPixels() / 2, y: this.world.getHeightPixels() / 2 };
+    }
+
+    private getRandomValidPos(): { x: number, y: number } {
+        return this.getSafeSpawnPos();
     }
 
     public setLastShotTime(time: number): void { this.lastShotTime = time; }

@@ -27,6 +27,7 @@ import { MaterialType } from './HeatMap';
 import { WeatherTimePlugin } from './plugins/WeatherTimePlugin';
 import { ChaosPlugin } from './plugins/ChaosPlugin';
 import { GPURenderer } from './gpu/GPURenderer';
+import { LoadingScreen } from '../ui/LoadingScreen';
 
 export class GameplayScene implements Scene, HUDParent, LightingParent {
     public simulation: Simulation;
@@ -37,6 +38,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     protected benchmark: BenchmarkSystem;
     protected inputManager: InputManager;
     protected gpuRenderer: GPURenderer;
+    protected loadingScreen: LoadingScreen;
 
     public cameraX: number = 0;
     public cameraY: number = 0;
@@ -95,6 +97,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         this.lightingRenderer = new LightingRenderer(this);
         this.benchmark = new BenchmarkSystem(this);
         this.gpuRenderer = GPURenderer.getInstance();
+        this.loadingScreen = new LoadingScreen();
     }
 
     public subtractCoins(amount: number): boolean {
@@ -110,14 +113,18 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     }
 
     async onEnter(): Promise<void> {
+        this.loadingScreen.show();
+
         // Reset Singletons for clean state
         WorldClock.getInstance().reset();
         LightManager.getInstance().reset();
         WeatherManager.getInstance().reset();
         SoundManager.getInstance().reset();
 
+        // 1. Initial Startups & World Calculations
         const seed = ConfigManager.getInstance().get<number>('Debug', 'forcedSeed');
         this.simulation = new Simulation(SimulationRole.SINGLEPLAYER, seed);
+
         this.simulation.pluginManager.install(new WeatherTimePlugin());
         this.simulation.player.inputManager = this.inputManager; // Link input
         this.worldRenderer = new WorldRenderer(this.simulation.world);
@@ -133,6 +140,15 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
         const sm = SoundManager.getInstance();
         await sm.init();
         sm.setWorld(this.simulation.world);
+
+        // 2. World Rendering (Hidden from players)
+        // Perform a warm-up render to ensure all shaders and buffers are ready
+        this.render(this.sceneManager['ctx']); // Access protected/private ctx if possible, or use standard scene render
+
+        // Give a small delay for perception and to ensure everything is "slick"
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        this.loadingScreen.hide();
     }
 
 

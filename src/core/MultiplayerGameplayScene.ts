@@ -5,6 +5,7 @@ import { RemotePlayer } from '../entities/RemotePlayer';
 import { SceneManager } from './SceneManager';
 import { InputManager } from './InputManager';
 import { WeatherManager } from './WeatherManager';
+import { LightManager } from './LightManager';
 import { WorldClock } from './WorldClock';
 import { Entity } from './Entity';
 import { Projectile, ProjectileType } from '../entities/Projectile';
@@ -48,7 +49,15 @@ export class MultiplayerGameplayScene extends GameplayScene {
     }
 
     async onEnter(): Promise<void> {
-        await super.onEnter(); // Initialize radar, sound, etc.
+        this.loadingScreen.show();
+
+        // Multiplayer-specific flow: onEnter already called super.onEnter() but we need more control
+        // Reset Singletons
+        WorldClock.getInstance().reset();
+        LightManager.getInstance().reset();
+        WeatherManager.getInstance().reset();
+        SoundManager.getInstance().reset();
+
         const mm = MultiplayerManager.getInstance();
         const role = mm.isHost ? SimulationRole.HOST : SimulationRole.CLIENT;
 
@@ -75,7 +84,11 @@ export class MultiplayerGameplayScene extends GameplayScene {
                 case NetworkMessageType.ENTITY_SPAWN: this.handleEntitySpawn(msg.d); break;
                 case NetworkMessageType.ENTITY_DESTROY: this.handleEntityDestroy(msg.d); break;
                 case NetworkMessageType.WORLD_UPDATE: this.handleWorldUpdate(msg.d); break;
-                case NetworkMessageType.WORLD_SEED: this.handleWorldSeed(msg.d); break;
+                case NetworkMessageType.WORLD_SEED:
+                    this.handleWorldSeed(msg.d);
+                    // World seed received, world is recreated, we can proceed to render/hide
+                    this.isSpawned = true;
+                    break;
                 case NetworkMessageType.PLAYER_DEATH: this.handleRemoteDeath(msg.d); break;
                 case NetworkMessageType.PLAYER_HIT: this.handlePlayerHit(msg.d); break;
                 case NetworkMessageType.EXPLOSION: this.handleRemoteExplosion(msg.d); break;
@@ -133,6 +146,22 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
         // Listen for item collection to sync destruction in MP
         EventBus.getInstance().on(GameEvent.ITEM_COLLECTED, this.onItemCollected);
+
+        // Wait for sync (client) or just a small warm-up (host)
+        const checkSync = async () => {
+            let attempts = 0;
+            while (!this.isSpawned && attempts < 50) {
+                await new Promise(r => setTimeout(r, 100));
+                attempts++;
+            }
+
+            // Render one frame hidden
+            this.render(this.sceneManager['ctx']);
+            await new Promise(r => setTimeout(r, 500));
+            this.loadingScreen.hide();
+        };
+
+        checkSync();
     }
 
     private onItemCollected = (data: any) => {
