@@ -1,5 +1,6 @@
 import { Shader } from "../Shader";
 import { DEFERRED_VERT, DEFERRED_AMBIENT_FRAG, DEFERRED_COMPOSE_FRAG, DEFERRED_LIGHT_FRAG, DEFERRED_SHADOW_VERT, DEFERRED_SHADOW_FRAG, DEFERRED_DIRECTIONAL_FRAG, DEFERRED_EMISSIVE_FRAG } from "./shaders/deferred.glsl";
+import { SHADOW_EXTRUSION_VERT, SHADOW_EXTRUSION_FRAG } from "./shaders/shadow_extrusion.glsl";
 import { ShadowVolumeGenerator, Point } from "./ShadowVolumeGenerator";
 import { LightSource } from "../../LightManager";
 import { GPUEntityBuffer } from "../GPUEntityBuffer";
@@ -36,8 +37,14 @@ export class GPUDeferredLighting {
     private composeShader: Shader | null = null;
     private directionalShader: Shader | null = null;
     private emissiveShader: Shader | null = null;
+    private shadowExtrusionShader: Shader | null = null;
     private shadowBuffer: WebGLBuffer | null = null;
     private quadBuffer: WebGLBuffer | null = null;
+
+    // Static GPU Shadow Buffer (AAA Optimization)
+    private staticShadowBuffer: WebGLBuffer | null = null;
+    private staticShadowCount: number = 0;
+    private lastStaticMeshVersion: number = -1;
 
     // Batched shadow rendering
     private shadowBatchData: Float32Array = new Float32Array(0);
@@ -85,7 +92,11 @@ export class GPUDeferredLighting {
         this.shadowBuffer = gl.createBuffer();
         this.shadowBatchData = new Float32Array(this.MAX_SHADOW_VERTICES * 2);
 
-        console.log("[GPU Deferred] Pipeline Initialized (Phase 4.2 + Batched Shadows)");
+        // Static Shadow Buffer
+        this.staticShadowBuffer = gl.createBuffer();
+        this.shadowExtrusionShader = new Shader(gl, SHADOW_EXTRUSION_VERT, SHADOW_EXTRUSION_FRAG);
+
+        console.log("[GPU Deferred] Pipeline Initialized (Phase 5: AAA GPU Extrusion)");
         this._initialized = true;
     }
 
@@ -273,6 +284,39 @@ export class GPUDeferredLighting {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
+    private buildStaticShadowBuffer(world: World): void {
+        const gl = this.gl!;
+        // 1. Get ALL segments (Global) - yes, we upload the whole world once.
+        // For a 500x500 world, this is acceptable. Streaming is overkill for this 2D engine.
+        // We use a large enough bound to catch everything.
+        const segments = world.getOcclusionSegments(0, 0, world.getWidthPixels(), world.getHeightPixels());
+
+        // We need 6 vertices per segment (2 Triangles)
+        // V0 (A, 0) - V1 (B, 0) - V2 (B, 1)
+        // V0 (A, 0) - V2 (B, 1) - V3 (A, 1)
+        const data = new Float32Array(segments.length * 6 * 3);
+        let offset = 0;
+
+        for (const seg of segments) {
+            // Triangle 1
+            data[offset++] = seg.a.x; data[offset++] = seg.a.y; data[offset++] = 0.0;
+            data[offset++] = seg.b.x; data[offset++] = seg.b.y; data[offset++] = 0.0;
+            data[offset++] = seg.b.x; data[offset++] = seg.b.y; data[offset++] = 1.0;
+
+            // Triangle 2
+            data[offset++] = seg.a.x; data[offset++] = seg.a.y; data[offset++] = 0.0;
+            data[offset++] = seg.b.x; data[offset++] = seg.b.y; data[offset++] = 1.0;
+            data[offset++] = seg.a.x; data[offset++] = seg.a.y; data[offset++] = 1.0;
+        }
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.staticShadowBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+        this.staticShadowCount = segments.length * 6;
+        this.lastStaticMeshVersion = world.getMeshVersion();
+
+        console.log(`[GPU Deferred] Built Static Shadow Buffer: ${segments.length} segments, ${this.staticShadowCount} vertices (AAA GPU Shadows).`);
+    }
+
     private renderDirectionalSmart(
         gl: WebGL2RenderingContext,
         light: any,
@@ -285,6 +329,11 @@ export class GPUDeferredLighting {
         viewProj: Float32Array,
         isSun: boolean
     ): void {
+        // 0. Check for Static Mesh Updates
+        if (this.lastStaticMeshVersion === -1 || world.getMeshVersion() !== this.lastStaticMeshVersion) {
+            this.buildStaticShadowBuffer(world);
+        }
+
         // 1. Render Directional Light into Temp
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.tempLightFBO!.fbo);
         gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.gBufferFBO!.depthRB);
@@ -320,35 +369,33 @@ export class GPUDeferredLighting {
         const shadowExtrude = light.shadowLen || 100.0;
         const viewportVersion = world.getGridVersionForRect(cameraX, cameraY, width, height);
 
-        const cache = isSun ? this.sunShadowCache : this.moonShadowCache;
-        const dirChanged = !cache || Math.abs(sDir.x - cache.lastDirection.x) > 0.01 || Math.abs(sDir.y - cache.lastDirection.y) > 0.01;
-        const versionChanged = !cache || viewportVersion !== cache.lastVersion;
-        const viewportMoved = !cache || Math.abs(cameraX - cache.lastViewport.x) > 16 || Math.abs(cameraY - cache.lastViewport.y) > 16;
+        // Draw Static Walls
+        this.shadowExtrusionShader!.use();
+        this.shadowExtrusionShader!.setUniform2f("u_resolution", this.width, this.height);
+        this.shadowExtrusionShader!.setUniform2f("u_camera", cameraX, cameraY);
+        this.shadowExtrusionShader!.setUniform2f("u_lightDir", sDir.x, sDir.y);
+        this.shadowExtrusionShader!.setUniform1f("u_shadowLen", light.shadowLen || 100.0);
+        this.shadowExtrusionShader!.setUniform1i("u_normalTex", 0);
 
-        if (!dirChanged && !versionChanged && !viewportMoved && cache) {
-            // Use cached static batch
-            this.shadowBatchData.set(cache.batchData, 0);
-            this.shadowBatchOffset = cache.batchData.length;
-        } else {
-            // Recompute static directional shadows for viewport
-            this.beginShadowBatch();
-            const segments = world.getOcclusionSegments(cameraX, cameraY, width, height);
-            for (const seg of segments) {
-                this.shadowBatchOffset = ShadowVolumeGenerator.writeDirectionalShadowToBatch(this.shadowBatchData, this.shadowBatchOffset, sDir, seg.a, seg.b, shadowExtrude);
-            }
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.staticShadowBuffer);
+        // Layout: 0: vec2 pos, 1: float extrude. Stride = 12 bytes
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 12, 0); // Pos
+        gl.enableVertexAttribArray(1);
+        gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 12, 8); // Extrude
 
-            // Save static parts to cache
-            if (this.shadowBatchOffset > 0) {
-                const newCache: DirectionalShadowCache = {
-                    batchData: new Float32Array(this.shadowBatchData.buffer, 0, this.shadowBatchOffset),
-                    lastDirection: { x: sDir.x, y: sDir.y },
-                    lastVersion: viewportVersion,
-                    lastViewport: { x: cameraX, y: cameraY, w: width, h: height }
-                };
-                if (isSun) this.sunShadowCache = newCache;
-                else this.moonShadowCache = newCache;
-            }
-        }
+        // Depth test important to not draw over walls!
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthMask(false);
+        gl.depthFunc(gl.LEQUAL);
+
+        gl.drawArrays(gl.TRIANGLES, 0, this.staticShadowCount);
+
+        gl.disableVertexAttribArray(0);
+        gl.disableVertexAttribArray(1);
+
+        // Clear dynamic batch
+        this.beginShadowBatch();
 
         // 3. Add Entity Shadows (DYNAMIC - RUN EVERY FRAME)
         // Entity Shadows are rendered after restoring the cache to ensure they follow entities graciously
