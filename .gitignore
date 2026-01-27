@@ -4,3 +4,5 @@ dist
 tmp
 *.log
 textures
+.env
+**/Voxel_Engine/.env
