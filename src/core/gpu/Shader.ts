@@ -92,4 +92,8 @@ export class Shader {
     public getProgram(): WebGLProgram {
         return this.program;
     }
+
+    public dispose(): void {
+        this.gl.deleteProgram(this.program);
+    }
 }

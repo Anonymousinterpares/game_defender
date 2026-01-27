@@ -186,4 +186,31 @@ export class GPULightingSystem {
 
     public getEmissiveTexture(): WebGLTexture | null { return this.emissiveFBO?.tex || null; }
     public getSDFTexture(): WebGLTexture | null { return this.sdfFBO?.tex || null; }
+
+    public cleanup(): void {
+        if (!this._initialized || !this.gl) return;
+        const gl = this.gl;
+
+        // FBOs
+        [this.emissiveFBO, this.occluderFBO, this.sdfFBO].forEach(f => {
+            if (f) {
+                gl.deleteFramebuffer(f.fbo);
+                gl.deleteTexture(f.tex);
+            }
+        });
+        this.jfaFBOs.forEach(f => {
+            gl.deleteFramebuffer(f.fbo);
+            gl.deleteTexture(f.tex);
+        });
+        this.jfaFBOs = [];
+
+        // Shaders
+        [this.emissiveShader, this.occluderShader, this.jfaInitShader, this.jfaStepShader, this.sdfFinalShader].forEach(s => {
+            if (s) s.dispose();
+        });
+
+        if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
+
+        this._initialized = false;
+    }
 }

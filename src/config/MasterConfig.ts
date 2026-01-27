@@ -102,6 +102,7 @@ export const MasterConfig: GameConfigSchema = {
     showLatency: { value: true, type: 'boolean', description: 'Show Network Latency' },
     showVersionAndPos: { value: true, type: 'boolean', description: 'Show Version and Position in HUD' },
     enableEnemySpawning: { value: false, type: 'boolean', description: 'Enable Enemy Spawning' },
+    multiplayerLogs: { value: true, type: 'boolean', description: 'Show detailed Multiplayer Position Logs' },
     webgl_debug: { value: true, type: 'boolean', description: 'Enable detailed WebGL Debug Logs' },
     show_overlay_settings: { value: true, type: 'boolean', description: 'Enable debug settings overlay in HUD' }
   },

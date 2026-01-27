@@ -5,7 +5,7 @@ import { Entity } from './Entity';
 import { Projectile, ProjectileType } from '../entities/Projectile';
 import { HeatMap, MaterialType } from './HeatMap';
 import { Quadtree } from '../utils/Quadtree';
-import { ConfigManager } from '../config/MasterConfig';
+import { ConfigManager, MasterConfig } from '../config/MasterConfig';
 import { WeaponSystem, WeaponParent } from '../systems/WeaponSystem';
 import { CombatSystem, CombatParent } from '../systems/CombatSystem';
 import { MultiplayerManager, NetworkMessageType } from './MultiplayerManager';
@@ -268,7 +268,11 @@ export class Simulation implements WeaponParent, CombatParent {
         this.entityManager.removeEntity(oldId);
     }
 
-    public reset(seed?: number): void {
+    public reset(seed?: number, width?: number, height?: number): void {
+        const config = ConfigManager.getInstance();
+        if (width !== undefined) MasterConfig.World.width.value = width;
+        if (height !== undefined) MasterConfig.World.height.value = height;
+
         this.world = new World(seed);
         this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));
         this.world.setHeatMap(this.heatMap);

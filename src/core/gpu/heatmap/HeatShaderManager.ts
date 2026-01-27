@@ -11,4 +11,10 @@ export class HeatShaderManager {
         this.splatShader = new Shader(gl, HEAT_VERT, HEAT_SPLAT_FRAG);
         this.renderShader = new Shader(gl, HEAT_VERT, HEAT_RENDER_FRAG);
     }
+
+    public dispose(): void {
+        this.updateShader.dispose();
+        this.splatShader.dispose();
+        this.renderShader.dispose();
+    }
 }

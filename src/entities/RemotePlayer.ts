@@ -80,14 +80,19 @@ export class RemotePlayer extends Entity {
 
   update(dt: number): void {
     // Smoother interpolation for the head logical position
-    // Note: PhysicsEngine updates prevX/prevY for interpolation
-    this.x += (this.targetX - this.x) * 0.2;
-    this.y += (this.targetY - this.y) * 0.2;
+    // STAGE 2 FIX: Time-Independent Interpolation
+    // Previous fixed factor (0.2) caused desync at different frame rates.
+    // Using 1.0 - exp(-decay * dt) matches dampening to time.
+    const smoothing = 15.0; // Tuned for snappy but smooth updates
+    const factor = 1.0 - Math.exp(-smoothing * dt);
+
+    this.x += (this.targetX - this.x) * factor;
+    this.y += (this.targetY - this.y) * factor;
 
     let diff = this.targetRotation - this.rotation;
     while (diff < -Math.PI) diff += Math.PI * 2;
     while (diff > Math.PI) diff -= Math.PI * 2;
-    this.rotation += diff * 0.2;
+    this.rotation += diff * factor;
 
     // We DO NOT call resolveSegmentConstraints here anymore because 
     // segments are strictly updated from network state in MultiplayerGameplayScene.

@@ -514,6 +514,8 @@ export class GPUDeferredLighting {
     public cleanup(): void {
         if (!this._initialized || !this.gl) return;
         const gl = this.gl;
+
+        // FBOs
         [this.accumulationFBO, this.tempLightFBO, this.bloomFBO].forEach(f => {
             if (f) {
                 gl.deleteFramebuffer(f.fbo);
@@ -526,6 +528,22 @@ export class GPUDeferredLighting {
             gl.deleteTexture(this.gBufferFBO.normalTex);
             gl.deleteRenderbuffer(this.gBufferFBO.depthRB);
         }
+
+        // Shaders
+        [this.ambientShader, this.lightShader, this.shadowShader, this.composeShader, this.directionalShader, this.emissiveShader, this.shadowExtrusionShader].forEach(s => {
+            if (s) s.dispose();
+        });
+
+        // Buffers
+        if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
+        if (this.shadowBuffer) gl.deleteBuffer(this.shadowBuffer);
+        if (this.staticShadowBuffer) gl.deleteBuffer(this.staticShadowBuffer);
+
+        this._initialized = false;
+        this.lastStaticMeshVersion = -1;
+        this.pointLightShadowCache.clear();
+        this.sunShadowCache = null;
+        this.moonShadowCache = null;
     }
 
     // ===== Batched Shadow Rendering =====

@@ -27,6 +27,7 @@ import { SegmentComponent } from './ecs/components/SegmentComponent';
 import { WeatherTimePlugin } from './plugins/WeatherTimePlugin';
 import { ChaosPlugin } from './plugins/ChaosPlugin';
 import { ProjectionUtils } from '../utils/ProjectionUtils';
+import { GPURenderer } from './gpu/GPURenderer';
 
 export class MultiplayerGameplayScene extends GameplayScene {
     private remotePlayersMap: Map<string, RemotePlayer> = new Map();
@@ -85,8 +86,10 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
         if (mm.isHost) {
             const seed = Math.floor(Math.random() * 1000000);
-            this.recreateWorld(seed);
-            mm.broadcast(NetworkMessageType.WORLD_SEED, { seed });
+            const width = ConfigManager.getInstance().get<number>('World', 'width');
+            const height = ConfigManager.getInstance().get<number>('World', 'height');
+            this.recreateWorld(seed, width, height);
+            mm.broadcast(NetworkMessageType.WORLD_SEED, { seed, w: width, h: height });
             this.isSpawned = true;
         } else {
             mm.onMessage((msg) => {
@@ -215,15 +218,18 @@ export class MultiplayerGameplayScene extends GameplayScene {
     }
 
     private handleWorldSeed(data: any): void {
-        if (!MultiplayerManager.getInstance().isHost) this.recreateWorld(data.seed);
+        if (!MultiplayerManager.getInstance().isHost) {
+            this.recreateWorld(data.seed, data.w, data.h);
+        }
     }
 
-    private recreateWorld(seed: number): void {
-        this.simulation.reset(seed);
+    private recreateWorld(seed: number, width?: number, height?: number): void {
+        this.simulation.reset(seed, width, height);
         this.simulation.pluginManager.install(new WeatherTimePlugin());
         this.simulation.player.inputManager = this.inputManager;
         this.worldRenderer = new WorldRenderer(this.simulation.world);
         this.lightingRenderer.clearCache();
+        GPURenderer.getInstance().resetWorld(this.simulation.world);
     }
 
     private getSafePVPSpawn(p1Pos: { x: number, y: number }): { x: number, y: number } {
@@ -254,6 +260,28 @@ export class MultiplayerGameplayScene extends GameplayScene {
             this.pingTimer = 0;
             this.pingStartTime = performance.now();
             MultiplayerManager.getInstance().broadcast(NetworkMessageType.PING_PONG, { ping: true });
+
+            // LOGGING POSITIONS for Diagnosis
+            if (ConfigManager.getInstance().get<boolean>('Debug', 'multiplayerLogs')) {
+                const mm = MultiplayerManager.getInstance();
+                if (mm.isHost) {
+                    let logMsg = `[MP-HOST] MyPos: (${Math.round(this.player?.x || 0)}, ${Math.round(this.player?.y || 0)})`;
+                    let i = 1;
+                    this.remotePlayersMap.forEach(rp => {
+                        logMsg += ` | Client${i}: (${Math.round(rp.x)}, ${Math.round(rp.y)})`;
+                        i++;
+                    });
+                    console.log(logMsg);
+                } else {
+                    let logMsg = `[MP-CLIENT] MyPos: (${Math.round(this.player?.x || 0)}, ${Math.round(this.player?.y || 0)})`;
+                    // Ideally we want to know where HOST is. We can find host if we knew their ID,
+                    // but for now, listing all remote players (one of which is host)
+                    this.remotePlayersMap.forEach(rp => {
+                        logMsg += ` | Remote(${rp.id.substr(0, 4)}): (${Math.round(rp.x)}, ${Math.round(rp.y)})`;
+                    });
+                    console.log(logMsg);
+                }
+            }
         }
 
         // 1. Sync remotePlayers array for simulation systems
@@ -348,8 +376,8 @@ export class MultiplayerGameplayScene extends GameplayScene {
                     const centerY = this.cameraY + ctx.canvas.height / 2;
                     const pOffset = ProjectionUtils.getProjectedOffset(rx, ry, rz, centerX, centerY);
 
-                    ctx.beginPath(); 
-                    ctx.moveTo(rx + pOffset.x, ry + rz + pOffset.y); 
+                    ctx.beginPath();
+                    ctx.moveTo(rx + pOffset.x, ry + rz + pOffset.y);
                     ctx.lineTo(endX, endY);
                     ctx.strokeStyle = type === 'laser' ? '#ff0000' : 'rgba(0, 255, 255, 0.8)';
                     ctx.lineWidth = type === 'laser' ? 2 : 15; ctx.stroke();

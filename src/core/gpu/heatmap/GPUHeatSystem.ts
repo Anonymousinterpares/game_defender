@@ -188,4 +188,26 @@ export class GPUHeatSystem {
     public getScorchTexture(): WebGLTexture | null {
         return this._initialized ? (this.scorchFBO?.tex || null) : null;
     }
+
+    public cleanup(): void {
+        if (!this._initialized || !this.gl) return;
+        const gl = this.gl;
+
+        this.heatFBOs.forEach(f => {
+            gl.deleteFramebuffer(f.fbo);
+            gl.deleteTexture(f.tex);
+        });
+        this.heatFBOs = [];
+
+        if (this.scorchFBO) {
+            gl.deleteFramebuffer(this.scorchFBO.fbo);
+            gl.deleteTexture(this.scorchFBO.tex);
+            this.scorchFBO = null;
+        }
+
+        if (this.shaders) this.shaders.dispose();
+        if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
+
+        this._initialized = false;
+    }
 }

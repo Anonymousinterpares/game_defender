@@ -100,6 +100,23 @@ export class GPUWallRenderer {
         this.meshBuilder.updateConfig();
     }
 
+    public reset(): void {
+        this.clear();
+        const gl = this.gl;
+        if (gl) {
+            if (this.posBuffer) gl.deleteBuffer(this.posBuffer);
+            if (this.uvBuffer) gl.deleteBuffer(this.uvBuffer);
+            if (this.matBuffer) gl.deleteBuffer(this.matBuffer);
+            if (this.normBuffer) gl.deleteBuffer(this.normBuffer);
+            if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
+            if (this.vao) gl.deleteVertexArray(this.vao);
+            if (this.structureTexture) gl.deleteTexture(this.structureTexture);
+            // groundTexture is handled by loadGroundTexture
+        }
+        this.initialized = false;
+        this.buffersInitialized = false;
+    }
+
     public clear(): void {
         this.lastMeshVersion = -1;
         this.lastWorld = null;

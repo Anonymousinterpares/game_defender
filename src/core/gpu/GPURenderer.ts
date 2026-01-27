@@ -48,7 +48,8 @@ export class GPURenderer {
     private deferredLighting: GPUDeferredLighting;
     private copyShader: Shader | null = null;
     private worldMapTexture: WebGLTexture | null = null;
-    private lastMeshVersion: number = -1;
+    private lastWorldWidth: number = -1;
+    private lastWorldHeight: number = -1;
     private lastEntityPositions: Map<number, { x: number, y: number }> = new Map();
 
     public getParticleSystem(): GPUParticleSystem {
@@ -200,6 +201,14 @@ export class GPURenderer {
         }
     }
 
+    public resetWorld(world: World): void {
+        console.log("[GPU] Explicitly resetting world reference and resources...");
+        this.world = world;
+        if (this.active) {
+            this.handleWorldChange();
+        }
+    }
+
     public clear(): void {
         if (this.particleSystem) this.particleSystem.clear();
         if (this.fluidSimulation) this.fluidSimulation.clear();
@@ -207,8 +216,38 @@ export class GPURenderer {
         if (this.wallRenderer) this.wallRenderer.clear();
     }
 
+    private handleWorldChange(): void {
+        const gl = this.context.getGL();
+        if (!gl || !this.world) return;
+
+        console.log("[GPU] Cleaning up resources for world re-initialization...");
+        this.fluidSimulation.cleanup();
+        this.heatSystem.cleanup();
+        this.lightingSystem.cleanup();
+        this.deferredLighting.cleanup();
+        this.wallRenderer.reset();
+
+        // Re-init systems that depend on world scale
+        this.fluidSimulation.init(gl, 256, 256);
+        this.heatSystem.init(gl, 1024, 1024);
+        this.lightingSystem.init(gl, 1024, 1024);
+        this.deferredLighting.init(gl, 1, 1);
+        this.wallRenderer.init(gl);
+    }
+
     public update(dt: number, entities: { x: number, y: number, radius: number, height: number, z?: number }[] = [], cameraX: number = 0, cameraY: number = 0, width: number = 800, height: number = 600): void {
         if (!this.active || !this.particleSystem || !this.world) return;
+
+        // Detect World swap or dimension change
+        const ww = this.world.getWidth();
+        const wh = this.world.getHeight();
+        if (ww !== this.lastWorldWidth || wh !== this.lastWorldHeight) {
+            console.log(`GPU Dimensions mismatch: ${this.lastWorldWidth}x${this.lastWorldHeight} -> ${ww}x${wh}. Re-initializing...`);
+            this.handleWorldChange();
+            this.lastWorldWidth = ww;
+            this.lastWorldHeight = wh;
+        }
+
         this.updateWorldTexture();
         if (this.worldMapTexture) this.particleSystem.setWorldMap(this.worldMapTexture, this.world.getWidth(), this.world.getHeight(), this.world.getTileSize());
         this.particleSystem.setEntities(entities);

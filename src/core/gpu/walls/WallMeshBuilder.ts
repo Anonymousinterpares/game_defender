@@ -227,6 +227,10 @@ export class WallMeshBuilder {
             v += 6;
         }
 
+        // Top Face (Roof)
+        this.setQuad(v, wx, wy, h, wx + ts, wy, h, wx, wy + ts, h, wx + ts, wy + ts, h, 0, 0, 1, 1, mat, 0, 0);
+        v += 6;
+
         return v;
     }
 
@@ -275,6 +279,10 @@ export class WallMeshBuilder {
                     this.setQuad(v, swx + subTs, swy, 0, swx + subTs, swy + subTs, 0, swx + subTs, swy, h, swx + subTs, swy + subTs, h, suvX1, suvY0, suvX1, suvY1, mat, 1, 0);
                     v += 6;
                 }
+
+                // Top Face (Roof)
+                this.setQuad(v, swx, swy, h, swx + subTs, swy, h, swx, swy + subTs, h, swx + subTs, swy + subTs, h, suvX0, suvY0, suvX1, suvY1, mat, 0, 0);
+                v += 6;
             }
         }
 

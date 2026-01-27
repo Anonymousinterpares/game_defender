@@ -350,4 +350,38 @@ export class FluidSimulation {
     public getDensityTexture(): WebGLTexture | null {
         return this._initialized ? this.densityFBOs[this.densityIdx].tex : null;
     }
+
+    public cleanup(): void {
+        if (!this._initialized || !this.gl) return;
+        const gl = this.gl;
+
+        const fbos = [
+            ...this.velocityFBOs,
+            ...this.densityFBOs,
+            ...this.pressureFBOs,
+            this.divergenceFBO,
+            this.vorticityFBO
+        ];
+
+        fbos.forEach(f => {
+            if (f) {
+                gl.deleteFramebuffer(f.fbo);
+                gl.deleteTexture(f.tex);
+            }
+        });
+
+        this.velocityFBOs = [];
+        this.densityFBOs = [];
+        this.pressureFBOs = [];
+        this.divergenceFBO = null;
+        this.vorticityFBO = null;
+
+        [this.advectShader, this.pressureShader, this.divergenceShader, this.subtractShader, this.splatShader, this.forcesShader, this.vorticityShader, this.applyVorticityShader].forEach(s => {
+            if (s) s.dispose();
+        });
+
+        if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
+
+        this._initialized = false;
+    }
 }
