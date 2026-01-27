@@ -60,7 +60,10 @@ export class Game {
   }
 
   private loop(timestamp: number): void {
-    const deltaTime = (timestamp - this.lastTime) / 1000;
+    let deltaTime = (timestamp - this.lastTime) / 1000;
+    // Safety Cap: Clamp max dt to 100ms (10 FPS) to prevent physics spiral of death
+    // This is especially important for Deferred Mode where GPU lag might cause spikes
+    if (deltaTime > 0.1) deltaTime = 0.1;
     this.lastTime = timestamp;
 
     this.frameCount++;
