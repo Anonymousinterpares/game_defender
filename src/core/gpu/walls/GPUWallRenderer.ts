@@ -2,7 +2,7 @@ import { World } from "../../World";
 import { Shader } from "../Shader";
 import { WALL_PARALLAX_VERT, WALL_PARALLAX_FRAG } from "./shaders/wall.glsl";
 import { GROUND_VERT, GROUND_FRAG } from "./shaders/ground.glsl";
-import { WallMeshBuilder } from "./WallMeshBuilder";
+import { WallChunk } from "./WallChunk";
 import { GPUHeatSystem } from "../heatmap/GPUHeatSystem";
 import { WorldClock } from "../../WorldClock";
 import { ConfigManager } from "../../../config/MasterConfig";
@@ -14,13 +14,12 @@ export class GPUWallRenderer {
     private gl: WebGL2RenderingContext | null = null;
     private shader: Shader | null = null;
     private groundShader: Shader | null = null;
-    private meshBuilder: WallMeshBuilder;
 
-    private vao: WebGLVertexArrayObject | null = null;
-    private posBuffer: WebGLBuffer | null = null;
-    private uvBuffer: WebGLBuffer | null = null;
-    private matBuffer: WebGLBuffer | null = null;
-    private normBuffer: WebGLBuffer | null = null;
+    private chunks: WallChunk[] = [];
+    private chunkSize: number = 16;
+    private chunksX: number = 0;
+    private chunksY: number = 0;
+
     private quadBuffer: WebGLBuffer | null = null;
 
     private groundTexture: WebGLTexture | null = null;
@@ -38,19 +37,13 @@ export class GPUWallRenderer {
     private dirtyTiles: Set<string> = new Set();
 
     constructor() {
-        this.meshBuilder = new WallMeshBuilder();
+        // WallMeshBuilder removed
     }
 
     public init(gl: WebGL2RenderingContext): void {
         this.gl = gl;
         this.shader = new Shader(gl, WALL_PARALLAX_VERT, WALL_PARALLAX_FRAG);
         this.groundShader = new Shader(gl, GROUND_VERT, GROUND_FRAG);
-
-        this.vao = gl.createVertexArray();
-        this.posBuffer = gl.createBuffer();
-        this.uvBuffer = gl.createBuffer();
-        this.matBuffer = gl.createBuffer();
-        this.normBuffer = gl.createBuffer();
 
         const quad = new Float32Array([-1, -1, 1, -1, -1, 1, 1, -1, 1, 1, -1, 1]);
         this.quadBuffer = gl.createBuffer();
@@ -97,24 +90,19 @@ export class GPUWallRenderer {
     }
 
     public updateConfig(): void {
-        this.meshBuilder.updateConfig();
+        this.chunks.forEach(c => c.markDirty());
     }
 
     public reset(): void {
         this.clear();
         const gl = this.gl;
         if (gl) {
-            if (this.posBuffer) gl.deleteBuffer(this.posBuffer);
-            if (this.uvBuffer) gl.deleteBuffer(this.uvBuffer);
-            if (this.matBuffer) gl.deleteBuffer(this.matBuffer);
-            if (this.normBuffer) gl.deleteBuffer(this.normBuffer);
             if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
-            if (this.vao) gl.deleteVertexArray(this.vao);
             if (this.structureTexture) gl.deleteTexture(this.structureTexture);
-            // groundTexture is handled by loadGroundTexture
         }
+        this.chunks.forEach(c => c.destroy());
+        this.chunks = [];
         this.initialized = false;
-        this.buffersInitialized = false;
     }
 
     public clear(): void {
@@ -155,44 +143,44 @@ export class GPUWallRenderer {
         if (this.lastWorld !== world) {
             this.lastWorld = world;
             this.lastMeshVersion = -1;
-            this.meshBuilder.reset();
             this.initStructureMap(world);
             this.dirtyTiles.clear();
+            this.initChunks(world);
+        }
+
+        const currentWallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0;
+        const currentVersion = world.getMeshVersion();
+
+        if (currentVersion !== this.lastMeshVersion || currentWallHeight !== this.lastWallHeight) {
+            const worldDirtyTiles = world.getDirtyTilesForGPU();
+            worldDirtyTiles.forEach(key => {
+                const [tx, ty] = key.split(',').map(Number);
+                const cx = Math.floor(tx / this.chunkSize);
+                const cy = Math.floor(ty / this.chunkSize);
+                const cidx = cy * this.chunksX + cx;
+                if (this.chunks[cidx]) this.chunks[cidx].markDirty();
+
+                // Keep local dirtyTiles set in sync for structureMap update
+                this.dirtyTiles.add(key);
+            });
+
+            this.lastMeshVersion = currentVersion;
+            this.lastWallHeight = currentWallHeight;
         }
 
         this.updateStructureMap(world);
         this.renderGround(world, cameraX, cameraY, screenW, screenH, heatSystem, lightBuffer, entityBuffer, worldMap, lightingSystem, timeState);
 
-        const currentWallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0;
-        const heightChanged = currentWallHeight !== this.lastWallHeight;
-        const currentVersion = world.getMeshVersion();
-
-        if (currentVersion !== this.lastMeshVersion || heightChanged) {
-            // Get dirty tiles BEFORE they are cleared by getOcclusionSegments
-            const worldDirtyTiles = world.getDirtyTilesForGPU();
-            this.meshBuilder.markTilesDirty(worldDirtyTiles);
-
-            if (heightChanged) {
-                this.meshBuilder.reset(); // Force full rebuild on height change
+        // Update dirty chunks that are visible OR close to visible
+        this.chunks.forEach(chunk => {
+            if (chunk.isVisible(cameraX, cameraY, screenW, screenH, 200)) {
+                chunk.update(world, currentWallHeight);
             }
-
-            const buffersChanged = this.meshBuilder.build(world);
-            this.lastMeshVersion = currentVersion;
-            this.lastWallHeight = currentWallHeight;
-
-            if (buffersChanged) {
-                this.updateBuffers();
-            }
-        }
-
-        if (this.meshBuilder.getVertexCount() === 0) {
-            this.cleanupWebGLState();
-            return;
-        }
+        });
 
         if (this.shader) {
             this.shader.use();
-            gl.bindVertexArray(this.vao);
+            // Per-chunk VAO binding is handled in chunk.render()
 
             const left = cameraX, right = cameraX + screenW, top = cameraY, bottom = cameraY + screenH;
             const m = new Float32Array([
@@ -251,7 +239,12 @@ export class GPUWallRenderer {
                 this.shader.setUniform1i("u_emissiveTexture", 5);
             }
 
-            gl.drawArrays(gl.TRIANGLES, 0, this.meshBuilder.getVertexCount());
+            // Render visible chunks
+            this.chunks.forEach(chunk => {
+                if (chunk.isVisible(cameraX, cameraY, screenW, screenH)) {
+                    chunk.render();
+                }
+            });
         }
 
         this.cleanupWebGLState();
@@ -383,83 +376,27 @@ export class GPUWallRenderer {
 
     public getStructureTexture(): WebGLTexture | null { return this.structureTexture; }
 
-    private buffersInitialized: boolean = false;
-    private bufferCapacity: number = 0;
+    private initChunks(world: World): void {
+        this.chunks.forEach(c => c.destroy());
+        this.chunks = [];
 
-    private updateBuffers(): void {
-        if (!this.gl || !this.vao) return;
-        const gl = this.gl;
-        gl.bindVertexArray(this.vao);
+        const tw = world.getWidth();
+        const th = world.getHeight();
+        const ts = world.getTileSize();
 
-        const positions = this.meshBuilder.getPositions();
-        const uvs = this.meshBuilder.getUVs();
-        const materials = this.meshBuilder.getMaterials();
-        const normals = this.meshBuilder.getNormals();
+        this.chunksX = Math.ceil(tw / this.chunkSize);
+        this.chunksY = Math.ceil(th / this.chunkSize);
 
-        // Check if we need to reallocate buffers (first time or capacity change)
-        const neededCapacity = positions.length / 3;
-        if (!this.buffersInitialized || neededCapacity > this.bufferCapacity) {
-            // Full buffer allocation with DYNAMIC_DRAW for frequent updates
-            this.bufferCapacity = neededCapacity;
+        for (let cy = 0; cy < this.chunksY; cy++) {
+            for (let cx = 0; cx < this.chunksX; cx++) {
+                const startTx = cx * this.chunkSize;
+                const startTy = cy * this.chunkSize;
+                const actualW = Math.min(this.chunkSize, tw - startTx);
+                const actualH = Math.min(this.chunkSize, th - startTy);
 
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, positions, gl.DYNAMIC_DRAW);
-            gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, uvs, gl.DYNAMIC_DRAW);
-            gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
-
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.matBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, materials, gl.DYNAMIC_DRAW);
-            gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
-
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.normBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, normals, gl.DYNAMIC_DRAW);
-            gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
-
-            this.buffersInitialized = true;
-        } else {
-            // Incremental update - only update changed regions
-            const pendingUpdates = this.meshBuilder.getPendingUpdates();
-
-            if (pendingUpdates.length === 0) {
-                // No specific updates, do full sub-data update
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuffer);
-                gl.bufferSubData(gl.ARRAY_BUFFER, 0, positions);
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
-                gl.bufferSubData(gl.ARRAY_BUFFER, 0, uvs);
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.matBuffer);
-                gl.bufferSubData(gl.ARRAY_BUFFER, 0, materials);
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.normBuffer);
-                gl.bufferSubData(gl.ARRAY_BUFFER, 0, normals);
-            } else {
-                // Update only specific regions
-                for (const update of pendingUpdates) {
-                    const { offset, count } = update;
-                    if (count <= 0) continue;
-
-                    const posStart = offset * 3;
-                    const posEnd = posStart + count * 3;
-                    const uvStart = offset * 2;
-                    const uvEnd = uvStart + count * 2;
-
-                    gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuffer);
-                    gl.bufferSubData(gl.ARRAY_BUFFER, posStart * 4, positions.subarray(posStart, posEnd));
-
-                    gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuffer);
-                    gl.bufferSubData(gl.ARRAY_BUFFER, uvStart * 4, uvs.subarray(uvStart, uvEnd));
-
-                    gl.bindBuffer(gl.ARRAY_BUFFER, this.matBuffer);
-                    gl.bufferSubData(gl.ARRAY_BUFFER, offset * 4, materials.subarray(offset, offset + count));
-
-                    gl.bindBuffer(gl.ARRAY_BUFFER, this.normBuffer);
-                    gl.bufferSubData(gl.ARRAY_BUFFER, uvStart * 4, normals.subarray(uvStart, uvEnd));
-                }
+                this.chunks.push(new WallChunk(this.gl!, startTx, startTy, actualW, actualH, ts));
             }
         }
-
-        gl.bindVertexArray(null);
     }
 }
 

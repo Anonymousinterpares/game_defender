@@ -15,6 +15,10 @@ export class GPULightBuffer {
     public init(gl: WebGL2RenderingContext): void {
         this.gl = gl;
         this.buffer = gl.createBuffer();
+        // Initialize with zeros to avoid "buffer too small" errors on first render
+        gl.bindBuffer(gl.UNIFORM_BUFFER, this.buffer);
+        gl.bufferData(gl.UNIFORM_BUFFER, this.data, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.UNIFORM_BUFFER, null);
     }
 
     public update(lights: LightSource[]): void {

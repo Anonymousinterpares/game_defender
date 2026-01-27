@@ -30,8 +30,8 @@ import { GPURenderer } from './gpu/GPURenderer';
 import { LoadingScreen } from '../ui/LoadingScreen';
 
 export class GameplayScene implements Scene, HUDParent, LightingParent {
-    public simulation: Simulation;
-    public worldRenderer: WorldRenderer;
+    public simulation!: Simulation;
+    public worldRenderer!: WorldRenderer;
     protected radar: Radar | null = null;
     protected hud: GameplayHUD;
     protected lightingRenderer: LightingRenderer;
@@ -44,10 +44,10 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     public cameraY: number = 0;
 
     // Getters to bridge to simulation for HUD/Renderer compatibility
-    public get world() { return this.simulation.world; }
-    public get player() { return this.simulation.player; }
-    public get heatMap() { return this.simulation.heatMap; }
-    public get enemies() { return this.simulation.enemies; }
+    public get world() { return this.simulation?.world; }
+    public get player() { return this.simulation?.player; }
+    public get heatMap() { return this.simulation?.heatMap; }
+    public get enemies() { return this.simulation?.enemies; }
     public get remotePlayers() { return this.simulation.remotePlayers; }
     public get drops() { return this.simulation.drops; }
     public get projectiles() { return this.simulation.projectiles; }
@@ -91,8 +91,8 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
 
     constructor(public sceneManager: SceneManager, inputManager: InputManager) {
         this.inputManager = inputManager;
-        this.simulation = new Simulation(SimulationRole.SINGLEPLAYER);
-        this.worldRenderer = new WorldRenderer(this.simulation.world);
+        // Simulation moved to onEnter to avoid blocking loading screen
+        this.worldRenderer = null as any;
         this.hud = new GameplayHUD(this);
         this.lightingRenderer = new LightingRenderer(this);
         this.benchmark = new BenchmarkSystem(this);
@@ -114,6 +114,9 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
 
     async onEnter(): Promise<void> {
         this.loadingScreen.show();
+
+        // Yield to allow the browser to paint the loading screen
+        await new Promise(resolve => requestAnimationFrame(resolve));
 
         // Reset Singletons for clean state
         WorldClock.getInstance().reset();
@@ -143,7 +146,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
 
         // 2. World Rendering (Hidden from players)
         // Perform a warm-up render to ensure all shaders and buffers are ready
-        this.render(this.sceneManager['ctx']); // Access protected/private ctx if possible, or use standard scene render
+        this.render(this.sceneManager['ctx']);
 
         // Give a small delay for perception and to ensure everything is "slick"
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -158,6 +161,9 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
             this.sceneManager.switchScene('menu');
             return;
         }
+
+        // Wait for async init
+        if (!this.simulation) return;
 
         this.benchmark.update(dt);
         LightManager.getInstance().update(dt);
@@ -294,6 +300,7 @@ export class GameplayScene implements Scene, HUDParent, LightingParent {
     }
 
     render(ctx: CanvasRenderingContext2D): void {
+        if (!this.simulation) return; // Wait for async init
         if (!this.world || !this.player) return;
         PerfMonitor.getInstance().begin('render_world');
         ctx.save();

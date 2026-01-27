@@ -51,7 +51,10 @@ export class MultiplayerGameplayScene extends GameplayScene {
     async onEnter(): Promise<void> {
         this.loadingScreen.show();
 
-        // Multiplayer-specific flow: onEnter already called super.onEnter() but we need more control
+        // Yield to allow the browser to paint the loading screen
+        await new Promise(resolve => requestAnimationFrame(resolve));
+
+        // Multiplayer-specific flow
         // Reset Singletons
         WorldClock.getInstance().reset();
         LightManager.getInstance().reset();
@@ -61,8 +64,9 @@ export class MultiplayerGameplayScene extends GameplayScene {
         const mm = MultiplayerManager.getInstance();
         const role = mm.isHost ? SimulationRole.HOST : SimulationRole.CLIENT;
 
-        // Set the correct role for simulation
-        this.simulation.setRole(role);
+        // Initialize simulation
+        const seed = Math.floor(Math.random() * 1000000);
+        this.simulation = new Simulation(role, seed);
         this.simulation.player.inputManager = this.inputManager;
 
         mm.clearMessageCallbacks();
