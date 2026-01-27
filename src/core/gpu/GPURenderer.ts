@@ -14,6 +14,7 @@ import { GPUEntityBuffer } from "./GPUEntityBuffer";
 import { LightManager } from "../LightManager";
 import { GPULightingSystem } from "./lighting/GPULightingSystem";
 import { GPUDeferredLighting } from "./lighting/GPUDeferredLighting";
+import { GPUWeatherSystem } from "./particles/GPUWeatherSystem";
 import { WorldClock } from "../WorldClock";
 import { ExplosionLibrary } from "../effects/ExplosionLibrary";
 import { EventBus, GameEvent } from "../EventBus";
@@ -46,6 +47,7 @@ export class GPURenderer {
     private entityBuffer: GPUEntityBuffer;
     private lightingSystem: GPULightingSystem;
     private deferredLighting: GPUDeferredLighting;
+    private weatherSystem: GPUWeatherSystem;
     private copyShader: Shader | null = null;
     private worldMapTexture: WebGLTexture | null = null;
     private lastWorldWidth: number = -1;
@@ -82,6 +84,7 @@ export class GPURenderer {
         this.entityBuffer = new GPUEntityBuffer(32);
         this.lightingSystem = new GPULightingSystem();
         this.deferredLighting = new GPUDeferredLighting();
+        this.weatherSystem = new GPUWeatherSystem();
         this.subscribeToEvents();
 
         const ps = ParticleSystem.getInstance();
@@ -145,6 +148,9 @@ export class GPURenderer {
         }
         if (this.deferredLighting && !this.deferredLighting.isInitialized) {
             this.deferredLighting.init(gl, 1, 1); // Size will be updated on first update()
+        }
+        if (this.weatherSystem && !this.weatherSystem.initialized && this.world) {
+            this.weatherSystem.init(gl, this.world);
         }
     }
 
@@ -219,6 +225,7 @@ export class GPURenderer {
         if (this.fluidSimulation) this.fluidSimulation.clear();
         if (this.heatSystem) this.heatSystem.clear();
         if (this.wallRenderer) this.wallRenderer.clear();
+        if (this.weatherSystem) this.weatherSystem.clear();
     }
 
     private handleWorldChange(): void {
@@ -230,6 +237,7 @@ export class GPURenderer {
         this.heatSystem.cleanup();
         this.lightingSystem.cleanup();
         this.deferredLighting.cleanup();
+        this.weatherSystem.cleanup();
         this.wallRenderer.reset();
 
         // Re-init systems that depend on world scale
@@ -238,6 +246,7 @@ export class GPURenderer {
         this.lightingSystem.init(gl, 1024, 1024);
         this.deferredLighting.init(gl, 1, 1);
         this.wallRenderer.init(gl);
+        if (this.world) this.weatherSystem.init(gl, this.world);
     }
 
     public update(dt: number, entities: { x: number, y: number, radius: number, height: number, z?: number }[] = [], cameraX: number = 0, cameraY: number = 0, width: number = 800, height: number = 600): void {
@@ -250,6 +259,7 @@ export class GPURenderer {
         const centerX = cameraX + width / 2;
         const centerY = cameraY + height / 2;
         this.particleSystem.update(dt, performance.now() * 0.001, centerX, centerY);
+        this.weatherSystem.update(dt, performance.now() * 0.001);
 
         if (this.fluidSimulation) {
             const ppm = ConfigManager.getInstance().getPixelsPerMeter();
@@ -425,6 +435,11 @@ export class GPURenderer {
             gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
             this.particleSystem.render(cameraX, cameraY, width, height);
             gl.disable(gl.BLEND);
+        }
+
+        if (this.weatherSystem) {
+            // Weather usually covers the screen, but follows camera.
+            this.weatherSystem.render(cameraX, cameraY, width, height);
         }
 
         gl.disable(gl.DEPTH_TEST);
