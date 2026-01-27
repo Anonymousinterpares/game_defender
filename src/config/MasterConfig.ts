@@ -276,6 +276,14 @@ export class ConfigManager {
     }
   }
 
+  public setRuntime<T>(category: string, key: string, newValue: T): void {
+    if (MasterConfig[category] && MasterConfig[category][key]) {
+      // @ts-ignore
+      MasterConfig[category][key].value = newValue;
+      console.log(`Config Runtime Update (No Save): [${category}.${key}] = ${newValue}`);
+    }
+  }
+
   private saveToLocalStorage(): void {
     try {
       const flatConfig: Record<string, any> = {};

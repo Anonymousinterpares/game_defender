@@ -184,9 +184,14 @@ export class GPURenderer {
     }
 
     public setWorld(world: World): void {
+        const isNewInstance = this.world !== world;
         this.world = world;
-        // Decoupled from CPU HeatMap callbacks to prevent lingering artifacts.
-        // GPU visual state is now triggered via direct events and simulated on GPU.
+        if (isNewInstance && this.active) {
+            console.log("[GPU] New world instance detected, forcing resource refresh.");
+            this.handleWorldChange();
+            this.lastWorldWidth = world.getWidth();
+            this.lastWorldHeight = world.getHeight();
+        }
     }
 
     public updateConfig(): void {
@@ -237,16 +242,6 @@ export class GPURenderer {
 
     public update(dt: number, entities: { x: number, y: number, radius: number, height: number, z?: number }[] = [], cameraX: number = 0, cameraY: number = 0, width: number = 800, height: number = 600): void {
         if (!this.active || !this.particleSystem || !this.world) return;
-
-        // Detect World swap or dimension change
-        const ww = this.world.getWidth();
-        const wh = this.world.getHeight();
-        if (ww !== this.lastWorldWidth || wh !== this.lastWorldHeight) {
-            console.log(`GPU Dimensions mismatch: ${this.lastWorldWidth}x${this.lastWorldHeight} -> ${ww}x${wh}. Re-initializing...`);
-            this.handleWorldChange();
-            this.lastWorldWidth = ww;
-            this.lastWorldHeight = wh;
-        }
 
         this.updateWorldTexture();
         if (this.worldMapTexture) this.particleSystem.setWorldMap(this.worldMapTexture, this.world.getWidth(), this.world.getHeight(), this.world.getTileSize());

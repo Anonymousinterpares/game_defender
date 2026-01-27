@@ -268,10 +268,13 @@ export class Simulation implements WeaponParent, CombatParent {
         this.entityManager.removeEntity(oldId);
     }
 
-    public reset(seed?: number, width?: number, height?: number): void {
+    public reset(seed?: number, width?: number, height?: number, mpt?: number, ts?: number, wh?: number): void {
         const config = ConfigManager.getInstance();
-        if (width !== undefined) MasterConfig.World.width.value = width;
-        if (height !== undefined) MasterConfig.World.height.value = height;
+        if (width !== undefined) config.setRuntime('World', 'width', width);
+        if (height !== undefined) config.setRuntime('World', 'height', height);
+        if (mpt !== undefined) config.setRuntime('World', 'metersPerTile', mpt);
+        if (ts !== undefined) config.setRuntime('World', 'tileSize', ts);
+        if (wh !== undefined) config.setRuntime('World', 'wallHeight', wh);
 
         this.world = new World(seed);
         this.heatMap = new HeatMap(ConfigManager.getInstance().get<number>('World', 'tileSize'));

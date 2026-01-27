@@ -89,7 +89,15 @@ export class MultiplayerGameplayScene extends GameplayScene {
             const width = ConfigManager.getInstance().get<number>('World', 'width');
             const height = ConfigManager.getInstance().get<number>('World', 'height');
             this.recreateWorld(seed, width, height);
-            mm.broadcast(NetworkMessageType.WORLD_SEED, { seed, w: width, h: height });
+            const config = ConfigManager.getInstance();
+            mm.broadcast(NetworkMessageType.WORLD_SEED, {
+                seed,
+                w: width,
+                h: height,
+                mpt: config.get('World', 'metersPerTile'),
+                ts: config.get('World', 'tileSize'),
+                wh: config.get('World', 'wallHeight')
+            });
             this.isSpawned = true;
         } else {
             mm.onMessage((msg) => {
@@ -219,12 +227,12 @@ export class MultiplayerGameplayScene extends GameplayScene {
 
     private handleWorldSeed(data: any): void {
         if (!MultiplayerManager.getInstance().isHost) {
-            this.recreateWorld(data.seed, data.w, data.h);
+            this.recreateWorld(data.seed, data.w, data.h, data.mpt, data.ts, data.wh);
         }
     }
 
-    private recreateWorld(seed: number, width?: number, height?: number): void {
-        this.simulation.reset(seed, width, height);
+    private recreateWorld(seed: number, width?: number, height?: number, mpt?: number, ts?: number, wh?: number): void {
+        this.simulation.reset(seed, width, height, mpt, ts, wh);
         this.simulation.pluginManager.install(new WeatherTimePlugin());
         this.simulation.player.inputManager = this.inputManager;
         this.worldRenderer = new WorldRenderer(this.simulation.world);
