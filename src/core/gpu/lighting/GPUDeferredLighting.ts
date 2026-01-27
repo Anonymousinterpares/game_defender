@@ -4,11 +4,19 @@ import { ShadowVolumeGenerator, Point } from "./ShadowVolumeGenerator";
 import { LightSource } from "../../LightManager";
 import { GPUEntityBuffer } from "../GPUEntityBuffer";
 import { ConfigManager } from "../../../config/MasterConfig";
+import { World } from "../../World";
 
 interface PointLightShadowCache {
     batchData: Float32Array;
     lastLightPos: { x: number, y: number };
-    lastMeshVersion: number;
+    lastLocalVersion: number;
+}
+
+interface DirectionalShadowCache {
+    batchData: Float32Array;
+    lastDirection: { x: number, y: number };
+    lastVersion: number;
+    lastViewport: { x: number, y: number, w: number, h: number };
 }
 
 export class GPUDeferredLighting {
@@ -39,6 +47,8 @@ export class GPUDeferredLighting {
 
     // Per-light shadow cache
     private pointLightShadowCache: Map<string, PointLightShadowCache> = new Map();
+    private sunShadowCache: DirectionalShadowCache | null = null;
+    private moonShadowCache: DirectionalShadowCache | null = null;
 
     constructor() { }
 
@@ -188,13 +198,12 @@ export class GPUDeferredLighting {
         width: number,
         height: number,
         lights: LightSource[],
-        segments: { a: Point, b: Point }[],
+        world: World,
         ambientColor: string,
         sun: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number },
         moon: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number },
         entityBuffer: GPUEntityBuffer,
-        viewProj: Float32Array,
-        meshVersion: number
+        viewProj: Float32Array
     ): void {
         if (!this._initialized || !this.gl) return;
         const gl = this.gl;
@@ -210,9 +219,9 @@ export class GPUDeferredLighting {
         this.ambientShader!.setUniform3f("u_ambientColor", amb[0], amb[1], amb[2]);
         this.renderQuad();
 
-        // 2. Process Sun/Moon (Directional)
-        if (sun.active) this.renderDirectional(gl, sun, segments, cameraX, cameraY, width, height, entityBuffer, viewProj);
-        if (moon.active) this.renderDirectional(gl, moon, segments, cameraX, cameraY, width, height, entityBuffer, viewProj);
+        // 2. Process Sun/Moon (Directional) - WITH CACHING
+        if (sun.active) this.renderDirectionalSmart(gl, sun, world, cameraX, cameraY, width, height, entityBuffer, viewProj, true);
+        if (moon.active) this.renderDirectionalSmart(gl, moon, world, cameraX, cameraY, width, height, entityBuffer, viewProj, false);
 
         // 3. Process each point light
         let shadowLightsCount = 0;
@@ -249,52 +258,7 @@ export class GPUDeferredLighting {
 
             this.renderQuad();
 
-            // Shadows - BATCHED & CACHED (Matching CPU optimizations)
-            if (light.castsShadows !== false && shadowLightsCount < this.MAX_SHADOW_LIGHTS) {
-                shadowLightsCount++;
-                gl.enable(gl.BLEND);
-                gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
-
-                // Check cache first
-                const cache = this.pointLightShadowCache.get(light.id);
-                const hasMoved = !cache || Math.abs(light.x - cache.lastLightPos.x) > 2 || Math.abs(light.y - cache.lastLightPos.y) > 2;
-                const meshChanged = !cache || meshVersion !== cache.lastMeshVersion;
-
-                if (!hasMoved && !meshChanged && cache) {
-                    // Use cached data
-                    this.shadowBatchData.set(cache.batchData, 0);
-                    this.shadowBatchOffset = cache.batchData.length;
-                    this.flushShadowBatch(viewProj, cameraX, cameraY);
-                } else {
-                    // Recompute and cache
-                    this.beginShadowBatch();
-                    for (const seg of segments) {
-                        const dx = ((seg.a.x + seg.b.x) / 2) - light.x;
-                        const dy = ((seg.a.y + seg.b.y) / 2) - light.y;
-                        if (dx * dx + dy * dy > (light.radius * 1.5) * (light.radius * 1.5)) continue;
-
-                        const worldA = { x: seg.a.x, y: seg.a.y };
-                        const worldB = { x: seg.b.x, y: seg.b.y };
-                        const worldLPos = { x: light.x, y: light.y };
-                        this.shadowBatchOffset = ShadowVolumeGenerator.writeShadowVolumeToBatch(this.shadowBatchData, this.shadowBatchOffset, worldLPos, worldA, worldB, light.radius);
-                    }
-
-                    // Save to cache before flushing
-                    if (this.shadowBatchOffset > 0) {
-                        this.pointLightShadowCache.set(light.id, {
-                            batchData: new Float32Array(this.shadowBatchData.buffer, 0, this.shadowBatchOffset),
-                            lastLightPos: { x: light.x, y: light.y },
-                            lastMeshVersion: meshVersion
-                        });
-                    }
-
-                    this.flushShadowBatch(viewProj, cameraX, cameraY);
-                }
-
-                gl.disable(gl.BLEND);
-            }
-
-            // Accumulate
+            // Accumulate Light Emission (Only)
             gl.bindFramebuffer(gl.FRAMEBUFFER, this.accumulationFBO!.fbo);
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.ONE, gl.ONE);
@@ -309,7 +273,18 @@ export class GPUDeferredLighting {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    private renderDirectional(gl: WebGL2RenderingContext, light: any, segments: any[], cameraX: number, cameraY: number, width: number, height: number, entityBuffer: GPUEntityBuffer, viewProj: Float32Array): void {
+    private renderDirectionalSmart(
+        gl: WebGL2RenderingContext,
+        light: any,
+        world: World,
+        cameraX: number,
+        cameraY: number,
+        width: number,
+        height: number,
+        entityBuffer: GPUEntityBuffer,
+        viewProj: Float32Array,
+        isSun: boolean
+    ): void {
         // 1. Render Directional Light into Temp
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.tempLightFBO!.fbo);
         gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.gBufferFBO!.depthRB);
@@ -337,22 +312,46 @@ export class GPUDeferredLighting {
 
         this.renderQuad();
 
-        // 2. Punch out Shadows - BATCHED
+        // 2. Punch out Shadows - BATCHED & CACHED
         const sDir = this.normalize(light.direction);
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
 
         const shadowExtrude = light.shadowLen || 100.0;
+        const viewportVersion = world.getGridVersionForRect(cameraX, cameraY, width, height);
 
-        // Collect all shadow polygons into batch
-        this.beginShadowBatch();
-        for (const seg of segments) {
-            const worldA = { x: seg.a.x, y: seg.a.y };
-            const worldB = { x: seg.b.x, y: seg.b.y };
-            this.shadowBatchOffset = ShadowVolumeGenerator.writeDirectionalShadowToBatch(this.shadowBatchData, this.shadowBatchOffset, sDir, worldA, worldB, shadowExtrude);
+        const cache = isSun ? this.sunShadowCache : this.moonShadowCache;
+        const dirChanged = !cache || Math.abs(sDir.x - cache.lastDirection.x) > 0.01 || Math.abs(sDir.y - cache.lastDirection.y) > 0.01;
+        const versionChanged = !cache || viewportVersion !== cache.lastVersion;
+        const viewportMoved = !cache || Math.abs(cameraX - cache.lastViewport.x) > 16 || Math.abs(cameraY - cache.lastViewport.y) > 16;
+
+        if (!dirChanged && !versionChanged && !viewportMoved && cache) {
+            // Use cached static batch
+            this.shadowBatchData.set(cache.batchData, 0);
+            this.shadowBatchOffset = cache.batchData.length;
+        } else {
+            // Recompute static directional shadows for viewport
+            this.beginShadowBatch();
+            const segments = world.getOcclusionSegments(cameraX, cameraY, width, height);
+            for (const seg of segments) {
+                this.shadowBatchOffset = ShadowVolumeGenerator.writeDirectionalShadowToBatch(this.shadowBatchData, this.shadowBatchOffset, sDir, seg.a, seg.b, shadowExtrude);
+            }
+
+            // Save static parts to cache
+            if (this.shadowBatchOffset > 0) {
+                const newCache: DirectionalShadowCache = {
+                    batchData: new Float32Array(this.shadowBatchData.buffer, 0, this.shadowBatchOffset),
+                    lastDirection: { x: sDir.x, y: sDir.y },
+                    lastVersion: viewportVersion,
+                    lastViewport: { x: cameraX, y: cameraY, w: width, h: height }
+                };
+                if (isSun) this.sunShadowCache = newCache;
+                else this.moonShadowCache = newCache;
+            }
         }
 
-        // Entity Shadows
+        // 3. Add Entity Shadows (DYNAMIC - RUN EVERY FRAME)
+        // Entity Shadows are rendered after restoring the cache to ensure they follow entities graciously
         const wallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0;
         const entities = entityBuffer.getData();
         for (const entity of entities) {
@@ -366,7 +365,7 @@ export class GPUDeferredLighting {
             if (volume) this.appendShadowPolygon(volume.vertices);
         }
 
-        // Single draw call for all directional shadows
+        // Single flush for both Static + Dynamic
         this.flushShadowBatch(viewProj, cameraX, cameraY);
 
         gl.disable(gl.BLEND);

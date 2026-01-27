@@ -15,6 +15,7 @@ export class World {
     // Optimized Shadow Geometry - Incremental Updates
     private cachedSegments: { a: { x: number, y: number }, b: { x: number, y: number } }[] = [];
     private spatialGrid: Map<string, { a: { x: number, y: number }, b: { x: number, y: number } }[]> = new Map();
+    private gridVersions: Map<string, number> = new Map();
     private gridCellSize: number = 256;
     private meshVersion: number = 0;
 
@@ -86,6 +87,12 @@ export class World {
     public markMeshDirty(tx?: number, ty?: number): void {
         this.meshVersion++;
         if (tx !== undefined && ty !== undefined) {
+            // Incremental versioning for spatial grid
+            const gx = Math.floor((tx * this.tileSize) / this.gridCellSize);
+            const gy = Math.floor((ty * this.tileSize) / this.gridCellSize);
+            const gkey = `${gx},${gy}`;
+            this.gridVersions.set(gkey, (this.gridVersions.get(gkey) || 0) + 1);
+
             // Targeted tile update - mark only affected tiles
             this.dirtyTiles.add(`${tx},${ty}`);
             // Also mark neighbors as dirty (edge changes affect adjacent tiles)
@@ -93,6 +100,13 @@ export class World {
                 const ntx = tx + dx, nty = ty + dy;
                 if (ntx >= 0 && ntx < this.width && nty >= 0 && nty < this.height) {
                     this.dirtyTiles.add(`${ntx},${nty}`);
+                    // If neighbor is in a different spatial cell, increment that cell too
+                    const ngx = Math.floor((ntx * this.tileSize) / this.gridCellSize);
+                    const ngy = Math.floor((nty * this.tileSize) / this.gridCellSize);
+                    if (ngx !== gx || ngy !== gy) {
+                        const ngkey = `${ngx},${ngy}`;
+                        this.gridVersions.set(ngkey, (this.gridVersions.get(ngkey) || 0) + 1);
+                    }
                 }
             }
             // Incremental sync - only the affected tile
@@ -100,8 +114,29 @@ export class World {
         } else {
             // Full rebuild requested (e.g., initial load or major world change)
             this.needsFullRebuild = true;
+            this.gridVersions.clear(); // Reset all local versions
             this.synchronizeSharedBuffer();
         }
+    }
+
+    /**
+     * Returns a combined version for the spatial cells covered by the given rect.
+     * This is used by lights to check for local changes.
+     */
+    public getGridVersionForRect(x: number, y: number, w: number, h: number): number {
+        const gx1 = Math.floor(x / this.gridCellSize);
+        const gy1 = Math.floor(y / this.gridCellSize);
+        const gx2 = Math.floor((x + w) / this.gridCellSize);
+        const gy2 = Math.floor((y + h) / this.gridCellSize);
+
+        let sum = 0;
+        for (let gy = gy1; gy <= gy2; gy++) {
+            for (let gx = gx1; gx <= gx2; gx++) {
+                sum += this.gridVersions.get(`${gx},${gy}`) || 0;
+            }
+        }
+        // Incorporate global meshVersion to handle full rebuilds
+        return sum + this.meshVersion;
     }
 
     public checkTileDestruction(tx: number, ty: number): void {

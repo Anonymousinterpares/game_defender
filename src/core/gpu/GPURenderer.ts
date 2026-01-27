@@ -333,18 +333,16 @@ export class GPURenderer {
             ]);
 
             // 2. Perform Lighting Pass (Shadows now see the filled G-Buffer/Depth!)
-            const segments = this.world!.getOcclusionSegments(cameraX, cameraY, width, height);
             const lights = LightManager.getInstance().getLights();
             const timeState = WorldClock.getInstance().getTimeState();
 
             this.deferredLighting.resize(width, height);
             this.deferredLighting.update(
                 cameraX, cameraY, width, height,
-                lights, segments, timeState.baseAmbient,
+                lights, this.world!, timeState.baseAmbient,
                 timeState.sun, timeState.moon,
                 this.entityBuffer,
-                viewProj,
-                this.world!.getMeshVersion()
+                viewProj
             );
 
             // 1. Draw the Unlit World from G-Buffer to screen
