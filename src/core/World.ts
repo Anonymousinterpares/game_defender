@@ -50,7 +50,7 @@ export class World {
     public setTile(x: number, y: number, mat: MaterialType): void {
         if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
             this.tiles[y][x] = mat;
-            this.markMeshDirty();
+            this.markMeshDirty(x, y);
         }
     }
     public getHeatMap(): any { return this.heatMapRef; }
@@ -95,17 +95,19 @@ export class World {
                     this.dirtyTiles.add(`${ntx},${nty}`);
                 }
             }
+            // Incremental sync - only the affected tile
+            this.synchronizeSharedBufferTile(tx, ty);
         } else {
             // Full rebuild requested (e.g., initial load or major world change)
             this.needsFullRebuild = true;
+            this.synchronizeSharedBuffer();
         }
-        this.synchronizeSharedBuffer();
     }
 
     public checkTileDestruction(tx: number, ty: number): void {
         if (this.heatMapRef && this.heatMapRef.isTileMostlyDestroyed(tx, ty)) {
             this.tiles[ty][tx] = MaterialType.NONE;
-            this.markMeshDirty();
+            this.markMeshDirty(tx, ty);
         }
     }
 
@@ -144,6 +146,13 @@ export class World {
             for (let x = 0; x < this.width; x++) {
                 this.sharedTiles[y * this.width + x] = this.tiles[y][x];
             }
+        }
+    }
+
+    private synchronizeSharedBufferTile(tx: number, ty: number): void {
+        if (!this.sharedTiles) return;
+        if (tx >= 0 && tx < this.width && ty >= 0 && ty < this.height) {
+            this.sharedTiles[ty * this.width + tx] = this.tiles[ty][tx];
         }
     }
 

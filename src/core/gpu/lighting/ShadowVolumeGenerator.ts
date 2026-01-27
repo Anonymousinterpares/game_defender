@@ -23,6 +23,36 @@ export class ShadowVolumeGenerator {
     }
 
     /**
+     * Write shadow volume directly to batch (allocation-free)
+     */
+    public static writeShadowVolumeToBatch(batch: Float32Array, offset: number, lightPos: Point, a: Point, b: Point, range: number): number {
+        const dxA = a.x - lightPos.x;
+        const dyA = a.y - lightPos.y;
+        const lenA = Math.sqrt(dxA * dxA + dyA * dyA);
+        const scaleA = (lenA + range * 2.0) / lenA;
+        const projAX = lightPos.x + dxA * scaleA;
+        const projAY = lightPos.y + dyA * scaleA;
+
+        const dxB = b.x - lightPos.x;
+        const dyB = b.y - lightPos.y;
+        const lenB = Math.sqrt(dxB * dxB + dyB * dyB);
+        const scaleB = (lenB + range * 2.0) / lenB;
+        const projBX = lightPos.x + dxB * scaleB;
+        const projBY = lightPos.y + dyB * scaleB;
+
+        // Tri 1: (a, b, projB)
+        batch[offset++] = a.x; batch[offset++] = a.y;
+        batch[offset++] = b.x; batch[offset++] = b.y;
+        batch[offset++] = projBX; batch[offset++] = projBY;
+        // Tri 2: (a, projB, projA)
+        batch[offset++] = a.x; batch[offset++] = a.y;
+        batch[offset++] = projBX; batch[offset++] = projBY;
+        batch[offset++] = projAX; batch[offset++] = projAY;
+
+        return offset;
+    }
+
+    /**
      * Generates a shadow volume polygon for a rectangular obstacle (AABB)
      * relative to a light source.
      */
@@ -103,6 +133,27 @@ export class ShadowVolumeGenerator {
         return {
             vertices: [a, b, projB, projA]
         };
+    }
+
+    /**
+     * Write directional shadow volume to batch (allocation-free)
+     */
+    public static writeDirectionalShadowToBatch(batch: Float32Array, offset: number, dir: Point, a: Point, b: Point, range: number): number {
+        const projAX = a.x + dir.x * range;
+        const projAY = a.y + dir.y * range;
+        const projBX = b.x + dir.x * range;
+        const projBY = b.y + dir.y * range;
+
+        // Tri 1: (a, b, projB)
+        batch[offset++] = a.x; batch[offset++] = a.y;
+        batch[offset++] = b.x; batch[offset++] = b.y;
+        batch[offset++] = projBX; batch[offset++] = projBY;
+        // Tri 2: (a, projB, projA)
+        batch[offset++] = a.x; batch[offset++] = a.y;
+        batch[offset++] = projBX; batch[offset++] = projBY;
+        batch[offset++] = projAX; batch[offset++] = projAY;
+
+        return offset;
     }
 
     /**

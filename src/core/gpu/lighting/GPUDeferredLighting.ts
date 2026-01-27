@@ -5,6 +5,12 @@ import { LightSource } from "../../LightManager";
 import { GPUEntityBuffer } from "../GPUEntityBuffer";
 import { ConfigManager } from "../../../config/MasterConfig";
 
+interface PointLightShadowCache {
+    batchData: Float32Array;
+    lastLightPos: { x: number, y: number };
+    lastMeshVersion: number;
+}
+
 export class GPUDeferredLighting {
     private gl: WebGL2RenderingContext | null = null;
     private _initialized = false;
@@ -24,6 +30,15 @@ export class GPUDeferredLighting {
     private emissiveShader: Shader | null = null;
     private shadowBuffer: WebGLBuffer | null = null;
     private quadBuffer: WebGLBuffer | null = null;
+
+    // Batched shadow rendering
+    private shadowBatchData: Float32Array = new Float32Array(0);
+    private shadowBatchOffset: number = 0;
+    private readonly MAX_SHADOW_VERTICES = 100000; // ~50K triangles max
+    private readonly MAX_SHADOW_LIGHTS = 8;
+
+    // Per-light shadow cache
+    private pointLightShadowCache: Map<string, PointLightShadowCache> = new Map();
 
     constructor() { }
 
@@ -56,10 +71,11 @@ export class GPUDeferredLighting {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
 
-        // Shadow Polygon Buffer (Dynamic)
+        // Shadow Polygon Buffer (Dynamic) - pre-allocate for batching
         this.shadowBuffer = gl.createBuffer();
+        this.shadowBatchData = new Float32Array(this.MAX_SHADOW_VERTICES * 2);
 
-        console.log("[GPU Deferred] Pipeline Initialized (Phase 4.2)");
+        console.log("[GPU Deferred] Pipeline Initialized (Phase 4.2 + Batched Shadows)");
         this._initialized = true;
     }
 
@@ -177,10 +193,14 @@ export class GPUDeferredLighting {
         sun: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number },
         moon: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number },
         entityBuffer: GPUEntityBuffer,
-        viewProj: Float32Array
+        viewProj: Float32Array,
+        meshVersion: number
     ): void {
         if (!this._initialized || !this.gl) return;
         const gl = this.gl;
+
+        // Cleanup stale cache entries (simple limit-based cleanup)
+        if (this.pointLightShadowCache.size > 100) this.pointLightShadowCache.clear();
 
         // 1. Fill Accumulation with Ambient
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.accumulationFBO!.fbo);
@@ -195,6 +215,7 @@ export class GPUDeferredLighting {
         if (moon.active) this.renderDirectional(gl, moon, segments, cameraX, cameraY, width, height, entityBuffer, viewProj);
 
         // 3. Process each point light
+        let shadowLightsCount = 0;
         lights.forEach(light => {
             if (light.intensity <= 0 || light.radius <= 0) return;
 
@@ -228,24 +249,48 @@ export class GPUDeferredLighting {
 
             this.renderQuad();
 
-            // Shadows
-            if (light.castsShadows !== false) {
+            // Shadows - BATCHED & CACHED (Matching CPU optimizations)
+            if (light.castsShadows !== false && shadowLightsCount < this.MAX_SHADOW_LIGHTS) {
+                shadowLightsCount++;
                 gl.enable(gl.BLEND);
                 gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
-                this.shadowShader!.use();
-                this.shadowShader!.setUniform2f("u_resolution", this.width, this.height);
 
-                for (const seg of segments) {
-                    const dx = ((seg.a.x + seg.b.x) / 2) - light.x;
-                    const dy = ((seg.a.y + seg.b.y) / 2) - light.y;
-                    if (dx * dx + dy * dy > (light.radius * 1.5) * (light.radius * 1.5)) continue;
+                // Check cache first
+                const cache = this.pointLightShadowCache.get(light.id);
+                const hasMoved = !cache || Math.abs(light.x - cache.lastLightPos.x) > 2 || Math.abs(light.y - cache.lastLightPos.y) > 2;
+                const meshChanged = !cache || meshVersion !== cache.lastMeshVersion;
 
-                    const worldA = { x: seg.a.x, y: seg.a.y };
-                    const worldB = { x: seg.b.x, y: seg.b.y };
-                    const worldLPos = { x: light.x, y: light.y };
-                    const volume = ShadowVolumeGenerator.getShadowVolumeFromSegment(worldLPos, worldA, worldB, light.radius);
-                    if (volume) this.renderShadowPolygon(volume.vertices, viewProj, cameraX, cameraY);
+                if (!hasMoved && !meshChanged && cache) {
+                    // Use cached data
+                    this.shadowBatchData.set(cache.batchData, 0);
+                    this.shadowBatchOffset = cache.batchData.length;
+                    this.flushShadowBatch(viewProj, cameraX, cameraY);
+                } else {
+                    // Recompute and cache
+                    this.beginShadowBatch();
+                    for (const seg of segments) {
+                        const dx = ((seg.a.x + seg.b.x) / 2) - light.x;
+                        const dy = ((seg.a.y + seg.b.y) / 2) - light.y;
+                        if (dx * dx + dy * dy > (light.radius * 1.5) * (light.radius * 1.5)) continue;
+
+                        const worldA = { x: seg.a.x, y: seg.a.y };
+                        const worldB = { x: seg.b.x, y: seg.b.y };
+                        const worldLPos = { x: light.x, y: light.y };
+                        this.shadowBatchOffset = ShadowVolumeGenerator.writeShadowVolumeToBatch(this.shadowBatchData, this.shadowBatchOffset, worldLPos, worldA, worldB, light.radius);
+                    }
+
+                    // Save to cache before flushing
+                    if (this.shadowBatchOffset > 0) {
+                        this.pointLightShadowCache.set(light.id, {
+                            batchData: new Float32Array(this.shadowBatchData.buffer, 0, this.shadowBatchOffset),
+                            lastLightPos: { x: light.x, y: light.y },
+                            lastMeshVersion: meshVersion
+                        });
+                    }
+
+                    this.flushShadowBatch(viewProj, cameraX, cameraY);
                 }
+
                 gl.disable(gl.BLEND);
             }
 
@@ -292,23 +337,22 @@ export class GPUDeferredLighting {
 
         this.renderQuad();
 
-        // 2. Punch out Shadows
+        // 2. Punch out Shadows - BATCHED
         const sDir = this.normalize(light.direction);
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
-        this.shadowShader!.use();
-        this.shadowShader!.setUniform2f("u_resolution", this.width, this.height);
 
         const shadowExtrude = light.shadowLen || 100.0;
 
+        // Collect all shadow polygons into batch
+        this.beginShadowBatch();
         for (const seg of segments) {
             const worldA = { x: seg.a.x, y: seg.a.y };
             const worldB = { x: seg.b.x, y: seg.b.y };
-            const volume = ShadowVolumeGenerator.getDirectionalShadowVolume(sDir, worldA, worldB, shadowExtrude);
-            if (volume) this.renderShadowPolygon(volume.vertices, viewProj, cameraX, cameraY);
+            this.shadowBatchOffset = ShadowVolumeGenerator.writeDirectionalShadowToBatch(this.shadowBatchData, this.shadowBatchOffset, sDir, worldA, worldB, shadowExtrude);
         }
 
-        // Render Entity Shadows
+        // Entity Shadows
         const wallHeight = ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0;
         const entities = entityBuffer.getData();
         for (const entity of entities) {
@@ -319,8 +363,11 @@ export class GPUDeferredLighting {
                 entity.radius,
                 entShadowLen
             );
-            if (volume) this.renderShadowPolygon(volume.vertices, viewProj, cameraX, cameraY);
+            if (volume) this.appendShadowPolygon(volume.vertices);
         }
+
+        // Single draw call for all directional shadows
+        this.flushShadowBatch(viewProj, cameraX, cameraY);
 
         gl.disable(gl.BLEND);
 
@@ -433,5 +480,71 @@ export class GPUDeferredLighting {
             gl.deleteTexture(this.gBufferFBO.normalTex);
             gl.deleteRenderbuffer(this.gBufferFBO.depthRB);
         }
+    }
+
+    // ===== Batched Shadow Rendering =====
+
+    private beginShadowBatch(): void {
+        this.shadowBatchOffset = 0;
+    }
+
+    private appendShadowPolygon(vertices: Point[]): void {
+        // Convert TRIANGLE_FAN to individual triangles for batching
+        // Fan: v0, v1, v2, v3, v4... → Triangles: (v0,v1,v2), (v0,v2,v3), (v0,v3,v4)...
+        if (vertices.length < 3) return;
+
+        const numTriangles = vertices.length - 2;
+        const neededFloats = numTriangles * 6; // 3 vertices * 2 floats each
+
+        if (this.shadowBatchOffset + neededFloats > this.shadowBatchData.length) {
+            // Buffer full, skip (shouldn't happen with MAX_SHADOW_VERTICES)
+            return;
+        }
+
+        const v0 = vertices[0];
+        for (let i = 1; i < vertices.length - 1; i++) {
+            const v1 = vertices[i];
+            const v2 = vertices[i + 1];
+
+            this.shadowBatchData[this.shadowBatchOffset++] = v0.x;
+            this.shadowBatchData[this.shadowBatchOffset++] = v0.y;
+            this.shadowBatchData[this.shadowBatchOffset++] = v1.x;
+            this.shadowBatchData[this.shadowBatchOffset++] = v1.y;
+            this.shadowBatchData[this.shadowBatchOffset++] = v2.x;
+            this.shadowBatchData[this.shadowBatchOffset++] = v2.y;
+        }
+    }
+
+    private flushShadowBatch(viewProj: Float32Array, cameraX: number, cameraY: number): void {
+        if (this.shadowBatchOffset === 0) return;
+
+        const gl = this.gl!;
+        const vertexCount = this.shadowBatchOffset / 2;
+
+        // Upload batch data
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.shadowBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, this.shadowBatchData.subarray(0, this.shadowBatchOffset), gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+        // Depth test setup
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthMask(false);
+        gl.depthFunc(gl.LEQUAL);
+
+        this.shadowShader!.use();
+        this.shadowShader!.setUniformMatrix4fv("u_viewProj", viewProj);
+        this.shadowShader!.setUniform2f("u_camera", cameraX, cameraY);
+        this.shadowShader!.setUniform2f("u_resolution", this.width, this.height);
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.gBufferFBO!.normalTex);
+        this.shadowShader!.setUniform1i("u_normalTex", 0);
+
+        // Single draw call for all shadows!
+        gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
+
+        gl.disable(gl.DEPTH_TEST);
+        gl.depthMask(true);
     }
 }

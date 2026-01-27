@@ -343,7 +343,8 @@ export class GPURenderer {
                 lights, segments, timeState.baseAmbient,
                 timeState.sun, timeState.moon,
                 this.entityBuffer,
-                viewProj
+                viewProj,
+                this.world!.getMeshVersion()
             );
 
             // 1. Draw the Unlit World from G-Buffer to screen
