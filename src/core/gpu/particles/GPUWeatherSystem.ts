@@ -220,7 +220,14 @@ export class GPUWeatherSystem {
         this.buffers.forEach(b => gl.deleteBuffer(b));
         this.updateVaos.forEach(v => gl.deleteVertexArray(v));
         this.renderVaos.forEach(v => gl.deleteVertexArray(v));
-        if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
+        this.buffers = [];
+        this.updateVaos = [];
+        this.renderVaos = [];
+
+        if (this.quadBuffer) {
+            gl.deleteBuffer(this.quadBuffer);
+            this.quadBuffer = null;
+        }
         if (this.updateShader) this.updateShader.dispose();
         if (this.renderShader) this.renderShader.dispose();
         this.initialized = false;

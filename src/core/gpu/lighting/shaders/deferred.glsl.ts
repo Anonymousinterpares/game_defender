@@ -172,6 +172,13 @@ uniform vec2 u_resolution;
 uniform vec2 u_camera;
 uniform float u_wallHeight;
 uniform float u_directionalShadowLen;
+
+// Weather Params
+uniform float u_snowIntensity;
+uniform sampler2D u_noiseTex;
+uniform vec2 u_noiseOffset; // Driven by wind/time to move pattern? No, static cover, maybe slight shift? 
+// Let's keep noise static to World Position.
+
 in vec2 v_uv;
 out vec4 outColor;
 
@@ -190,28 +197,17 @@ float getEntityShadow(vec2 fragPos, vec2 lightDir) {
         if (entHeight < 0.1) continue;
         
         vec2 entWorldPos = u_entities[i].posRad.xy;
-        // Convert entity world position to screen space (Y-down, origin top-left)
         vec2 screenEntPos = entWorldPos - u_camera;
-        // NOTE: v_uv is Y-up (0 at bottom, 1 at top), so fragPos is Y-up.
-        // We need screenEntPos to also be Y-up for consistent math.
         screenEntPos.y = u_resolution.y - screenEntPos.y;
         float entRad = u_entities[i].posRad.z;
         
-        // Directional light only - shadow extends in the light direction
-        // lightDir is the direction FROM the sun TO the scene (world coords, Y-down).
-        // Shadow extends AWAY from the light, i.e., in the +lightDir direction.
-        // Convert to screen-space (Y-up): flip the Y component.
         vec2 shadowDir = normalize(vec2(lightDir.x, -lightDir.y));
         float effectiveShadowLen = u_directionalShadowLen * (entHeight / u_wallHeight);
 
-        
-        // Vector from entity to fragment
         vec2 entToFrag = fragPos - screenEntPos;
-        // Project entToFrag onto the shadow direction
         float projection = dot(entToFrag, shadowDir);
         
         if (projection > 0.0 && projection < effectiveShadowLen) {
-            // Find the closest point on the shadow ray to the fragment
             vec2 pointOnRay = screenEntPos + shadowDir * projection;
             float distToRay = distance(fragPos, pointOnRay);
             
@@ -225,10 +221,9 @@ float getEntityShadow(vec2 fragPos, vec2 lightDir) {
     return shadow;
 }
 
-uniform float u_lightAltitude; // 0 (horizon) to 1 (zenith)
+uniform float u_lightAltitude;
 
 void main() {
-    // Map lightDir (top-down) to bottom-up NDC screen space
     vec2 dir = normalize(vec2(u_lightDir.x, -u_lightDir.y));
 
     // Sample Normal from G-Buffer
@@ -240,24 +235,69 @@ void main() {
     
     // Altitude-based ground shading
     if (length(normal) < 0.1) {
-        // Ground receives light based on altitude
         dotNL = clamp(u_lightAltitude, 0.05, 1.0); 
     } else {
-        // Walls receive light based on 2D dot product, scaled by altitude
         dotNL = max(0.05, dotNL) * (0.3 + 0.7 * clamp(u_lightAltitude * 2.0, 0.0, 1.0)); 
     }
     
-    // Color toning
     vec3 color = u_lightColor * u_lightIntensity * dotNL;
     
-    // Entity Shadows for directional light
+    // Entity Shadows
     vec2 fragPos = v_uv * u_resolution;
-    float shadow = getEntityShadow(fragPos, u_lightDir);
+    vec2 worldPos = fragPos + u_camera; // Approx world pos (Y-flipped issue handled by noise sampling)
     
-    // Shadow Bleeding
+    // Note: fragPos.y is 0 at bottom, but worldPos.y is 0 at top. 
+    // We need consistent world coords for noise.
+    vec2 trueWorldPos = vec2(u_camera.x + fragPos.x, u_camera.y + (u_resolution.y - fragPos.y));
+
+    float shadow = getEntityShadow(fragPos, u_lightDir);
     float shadowFactor = 1.0 - (shadow * 0.85);
     
-    outColor = vec4(color * shadowFactor, 1.0);
+    color *= shadowFactor;
+    
+    // --- SNOW COVER ---
+    if (u_snowIntensity > 0.0) {
+        // 1. Upward facing check
+        // Ground normals are (0,0,0) encoded as (0.5,0.5,0). 
+        // Normals is actually xy only in GBuffer... Z is derived or height.
+        // Wait, current GBuffer encoding: normData.xy
+        // Ground is likely (0,0) in normal.
+        // Walls are (nx, ny).
+        // If length(normal) is small, it's ground (flat up).
+        
+        bool isGround = length(normal) < 0.2;
+        float upFactor = isGround ? 1.0 : 0.0;
+        
+        // Walls: top edge check? GBuffer doesn't store 'top' flag explicitly.
+        // But we render Wall Tops. Wall Tops should write ground-like normal?
+        // If WallRenderer renders tops as standard sprites, they might not update normal buffer?
+        // If they don't update normal buffer, they effectively have the 'clear color' normal (0,0).
+        // So Wall Tops == Ground for this check. Correct.
+        
+        if (upFactor > 0.5) {
+            // Sample Noise
+            // Scale world pos for noise freq
+            vec2 noiseUV = trueWorldPos * 0.002; // 500px tile
+            float noiseVal = texture(u_noiseTex, noiseUV).r; // Use Low Freq channel
+            float noiseHigh = texture(u_noiseTex, noiseUV * 4.0).g; // Detail
+            
+            float combinedNoise = noiseVal * 0.7 + noiseHigh * 0.3;
+            
+            // Threshold based on intensity
+            // intensity 0.1 -> only tips (high noise)
+            // intensity 1.0 -> full cover
+            
+            float snowThreshold = 1.0 - u_snowIntensity * 0.8; 
+            // If noise > threshold, snow.
+            // Soften edge
+            float cover = smoothstep(snowThreshold - 0.1, snowThreshold + 0.1, combinedNoise);
+            
+            // Mix
+            color = mix(color, vec3(0.9, 0.95, 1.0), cover * 0.9); // 90% opacity white
+        }
+    }
+    
+    outColor = vec4(color, 1.0);
 }
 `;
 

@@ -133,11 +133,11 @@ uniform vec2 u_camera;   // Camera World Pos
 uniform vec2 u_resolution;// Screen Resolution
 uniform vec3 u_cameraPos; // 3D Camera Pos
 uniform float u_perspectiveStrength;
+uniform float u_time;
 
 out vec2 v_uv;
 out float v_type;
 out float v_life;
-out float v_depth;
 
 #define TYPE_RAIN 0.0
 #define TYPE_SNOW 1.0
@@ -152,74 +152,131 @@ void main() {
     v_type = type;
     v_life = life;
     
-    // Billboard Logic & Streak Logic
     vec3 worldPos = pos;
-    
     vec2 offset = a_quadPos;
     
+    // Parallax Lean Base
+    // Use positive Z for height. High objects lean AWAY from center?
+    // In standard parallax: P' = P + (P - C) * depth * scale.
+    // Here Z is height, so "closer" to camera (effectively). 
+    // Usually high objects shift relative to ground based on view angle.
+    // If center is (0,0), top-left is (-W,-H).
+    // If we lean "outwards", a tower top is further from center than base.
+    float h = worldPos.z; 
+    
+    // Fix: Parallax was too aggressive
+    vec2 delta = worldPos.xy - (u_camera + u_resolution * 0.5);
+    vec2 leanOffset = delta * h * u_perspectiveStrength; 
+    
+    // FIX 1: Assign UVs for fragment shader so we get circles, not squares/triangles!
+    v_uv = a_quadPos * 2.0; 
+
     if (type == TYPE_RAIN) {
-        // Streak alignment: Stretch along velocity vector
-        // Normalize 2D velocity direction
-        vec2 dir = normalize(vel.xy);
-        float speed = length(vel.xy);
+        // --- RAIN PHYSICS & PROJECTION ---
         
-        // Rotate offset to align with velocity
-        // Basic 2D rotation matrix: [cos -sin, sin cos]
-        // Cos/Sin derived from direction normal
-        // This makes particles point in move direction
+        // Improve "Cinematic Fall" feel
+        // Instead of pure 3D perspective which makes rain falling "away" (down Z) converge 
+        // to center bottom, we want a "slanted rain" look.
         
-        // Simpler: Just stretch in Z (vertical) for rain falling down?
-        // Rain falls primarily in Z, but also moves XY with wind.
-        // We want streaks to look 3D.
+        // 1. Calculate future position based on velocity
+        vec3 nextPos = worldPos + vel * 0.05; // 50ms trail
         
-        // Scaling
-        offset.y *= 10.0; // Long streaks
-        offset.x *= 0.5;  // Thin
+        // 2. Project both points (Start & End)
+        // Standard Top-Down Parallax: 
+        // ScreenPos = WorldXY + Lean(XY, Z)
         
-        // 3D Billboard facing camera? Or Fixed Vertical?
-        // Rain is often rendered as vertical billboards that rotate to face camera around Y only.
+        // Current Pos Projection
+        vec2 d1 = worldPos.xy - (u_camera + u_resolution * 0.5);
+        vec2 lean1 = d1 * worldPos.z * u_perspectiveStrength;
         
-        // Let's assume standard billboard facing camera plane
-        worldPos.xy += offset;
+        
+
+        
+        // Standard Height Projection (y - z)
+        // High Z = Lower Y (Visual shift up?)
+        
+        vec2 p1 = worldPos.xy + lean1;
+        float y1 = worldPos.y - worldPos.z;
+
+        // Next Pos Projection
+        vec2 d2 = nextPos.xy - (u_camera + u_resolution * 0.5);
+        vec2 lean2 = d2 * nextPos.z * u_perspectiveStrength;
+        
+        vec2 p2 = nextPos.xy + lean2;
+        float y2 = nextPos.y - nextPos.z;
+        
+        // Screen Velocity Vector
+        vec2 screenVel = vec2(p2.x - p1.x, y2 - y1);
+        
+        // Force a minimum vertical component for "Rain" feel if camera is looking straight down
+        // This avoids the "converging to center" look when rain is directly overhead.
+        // We simulate a slight camera tilt "forward".
+        screenVel.y += 10.0; 
+        
+        float speed = length(screenVel);
+        vec2 dir = (speed > 0.001) ? normalize(screenVel) : vec2(0.0, 1.0);
+        
+        // Streak Logic
+        vec2 axisY = dir;
+        vec2 axisX = vec2(-dir.y, dir.x);
+        
+        float streakLen = 40.0 + speed * 1.5;
+        streakLen = min(streakLen, 300.0);
+        
+        vec2 rotOffset = axisX * offset.x * 2.0 + axisY * offset.y * streakLen * 0.5;
+        
+        // Final Position
+        vec2 projectedXY = worldPos.xy + leanOffset;
+        float projectedY = projectedXY.y - worldPos.z;
+        
+        vec2 finalScreenPos = vec2(projectedXY.x, projectedY) + rotOffset;
+        
+        // Convert to Clip Space
+        vec2 screenPos = finalScreenPos - u_camera;
+        float clipX = (screenPos.x / u_resolution.x) * 2.0 - 1.0;
+        float clipY = 1.0 - (screenPos.y / u_resolution.y) * 2.0;
+        
+        gl_Position = vec4(clipX, clipY, 0.0, 1.0);
         
     } else if (type == TYPE_SPLASH) {
-        // Flat on ground
-        offset *= (1.0 - life) * 20.0; // Expand as life decreases (1->0 is backwards)
-        // Wait, update sets life 1->0 decay.
-        // So size should be (1.0 - life) * MAX_SIZE ?? Start small, end big?
-        // Or if life stands for "Age", it grows.
-        // If life is "Time Remaining", it starts at 1.0 and goes to 0.0.
-        // Splash should start small (life=1) and grow (life=0).
-        // Let's invert: size = (1.0 - life) * 32.0.
         float size = (1.0 - life * life) * 24.0;
-        worldPos.xy += offset * (size / 24.0); // Simple scaling
-        worldPos.z += 1.0; // Slightly above ground
+        worldPos.xy += offset * size;
+        worldPos.z += 1.0;
+        
+        vec2 delta = worldPos.xy - (u_camera + u_resolution * 0.5);
+        vec2 leanOffset = delta * worldPos.z * u_perspectiveStrength;
+        
+        vec2 projectedXY = worldPos.xy + leanOffset;
+        float projectedY = projectedXY.y - worldPos.z;
+        vec2 screenPos = vec2(projectedXY.x, projectedY) - u_camera;
+        
+        gl_Position = vec4(
+            (screenPos.x / u_resolution.x) * 2.0 - 1.0,
+            1.0 - (screenPos.y / u_resolution.y) * 2.0,
+            0.0, 1.0
+        );
         
     } else {
-        // SNOW: standard billboard
-        float size = 4.0;
+        // SNOW
+        float wobble = sin(u_time * 5.0 + float(gl_VertexID)) * 4.0;
+        worldPos.x += wobble;
+        
+        float size = 5.0; 
         worldPos.xy += offset * size;
+        
+        vec2 delta = worldPos.xy - (u_camera + u_resolution * 0.5);
+        vec2 leanOffset = delta * worldPos.z * u_perspectiveStrength;
+        
+        vec2 projectedXY = worldPos.xy + leanOffset;
+        float projectedY = projectedXY.y - worldPos.z;
+        vec2 screenPos = vec2(projectedXY.x, projectedY) - u_camera;
+        
+        gl_Position = vec4(
+            (screenPos.x / u_resolution.x) * 2.0 - 1.0,
+            1.0 - (screenPos.y / u_resolution.y) * 2.0,
+            0.0, 1.0
+        );
     }
-
-    // Perspective Projection (Simulated)
-    // Similar to particle.render.glsl logic
-    
-    // Parallax Lean
-    vec2 delta = worldPos.xy - (u_camera + vec2(400.0, 300.0)); // Center approx
-    float h = -worldPos.z; // negative for UP
-    vec2 leanOffset = delta * h * u_perspectiveStrength;
-    
-    vec2 projectedXY = worldPos.xy + leanOffset;
-    float projectedY = projectedXY.y + worldPos.z; // Vertical shift from height
-    
-    // Screen Space
-    vec2 screenPos = projectedXY - u_camera;
-    
-    // Normalize to NDC
-    float clipX = (screenPos.x / u_resolution.x) * 2.0 - 1.0;
-    float clipY = 1.0 - (screenPos.y / u_resolution.y) * 2.0; // Y-down to Y-up transform
-
-    gl_Position = vec4(clipX, clipY, 0.0, 1.0);
 }
 `;
 
@@ -241,24 +298,25 @@ void main() {
     
     if (v_type == TYPE_RAIN) {
         // Streak Texture
-        float alpha = 1.0 - abs(v_uv.x * 2.0); // Fade on edges X
-        alpha *= 1.0 - abs(v_uv.y); // Fade on tips Y
-        if (alpha < 0.1) discard;
-        outColor = vec4(0.7, 0.8, 1.0, 0.6 * alpha);
+        // Tapered ends
+        float alpha = 1.0 - abs(v_uv.x * 3.0);
+        alpha *= smoothstep(1.0, 0.0, abs(v_uv.y)); // Soft tips
+        
+        if (alpha < 0.05) discard;
+        // Whiter rain for visibility
+        outColor = vec4(0.85, 0.9, 1.0, 0.5 * alpha);
     } 
     else if (v_type == TYPE_SPLASH) {
-        // Ring Texture
         float ring = smoothstep(0.6, 0.8, dist) * (1.0 - smoothstep(0.8, 1.0, dist));
-        // Fade out over lifetime
-        float opacity = v_life * ring * 0.5;
+        float opacity = v_life * ring * 0.4;
         if (opacity < 0.01) discard;
-        outColor = vec4(0.8, 0.9, 1.0, opacity);
+        outColor = vec4(0.9, 0.95, 1.0, opacity);
     }
     else {
         // Snow (Soft Circle)
         if (dist > 1.0) discard;
-        float alpha = 1.0 - smoothstep(0.5, 1.0, dist);
-        outColor = vec4(1.0, 1.0, 1.0, 0.8 * alpha);
+        float alpha = smoothstep(1.0, 0.2, dist);
+        outColor = vec4(1.0, 1.0, 1.0, 0.9 * alpha);
     }
 }
 `;

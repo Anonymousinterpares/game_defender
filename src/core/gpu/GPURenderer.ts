@@ -1,5 +1,6 @@
 import { GPUContext } from "./GPUContext";
 import { World } from "../World";
+import { WeatherManager, WeatherType } from "../WeatherManager";
 import { Shader } from "./Shader";
 import { ConfigManager } from "../../config/MasterConfig";
 import { WorldShader } from "./WorldShader";
@@ -15,6 +16,7 @@ import { LightManager } from "../LightManager";
 import { GPULightingSystem } from "./lighting/GPULightingSystem";
 import { GPUDeferredLighting } from "./lighting/GPUDeferredLighting";
 import { GPUWeatherSystem } from "./particles/GPUWeatherSystem";
+import { NoiseTexture } from "./textures/NoiseTexture";
 import { WorldClock } from "../WorldClock";
 import { ExplosionLibrary } from "../effects/ExplosionLibrary";
 import { EventBus, GameEvent } from "../EventBus";
@@ -48,6 +50,7 @@ export class GPURenderer {
     private lightingSystem: GPULightingSystem;
     private deferredLighting: GPUDeferredLighting;
     private weatherSystem: GPUWeatherSystem;
+    private noiseTexture: NoiseTexture | null = null;
     private copyShader: Shader | null = null;
     private worldMapTexture: WebGLTexture | null = null;
     private lastWorldWidth: number = -1;
@@ -246,7 +249,10 @@ export class GPURenderer {
         this.lightingSystem.init(gl, 1024, 1024);
         this.deferredLighting.init(gl, 1, 1);
         this.wallRenderer.init(gl);
+        this.wallRenderer.init(gl);
         if (this.world) this.weatherSystem.init(gl, this.world);
+
+        this.noiseTexture = new NoiseTexture(gl);
     }
 
     public update(dt: number, entities: { x: number, y: number, radius: number, height: number, z?: number }[] = [], cameraX: number = 0, cameraY: number = 0, width: number = 800, height: number = 600): void {
@@ -334,40 +340,50 @@ export class GPURenderer {
         this.context.resize(width, height);
         const gl = this.context.getGL();
         const canvas = this.context.getCanvas();
-        // The user's provided snippet for `unbindGBuffer` was syntactically incorrect
-        // if placed inside `renderEnvironment`. Assuming the intent was to modify
-        // the rendering flow for deferred lighting.
+
         const useDeferred = ConfigManager.getInstance().get<boolean>('Visuals', 'useDeferredLighting') || false;
 
+        // 1. Setup G-Buffer for Geometry Pass
         if (useDeferred && this.deferredLighting.isInitialized) {
-
             this.deferredLighting.bindGBuffer();
         } else {
+            // If not deferred, ensure we bind backbuffer (or intermediate)
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
             gl.viewport(0, 0, canvas.width, canvas.height);
-            this.context.clear();
+
+            // In Forward mode, we might want to preserve depth if we are compositing? 
+            // But usually we clear at start of frame.
+            // GPURenderer.update() clears usually? No, renderEnvironment is the first visual pass.
+            this.context.clear(true);
         }
 
-        // Structure map already updated in GPURenderer.update()
-        // Pass null to lightingSystem if deferred is active to skip old raymarching
+        // 2. Render World Geometry (Walls/Ground)
+        // This must happen regardless of deferred/forward.
+        // If deferred, it writes to G-Buffer. If forward, it writes to Screen.
+        // WallRenderer handles shader selection internally via 'u_useDeferred' uniform?
+        // Actually WallRenderer.render uses u_useDeferred uniform to switch output mode.
         this.wallRenderer.render(
-            this.world,
-            cameraX,
-            cameraY,
-            width,
-            height,
+            this.world!,
+            cameraX, cameraY, width, height,
             this.heatSystem,
             this.lightBuffer,
             this.entityBuffer,
             this.worldMapTexture,
-            useDeferred ? null : this.lightingSystem,
+            useDeferred ? null : this.lightingSystem, // If deferred, pass null to disable old lighting
             performance.now() * 0.001
         );
 
+        // 3. Deferred Lighting Pass
         if (useDeferred && this.deferredLighting.isInitialized) {
             this.deferredLighting.unbindGBuffer();
 
-            // 1. Calculate the SAME viewProj matrix as wallRenderer for shadows
+            // Prepare State
+            const timeState = WorldClock.getInstance().getTimeState();
+            const sun = timeState.sun;
+            const weather = WeatherManager.getInstance().getWeatherState();
+            const snowIntensity = (weather.type === WeatherType.SNOW) ? weather.precipitationIntensity : 0.0;
+
+            // Compute ViewProj
             const left = cameraX, right = cameraX + width, top = cameraY, bottom = cameraY + height;
             const viewProj = new Float32Array([
                 2 / (right - left), 0, 0, 0,
@@ -376,29 +392,90 @@ export class GPURenderer {
                 -(right + left) / (right - left), -(top + bottom) / (top - bottom), 0, 1
             ]);
 
-            // 2. Perform Lighting Pass (Shadows now see the filled G-Buffer/Depth!)
-            const lights = LightManager.getInstance().getLights();
-            const timeState = WorldClock.getInstance().getTimeState();
+            // Helper
+            const parseColor = (c: string): { r: number, g: number, b: number } => {
+                const rgb = c.match(/\d+/g)?.map(Number) || [255, 255, 255];
+                return { r: rgb[0] / 255, g: rgb[1] / 255, b: rgb[2] / 255 };
+            };
 
+            // A. Snow/Weather Cover Pass (re-using Directional Light shader logic for snow)
+            // Wait, this was calling renderDirectionalLight for EVERYTHING related to Directional + Snow.
+            // But deferredLighting.update() ALSO calls renderDirectionalLight inside it?
+            // Let's check deferredLighting.update().
+            // It processes sun/moon internally.
+
+            // If I call renderDirectionalLight HERE, I am duplicating work or doing a specific "Weather Pass"?
+            // The previous code had a specific call for "Snow Cover" using renderDirectionalLight.
+            // AND then called deferredLighting.update.
+            // If deferredLighting.update handles sun/moon, do I need this manual call?
+
+            // The manual call was passing `noiseTex`. `deferredLighting.update` arguments do NOT include noiseTex.
+            // So `deferredLighting.update` -> `renderDirectionalLight` (internal) has no noise tex?
+            // AND I modified `renderDirectionalLight` signature to accept `weather`.
+            // BUT `deferredLighting.update` signature does NOT accept weather?
+
+            // I should update `deferredLighting.update` signature to accept weather params to avoid duplication.
+            // OR I just pass the snow parameters into the update call?
+
+            // For now, to keep it working as designed in the polish phase:
+            // I will inject the weather params into the `deferredLighting.update` call.
+            // I need to update `GPUDeferredLighting.update` signature first?
+            // OR I can just set the texture globally?
+
+            // Actually, the previous code called `renderDirectionalLight` MANUALLY inside GPURenderer.
+            // And then called `update`? 
+            // If `update` clears the light buffer (`gl.clear(gl.COLOR_BUFFER_BIT)`), then the first manual call is wiped!
+
+            // Let's check `GPUDeferredLighting.renderDirectionalLight`.
+            // It calls `gl.clear`.
+
+            // So if I call it manually, then call `update` (which calls it again internally), the first one is lost.
+
+            // CONCLUSION: I must pass weather params to `deferredLighting.update` and let IT handle the call.
+            // I will fix `GPURenderer` to call `update` properly with weather context.
+            // But `update` signature needs change.
+
+            // FOR THIS STEP: 
+            // I will perform the manual call logic BUT I realize it conflicts with `update`.
+            // I will assume `deferredLighting.update` is the MAIN entry point.
+            // I need to change `GPUDeferredLighting.update` signature.
+
+            // But I am editing `GPURenderer.ts` now.
+            // I will leave a comment and pass the weather info to `update` (forcing a signature mismatch I will fix in next step).
+
+            // Wait, I can't break the build.
+            // I will use `(this.deferredLighting as any).update(...)` or just modify the file in next step.
+
+            const lights = LightManager.getInstance().getLights();
             this.deferredLighting.resize(width, height);
+
+            // Pass weather data via a new argument (I will update definition next)
+            // Actually, let's just piggyback on `sun` object? No, strict types.
+
+            // I'll call update() as is, but I know it won't render snow.
+            // CRITICAL: I need to mod `update` signature.
+
             this.deferredLighting.update(
                 cameraX, cameraY, width, height,
                 lights, this.world!, timeState.baseAmbient,
                 timeState.sun, timeState.moon,
                 this.entityBuffer,
-                viewProj
+                viewProj,
+                {
+                    snowIntensity: snowIntensity,
+                    noiseTex: this.noiseTexture ? this.noiseTexture.getTexture() : null
+                }
             );
 
-            // 1. Draw the Unlit World from G-Buffer to screen
+            // 4. Composite to Screen
             const unlitTex = this.deferredLighting.getGBufferColorTexture();
             if (unlitTex) {
-                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null); // Composite to screen
                 gl.viewport(0, 0, canvas.width, canvas.height);
-                this.context.clear();
+                this.context.clear(false);
                 this.renderSimpleTexture(unlitTex);
             }
 
-            // 2. Multiply Lighting on top
             const lightTex = this.deferredLighting.getResultTexture();
             if (lightTex) {
                 gl.enable(gl.BLEND);
@@ -407,7 +484,6 @@ export class GPURenderer {
                 gl.disable(gl.BLEND);
             }
 
-            // 3. Add Emissive Glow (Fire/Heat) on top
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.ONE, gl.ONE);
             this.deferredLighting.renderEmissive();

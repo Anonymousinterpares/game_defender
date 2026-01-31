@@ -57,6 +57,9 @@ export class GPUDeferredLighting {
     private sunShadowCache: DirectionalShadowCache | null = null;
     private moonShadowCache: DirectionalShadowCache | null = null;
 
+    // Noise for Weather Polishing
+    private noiseTexture: WebGLTexture | null = null;
+
     constructor() { }
 
     public get isInitialized(): boolean {
@@ -68,7 +71,7 @@ export class GPUDeferredLighting {
         this.width = width;
         this.height = height;
 
-        // Create FBOs
+        // 1. G-Buffer (Color, Normal, Depth)
         this.accumulationFBO = this.createFBO(gl, width, height, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
         this.tempLightFBO = this.createFBO(gl, width, height, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
         this.bloomFBO = this.createFBO(gl, width, height, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
@@ -199,6 +202,7 @@ export class GPUDeferredLighting {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         return { fbo, tex };
     }
@@ -214,7 +218,8 @@ export class GPUDeferredLighting {
         sun: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number },
         moon: { active: boolean, color: string, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen: number },
         entityBuffer: GPUEntityBuffer,
-        viewProj: Float32Array
+        viewProj: Float32Array,
+        weather?: { snowIntensity: number; noiseTex: WebGLTexture | null }
     ): void {
         if (!this._initialized || !this.gl) return;
         const gl = this.gl;
@@ -228,11 +233,37 @@ export class GPUDeferredLighting {
         this.ambientShader!.use();
         const amb = this.parseColor(ambientColor);
         this.ambientShader!.setUniform3f("u_ambientColor", amb[0], amb[1], amb[2]);
+        this.ambientShader!.setUniform3f("u_ambientColor", amb[0], amb[1], amb[2]);
         this.renderQuad();
 
+        // 1.5 Update Static Shadows if World Changed
+        if (world.getMeshVersion() !== this.lastStaticMeshVersion) {
+            this.buildStaticShadowBuffer(world);
+        }
+
         // 2. Process Sun/Moon (Directional) - WITH CACHING
-        if (sun.active) this.renderDirectionalSmart(gl, sun, world, cameraX, cameraY, width, height, entityBuffer, viewProj, true);
-        if (moon.active) this.renderDirectionalSmart(gl, moon, world, cameraX, cameraY, width, height, entityBuffer, viewProj, false);
+        // 2. Process Sun/Moon (Directional) - WITH CACHING
+        const parseColor = (c: string): { r: number, g: number, b: number } => {
+            const rgb = c.match(/\d+/g)?.map(Number) || [255, 255, 255];
+            return { r: rgb[0] / 255, g: rgb[1] / 255, b: rgb[2] / 255 };
+        };
+
+        if (sun.active) {
+            this.renderDirectionalLight(
+                viewProj, entityBuffer, cameraX, cameraY,
+                { ...sun, color: parseColor(sun.color) },
+                world, width, height,
+                weather
+            );
+        }
+        if (moon.active) {
+            this.renderDirectionalLight(
+                viewProj, entityBuffer, cameraX, cameraY,
+                { ...moon, color: parseColor(moon.color) },
+                world, width, height,
+                weather
+            );
+        }
 
         // 3. Process each point light
         let shadowLightsCount = 0;
@@ -317,40 +348,64 @@ export class GPUDeferredLighting {
         console.log(`[GPU Deferred] Built Static Shadow Buffer: ${segments.length} segments, ${this.staticShadowCount} vertices (AAA GPU Shadows).`);
     }
 
-    private renderDirectionalSmart(
-        gl: WebGL2RenderingContext,
-        light: any,
-        world: World,
+    public renderDirectionalLight(
+        viewProj: Float32Array,
+        entityBuffer: GPUEntityBuffer,
         cameraX: number,
         cameraY: number,
+        light: { color: { r: number, g: number, b: number }, intensity: number, direction: { x: number, y: number }, altitude: number, shadowLen?: number },
+        world: World,
         width: number,
         height: number,
-        entityBuffer: GPUEntityBuffer,
-        viewProj: Float32Array,
-        isSun: boolean
+        weather?: { snowIntensity: number; noiseTex: WebGLTexture | null }
     ): void {
-        // 0. Check for Static Mesh Updates
-        if (this.lastStaticMeshVersion === -1 || world.getMeshVersion() !== this.lastStaticMeshVersion) {
-            this.buildStaticShadowBuffer(world);
-        }
+        if (!this._initialized || !this.gl || !this.gBufferFBO) return;
+        const gl = this.gl;
 
-        // 1. Render Directional Light into Temp
+        // 1. Shadow Pass (Static) - Only if light changed? For now every frame or optimized
+        // We actually render shadows into the light pass using the shadow buffer we built.
+        // But for Directional Light, we might want a separate shadow map or just use the geometry extrusions.
+        // Current implementation: Geometry Extrusion in the same pass or separate FBO?
+        // Code below implies we draw directly to accumulation buffer using the "Shadow Extrusion" technique (stencil or additive mod).
+
+        // Wait, the previous implementation of renderDirectionalLight mixed lighting and shadow output?
+        // Let's check: It draws a full screen quad for light, then draws shadow volumes to subtract light?
+        // Or draws light with shadow logic inside?
+        // The shader `DEFERRED_DIRECTIONAL_FRAG` computes built-in shadows for entities?
+        // Yes, `getEntityShadow` loop.
+
+        // What about Static Wall Shadows?
+        // The logic below (lines 359+) does Shadow Volume rendering.
+
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.tempLightFBO!.fbo);
-        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.gBufferFBO!.depthRB);
-
-        gl.clearColor(0.0, 0.0, 0.0, 0.0);
+        gl.viewport(0, 0, this.width, this.height);
+        gl.clearColor(0, 0, 0, 0); // Clear light buffer
         gl.clear(gl.COLOR_BUFFER_BIT);
 
+        // 1. Draw Directional Light (Base)
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE); // Additive lighting
+
         this.directionalShader!.use();
-        this.directionalShader!.setUniform2f("u_resolution", this.width, this.height);
-        this.directionalShader!.setUniform2f("u_camera", cameraX, cameraY);
-        const sc = this.parseColor(light.color);
-        this.directionalShader!.setUniform3f("u_lightColor", sc[0], sc[1], sc[2]);
+        this.directionalShader!.setUniform3f("u_lightColor", light.color.r, light.color.g, light.color.b);
         this.directionalShader!.setUniform1f("u_lightIntensity", light.intensity);
         this.directionalShader!.setUniform2f("u_lightDir", light.direction.x, light.direction.y);
         this.directionalShader!.setUniform1f("u_lightAltitude", light.altitude);
         this.directionalShader!.setUniform1f("u_wallHeight", ConfigManager.getInstance().get<number>('World', 'wallHeight') || 32.0);
         this.directionalShader!.setUniform1f("u_directionalShadowLen", light.shadowLen || 100.0);
+
+        // Weather Uniforms
+        if (weather) {
+            this.directionalShader!.setUniform1f("u_snowIntensity", weather.snowIntensity);
+
+            if (weather.noiseTex) {
+                gl.activeTexture(gl.TEXTURE1);
+                gl.bindTexture(gl.TEXTURE_2D, weather.noiseTex);
+                this.directionalShader!.setUniform1i("u_noiseTex", 1);
+            }
+        } else {
+            this.directionalShader!.setUniform1f("u_snowIntensity", 0.0);
+        }
 
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.gBufferFBO!.normalTex);
@@ -360,6 +415,7 @@ export class GPUDeferredLighting {
         entityBuffer.bind(this.directionalShader!.getProgram(), "EntityBlock", 1);
 
         this.renderQuad();
+
 
         // 2. Punch out Shadows - BATCHED & CACHED
         const sDir = this.normalize(light.direction);
